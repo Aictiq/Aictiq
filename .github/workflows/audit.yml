@@ -39,7 +39,7 @@ jobs:
           dotnet restore Aictiq.slnx
           dotnet list Aictiq.slnx package --vulnerable --include-transitive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
