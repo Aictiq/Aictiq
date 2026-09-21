@@ -1,0 +1,16 @@
+# Keep the source-build context small and reproducible. Docker rebuilds dependencies
+# inside its build stages from the lockfiles, so host output and credentials never leak
+# into an image layer.
+.git
+.github
+.env
+.env.*
+**/bin
+**/obj
+**/node_modules
+frontend-vue/dist
+cli
+deploy
+docs
+perf
+README.md

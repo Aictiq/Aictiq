@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Aictiq.Modules.Wiki</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"><PrivateAssets>all</PrivateAssets></PackageReference>
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="DiffPlex" />
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\..\\SharedKernel\\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\\Tenancy\\Aictiq.Modules.Tenancy.csproj" />
+  </ItemGroup>
+</Project>

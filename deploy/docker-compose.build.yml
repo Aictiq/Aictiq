@@ -1,0 +1,14 @@
+# Overlay for running compose against locally built images.
+#
+#   ./build-local.sh
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+#
+# Equivalent to setting AICTIQ_IMAGE_REGISTRY/AICTIQ_IMAGE_TAG in .env; this file exists
+# so you can do it without editing .env — useful in CI, which builds the branch.
+services:
+  api:
+    image: ${AICTIQ_IMAGE_REGISTRY:-aictiq-local}/api:${AICTIQ_IMAGE_TAG:-local}
+    pull_policy: never
+  workers:
+    image: ${AICTIQ_IMAGE_REGISTRY:-aictiq-local}/workers:${AICTIQ_IMAGE_TAG:-local}
+    pull_policy: never

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Aictiq.Modules.Notifications</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Fluid.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Templates ship inside the assembly: Workers must be able to render them without
+         a content directory next to the binary, and a missing file would otherwise be a
+         runtime surprise rather than a build one. -->
+    <EmbeddedResource Include="Templates\**\*.liquid" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\SharedKernel\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\WorkItems\Aictiq.Modules.WorkItems.csproj" />
+  </ItemGroup>
+
+</Project>

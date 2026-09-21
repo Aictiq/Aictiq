@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Aictiq.Api</RootNamespace>
+    <UserSecretsId>aictiq-api</UserSecretsId>
+    <!-- Restore assets for both container architectures so `dotnet publish
+         -t:PublishContainer -p:ContainerRuntimeIdentifiers="linux-x64;linux-arm64"`
+         can produce a multi-arch manifest (see .github/workflows/containers.yml).
+         No RID is selected here, so ordinary builds stay RID-agnostic. -->
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Npgsql" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="Microsoft.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <!-- Wiki uses DiffPlex at request time; the executable host carries the runtime asset. -->
+    <PackageReference Include="DiffPlex" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- ============================================================================
+       The API serves the SPA in production, so `dotnet publish` builds it and copies
+       the Vite output into wwwroot. The build is deliberately part of publish only:
+       `dotnet build` and `dotnet run` (Aspire) leave wwwroot empty, and Program.cs
+       turns the static-file pipeline off when index.html is absent, so development
+       keeps using the Vite dev server.
+
+       Skip it with -p:SkipWebBuild=true when you only want the backend image (CI does
+       this for the test job, which never touches the SPA).
+       =========================================================================== -->
+  <PropertyGroup>
+    <SkipWebBuild Condition="'$(SkipWebBuild)' == ''">false</SkipWebBuild>
+    <WebProjectDir>$(MSBuildThisFileDirectory)..\..\..\frontend-vue\</WebProjectDir>
+    <WebDistDir>$(WebProjectDir)dist\</WebDistDir>
+  </PropertyGroup>
+
+  <Target Name="BuildSpa"
+          BeforeTargets="PrepareForPublish"
+          Condition="'$(SkipWebBuild)' != 'true'">
+    <Message Importance="high" Text="Building the SPA in $(WebProjectDir)" />
+    <Exec Command="pnpm install --frozen-lockfile" WorkingDirectory="$(WebProjectDir)" />
+    <Exec Command="pnpm run build" WorkingDirectory="$(WebProjectDir)" />
+  </Target>
+
+  <!-- Publish-only content: adding the files to @(Content) would make `dotnet build`
+       depend on a SPA build that has not run. -->
+  <Target Name="IncludeSpaInPublish"
+          DependsOnTargets="BuildSpa"
+          BeforeTargets="PrepareForPublish"
+          Condition="'$(SkipWebBuild)' != 'true'">
+    <ItemGroup>
+      <_SpaFiles Include="$(WebDistDir)**\*" />
+      <ResolvedFileToPublish Include="@(_SpaFiles)">
+        <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ServiceDefaults\Aictiq.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\SharedKernel\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\Modules\Identity\Aictiq.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Modules\Integrations\Aictiq.Modules.Integrations.csproj" />
+    <ProjectReference Include="..\Modules\Tenancy\Aictiq.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\Modules\Billing\Aictiq.Modules.Billing.csproj" />
+    <ProjectReference Include="..\Modules\WorkItems\Aictiq.Modules.WorkItems.csproj" />
+    <ProjectReference Include="..\Modules\Wiki\Aictiq.Modules.Wiki.csproj" />
+    <ProjectReference Include="..\Modules\Notifications\Aictiq.Modules.Notifications.csproj" />
+    <ProjectReference Include="..\Modules\Analytics\Aictiq.Modules.Analytics.csproj" />
+    <ProjectReference Include="..\Modules\Automation\Aictiq.Modules.Automation.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,48 @@
+# Caddy fronts the whole deployment. One origin serves the SPA, the API and the object
+# store, which is what makes the session cookies first-party and uploads CORS-free.
+#
+# AICTIQ_SITE comes from AICTIQ_URL in .env:
+#   http://localhost          plain HTTP, no certificate — local evaluation
+#   https://aictiq.example.com  Caddy obtains and renews a certificate automatically
+
+{$AICTIQ_SITE} {
+	encode zstd gzip
+
+	# ------------------------------------------------------------------ object store
+	# handle_path strips the /s3 prefix before proxying. That is deliberate and it is
+	# why S3__PublicPathPrefix exists: the API signs presigned URLs *without* the
+	# prefix and adds it afterwards, so the path Garage verifies is the path it
+	# receives. Signing the prefixed path instead would fail every signature.
+	handle_path /s3/* {
+		# Host is NOT rewritten. SigV4 covers the Host header, so pointing this at
+		# garage:3900 with `header_up Host {upstream_hostport}` would invalidate every
+		# presigned URL. Caddy preserves the incoming Host by default — keep it that way.
+		reverse_proxy garage:3900 {
+			# Attachments can be large; the default flush behaviour is fine, but the
+			# read timeout must outlast a slow upload.
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	# ------------------------------------------------------------------ application
+	# Everything else — the SPA's static assets, /api, /hubs (SignalR), /mcp, /health.
+	# The API serves the SPA from wwwroot and falls back to index.html for deep links.
+	handle {
+		# X-Forwarded-For and X-Forwarded-Proto are set by Caddy already. The API only
+		# honours them when ReverseProxy__KnownProxies__0 in compose matches this
+		# container's address — hence the static IP on the compose network.
+		reverse_proxy api:8080 {
+			transport http {
+				# SignalR connections are long-lived.
+				read_timeout 300s
+			}
+		}
+	}
+
+	# The API sets its own security headers (CSP included); Caddy must not duplicate or
+	# contradict them. Only the ones tied to TLS termination belong here, and Caddy
+	# already sends HSTS on an https site.
+}

@@ -1,0 +1,244 @@
+name: release
+
+# A release is intentionally one tag and one workflow. It validates the tag before any
+# package is published, then stamps the same SemVer into the API, Workers, CLI, compose
+# bundle and GitHub Release. Create tags from the fully tested main commit only.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      owner: ${{ steps.version.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: version
+        name: Validate semantic version and CLI package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ github.ref_name }}'
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Release tags must be semantic versions such as v0.1.0 or v1.2.3-rc.1." >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          cli_version=$(node --input-type=module -e "import manifest from './cli/package.json' with { type: 'json' }; process.stdout.write(manifest.version)")
+          test "$cli_version" = "$version" || {
+            echo "cli/package.json is $cli_version, but tag is $version. Keep the published CLI and release tag aligned." >&2
+            exit 1
+          }
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend-vue/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend-vue/pnpm-lock.yaml
+            cli/pnpm-lock.yaml
+
+      - name: Build and test backend
+        run: |
+          dotnet build Aictiq.slnx -warnaserror -p:Version='${{ needs.validate.outputs.version }}'
+          dotnet test backend/tests/IntegrationTests/Aictiq.IntegrationTests.csproj --no-build
+
+      - name: Check web
+        working-directory: frontend-vue
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm build
+
+      - name: Check CLI and its generated contract
+        working-directory: cli
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm build
+          pnpm gen:api -- --offline
+          git diff --exit-code -- openapi/v1.json src/api/schema.d.ts
+
+  images:
+    needs: [validate, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend-vue/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend-vue/pnpm-lock.yaml
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish versioned multi-architecture images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in Api Workers; do
+            name=$(echo "$project" | tr '[:upper:]' '[:lower:]')
+            tags='${{ needs.validate.outputs.version }};sha-${GITHUB_SHA::12}'
+            # A release candidate must never replace a stable install following latest.
+            if [[ '${{ needs.validate.outputs.version }}' != *-* ]]; then tags="$tags;latest"; fi
+            dotnet publish "backend/src/$project" \
+              -c Release \
+              -t:PublishContainer \
+              -p:Version='${{ needs.validate.outputs.version }}' \
+              -p:ContainerRuntimeIdentifiers='linux-x64;linux-arm64' \
+              -p:ContainerRegistry=ghcr.io \
+              -p:ContainerRepository='${{ needs.validate.outputs.owner }}/'"$name" \
+              -p:ContainerImageTags="$tags"
+          done
+        env:
+          DOTNET_NOLOGO: "true"
+
+  cli:
+    needs: [validate, check]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cli/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cli/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # npm trusted publishing uses the GitHub OIDC token. Configure the npm package's
+      # trusted publisher once; no long-lived NPM_TOKEN is stored in this repository.
+      - name: Publish to npm
+        shell: bash
+        run: |
+          if [[ '${{ needs.validate.outputs.version }}' == *-* ]]; then
+            npm publish --access public --provenance --tag next
+          else
+            npm publish --access public --provenance
+          fi
+
+  bundle:
+    needs: [validate, images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build a release-pinned compose bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="aictiq-compose-v${{ needs.validate.outputs.version }}"
+          mkdir -p "$bundle/deploy"
+          rsync -a --exclude '.env' deploy/ "$bundle/deploy/"
+          sed -i \
+            -e 's/^AICTIQ_IMAGE_PULL_POLICY=.*/AICTIQ_IMAGE_PULL_POLICY=always/' \
+            -e 's|^AICTIQ_IMAGE_REGISTRY=.*|AICTIQ_IMAGE_REGISTRY=ghcr.io/${{ needs.validate.outputs.owner }}|' \
+            -e 's/^AICTIQ_IMAGE_TAG=.*/AICTIQ_IMAGE_TAG=${{ needs.validate.outputs.version }}/' \
+            "$bundle/deploy/.env.example"
+          zip -qr "$bundle.zip" "$bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose-bundle
+          path: aictiq-compose-v${{ needs.validate.outputs.version }}.zip
+          if-no-files-found: error
+
+  github-release:
+    needs: [validate, images, cli, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: compose-bundle
+      - name: Build changelog from conventional commits and ticket keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          current='${{ github.ref_name }}'
+          previous=$(git tag --merged HEAD --sort=-version:refname | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?' | grep -vx "$current" | head -1 || true)
+          range=HEAD
+          if [ -n "$previous" ]; then range="$previous..HEAD"; fi
+          {
+            echo "## Aictiq ${{ needs.validate.outputs.version }}"
+            echo
+            echo "### Migration safety"
+            echo "Images only migrate databases forward. Take a backup before upgrading; do not roll an older API image back against a database started by this release."
+            echo
+            echo "### Breaking configuration changes"
+            breaking=$(git log --format='%s' "$range" | grep -E '^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE:' || true)
+            if [ -n "$breaking" ]; then printf '%s\n' "$breaking" | sed 's/^/- /'; else echo "- None declared by conventional commits."; fi
+            echo
+            echo "### Changes"
+            changes=$(git log --format='%s' "$range" | grep -E '^[a-z]+(\([^)]*\))?!?:|[A-Z]+-[0-9]+' || true)
+            if [ -n "$changes" ]; then printf '%s\n' "$changes" | sed 's/^/- /'; else echo "- No conventional commits or ticket keys found."; fi
+          } > RELEASE_NOTES.md
+      - name: Create GitHub Release with the pinned compose bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          args=()
+          if [[ '${{ needs.validate.outputs.version }}' == *-* ]]; then args+=(--prerelease); fi
+          gh release create '${{ github.ref_name }}' \
+            'aictiq-compose-v${{ needs.validate.outputs.version }}.zip' \
+            --title 'Aictiq v${{ needs.validate.outputs.version }}' \
+            --notes-file RELEASE_NOTES.md \
+            --generate-notes "${args[@]}"

@@ -1,0 +1,64 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path=".editorconfig" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Api/">
+    <Project Path="backend/src/Api/Aictiq.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/AppHost/">
+    <Project Path="backend/src/AppHost/Aictiq.AppHost.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Identity/">
+    <Project Path="backend/src/Modules/Identity/Aictiq.Modules.Identity.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Integrations/">
+    <Project Path="backend/src/Modules/Integrations/Aictiq.Modules.Integrations.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Analytics/">
+    <Project Path="backend/src/Modules/Analytics/Aictiq.Modules.Analytics.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Automation/">
+    <Project Path="backend/src/Modules/Automation/Aictiq.Modules.Automation.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Billing/">
+    <Project Path="backend/src/Modules/Billing/Aictiq.Modules.Billing.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/WorkItems/">
+    <Project Path="backend/src/Modules/WorkItems/Aictiq.Modules.WorkItems.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Wiki/">
+    <Project Path="backend/src/Modules/Wiki/Aictiq.Modules.Wiki.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Notifications/">
+    <Project Path="backend/src/Modules/Notifications/Aictiq.Modules.Notifications.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Tenancy/">
+    <Project Path="backend/src/Modules/Tenancy/Aictiq.Modules.Tenancy.csproj" />
+  </Folder>
+  <Folder Name="/src/ServiceDefaults/">
+    <Project Path="backend/src/ServiceDefaults/Aictiq.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/SharedKernel/">
+    <Project Path="backend/src/SharedKernel/Aictiq.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Workers/">
+    <Project Path="backend/src/Workers/Aictiq.Workers.csproj" />
+  </Folder>
+  <!-- The Vue SPA is orchestrated by the AppHost (AddViteApp "web"); these entries
+       just surface it in the IDE's solution tree. It is built by pnpm, not MSBuild. -->
+  <Folder Name="/frontend-vue/">
+    <File Path="frontend-vue/package.json" />
+    <File Path="frontend-vue/vite.config.ts" />
+    <File Path="frontend-vue/tsconfig.json" />
+    <File Path="frontend-vue/eslint.config.ts" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/IntegrationTests/">
+    <Project Path="backend/tests/IntegrationTests/Aictiq.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

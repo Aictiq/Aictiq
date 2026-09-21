@@ -1,0 +1,11 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+Confirm that {{ newEmail }} is yours and it becomes the address you sign in with{% if currentEmail != blank %}, replacing {{ currentEmail }}{% endif %}.
+
+{{ confirmUrl }}
+{%- if expiresOn != blank %}
+
+The link works once, and stops working on {{ expiresOn }}.
+{%- endif %}
+
+Nothing changes until you confirm. If you did not ask for this, ignore this message.

@@ -1,0 +1,47 @@
+{
+  "name": "@aictiq/cli",
+  "version": "0.1.0",
+  "description": "Command-line client for Aictiq, including an MCP stdio bridge for coding agents.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "aictiq": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gen:api": "node scripts/generate-api-types.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.0",
+    "eslint": "^10.9.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "jiti": "^2.7.0",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.9.6",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.1",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "packageManager": "pnpm@12.3.4"
+}

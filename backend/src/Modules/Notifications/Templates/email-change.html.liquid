@@ -1,0 +1,18 @@
+<p style="margin:0 0 12px 0;">Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},</p>
+<p style="margin:0 0 16px 0;">
+  Confirm that <strong>{{ newEmail }}</strong> is yours and it becomes the address you sign
+  in with{% if currentEmail != blank %}, replacing {{ currentEmail }}{% endif %}.
+</p>
+<p style="margin:0 0 24px 0;">
+  <a href="{{ confirmUrl }}" style="display:inline-block; background:#1c1917; color:#ffffff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:500;">Confirm this address</a>
+</p>
+<p style="margin:0 0 8px 0; color:#78716c; font-size:12px;">
+  Or paste this into your browser:<br />
+  <a href="{{ confirmUrl }}" style="color:#78716c; word-break:break-all;">{{ confirmUrl }}</a>
+</p>
+{%- if expiresOn != blank %}
+<p style="margin:0 0 8px 0; color:#78716c; font-size:12px;">The link works once, and stops working on {{ expiresOn }}.</p>
+{%- endif %}
+<p style="margin:0; color:#78716c; font-size:12px;">
+  Nothing changes until you confirm. If you did not ask for this, ignore this message.
+</p>

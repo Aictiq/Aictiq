@@ -1,0 +1,133 @@
+<div align="center">
+
+# Aictiq
+
+**Your AI software factory.**
+
+[![backend](https://github.com/aictiq/aictiq/actions/workflows/backend.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/backend.yml)
+[![web](https://github.com/aictiq/aictiq/actions/workflows/web.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/web.yml)
+[![CodeQL](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![Vue 3](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)
+[![Postgres 17](https://img.shields.io/badge/Postgres-17-336791)](https://www.postgresql.org/)
+
+[Documentation](https://aictiq.github.io/aictiq/) · [Getting started](docs/getting-started.md) · [Connect an agent](docs/agents.md) · [Self-hosting](docs/self-host.md)
+
+</div>
+
+Aictiq is project management for software teams **and their coding agents**: organizations,
+projects, teams, sprints, hierarchical work items, wiki and analytics — plus a factory that
+hands a ticket to an agent running on a machine you control and gets a pull request back.
+
+Self-hosted, AGPL-3.0, one `docker compose up`.
+
+## Quick start
+
+```bash
+git clone https://github.com/aictiq/aictiq && cd aictiq/deploy
+cp .env.example .env
+$EDITOR .env          # every CHANGE_ME; the file shows how to generate each secret
+docker compose up --build -d
+open http://localhost
+```
+
+The images build from source, so the host needs only Docker. Compose refuses to start
+rather than invent a default for a secret. See [Getting started](docs/getting-started.md).
+
+For development, one command starts Postgres, object storage, the API, the workers and the
+Vite dev server through Aspire:
+
+```bash
+dotnet run --project backend/src/AppHost
+```
+
+## Run your own runner
+
+A runner is the `aictiq runner` process on your VPS, laptop or CI host. It starts a coding
+harness — Claude Code, Codex or OpenCode — in a workspace it controls, under an agent
+identity you own:
+
+```bash
+npm install -g @aictiq/cli
+aictiq runner register --url https://aictiq.example.com --token jrn_…
+aictiq runner map ACME ~/src/acme
+aictiq runner start          # or: aictiq runner install-service (systemd)
+```
+
+Move an item into a trigger state and the run starts itself. Your code, your machine, your
+harness subscription: Aictiq dispatches and records, it never holds your repository. The
+database allows at most one live run per item, the run's token dies with it, and every
+branch, comment and pull request is attributed to the agent and through it to its owner.
+See [the factory guide](docs/factory.md).
+
+## Onboard a stakeholder in a minute
+
+A client or non-technical stakeholder should not need a call, a licence negotiation or a
+factory briefing. Invite them with the **Stakeholder** preset, pick one project, send the
+link: they get the board, comments and a run's visible status and pull request, and nothing
+else. No access to other projects, no Factory area, no run prompts, logs or failure
+reasons.
+
+If the instance has no SMTP relay, the invitation is a link you copy — email is optional
+everywhere in Aictiq, so evaluation never stalls on mail configuration.
+
+## Secure by construction
+
+Security here is mostly database-level, so it survives a mistake in an endpoint:
+
+- **Tenant isolation fails closed.** Every tenant table derives from `TenantEntity` and
+  gets the organization filter automatically. No tenant means no rows, never all rows.
+  Postgres row-level security is the second guard for the runtime role.
+- **Invariants are constraints, not conventions.** An organization always has an owner, an
+  item has at most one live run, audit and item history reject UPDATE and DELETE by
+  trigger. State changes are compare-and-swap, so concurrency cannot fork them.
+- **Credentials exist once.** Refresh tokens, personal access tokens, runner secrets and
+  invitation links are stored only as SHA-256 hashes. Replaying a spent refresh token
+  revokes its whole family. Scopes narrow a token, never widen it.
+- **Agents cannot escalate.** An agent is a user that cannot log in, cannot mint its own
+  credentials, and is visibly an agent everywhere. A run's token is bound to that run and
+  revoked when it ends.
+- **404, not 403,** for anything outside your scope — a refusal never confirms that a
+  project or organization exists.
+
+Full model in [docs/security.md](docs/security.md).
+
+## Fast at real size
+
+Measured on the compose stack against a seeded organization of 100k items across 20
+projects, with 400k history rows:
+
+| Endpoint | p95 | Budget |
+| --- | --- | --- |
+| Item list | 15 ms | < 200 ms |
+| Board | 77 ms | < 200 ms |
+| Search | 20 ms | < 300 ms |
+| Item detail | 6 ms | < 200 ms |
+| MCP `list_ready_work` | 50 ms | < 300 ms |
+
+k6 runs these nightly and the thresholds *are* the budget, so a regression fails CI.
+Query-count tests lock the number of SQL statements each hot endpoint issues, which catches
+an N+1 long before the load test does. Details in [docs/performance.md](docs/performance.md).
+
+## How it is built
+
+.NET 10 modular monolith (schema-per-module Postgres, transactional outbox, Aspire for
+local orchestration), a Vue 3 SPA served same-origin by the API, and `@aictiq/cli` — the
+same REST surface from a terminal plus a stdio MCP bridge for coding agents. Integration
+tests boot the real API against Testcontainers Postgres and talk HTTP only.
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for the shape, [docs/data-model.md](docs/data-model.md)
+for the schemas, and [docs/invariants.md](docs/invariants.md) for the rules any change has to
+respect.
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
+
+## License
+
+[AGPL-3.0-only](LICENSE). The Aictiq name and logos are covered by
+[TRADEMARK.md](TRADEMARK.md).

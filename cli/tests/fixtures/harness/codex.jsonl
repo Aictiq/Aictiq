@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a0b01c-1219-78a1-bd0c-aa8b55d7a829"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create the requested file now."}}
+{"type":"item.started","item":{"id":"item_1","type":"file_change","changes":[{"path":"/work/run/hello.txt","kind":"add"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"file_change","changes":[{"path":"/work/run/hello.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":28817,"cached_input_tokens":25088,"cache_write_input_tokens":0,"output_tokens":92,"reasoning_output_tokens":21}}

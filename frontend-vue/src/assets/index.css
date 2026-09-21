@@ -1,0 +1,403 @@
+/*
+ * Aictiq's design tokens.
+ *
+ * The palette comes from the design canvas, which is dark: warm near-black neutrals, a
+ * single amber accent, and a mono face carrying every label, key and count. Light mode is
+ * derived from it rather than given — same hues, inverted lightness — so the product has
+ * one identity in both.
+ *
+ * Fonts are self-hosted (@fontsource). The API serves the SPA under
+ * `default-src 'self'`, so a Google Fonts link would simply be blocked.
+ */
+
+@import '@fontsource-variable/instrument-sans';
+@import '@fontsource-variable/jetbrains-mono';
+
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-vue/tailwind.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ------------------------------------------------------------------ light */
+:root {
+  --radius: 0.3125rem; /* 5px — the design's button radius */
+
+  --background: oklch(0.985 0.004 75);
+  --foreground: oklch(0.22 0.008 60);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+
+  /* The amber accent (#eda45c) is the only saturated colour in the interface. */
+  --primary: oklch(0.76 0.114 63);
+  --primary-foreground: oklch(0.2 0.03 60);
+
+  --secondary: oklch(0.955 0.006 75);
+  --secondary-foreground: oklch(0.3 0.008 60);
+  --muted: oklch(0.955 0.006 75);
+  --muted-foreground: oklch(0.52 0.01 65);
+  --accent: oklch(0.95 0.008 75);
+  --accent-foreground: oklch(0.25 0.008 60);
+  --destructive: oklch(0.62 0.16 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.9 0.006 75);
+  --input: oklch(0.9 0.006 75);
+  --ring: oklch(0.76 0.114 63);
+
+  /* Surfaces the shell paints itself with: the sidebar and header are distinct planes. */
+  --sidebar: oklch(0.965 0.005 75);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: oklch(0.9 0.006 75);
+  --sidebar-accent: oklch(0.93 0.008 75);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-ring: var(--ring);
+  --header: oklch(0.975 0.004 75);
+
+  /* Semantic status colours, used by state badges and the live indicator. */
+  --success: oklch(0.66 0.12 158);
+  --info: oklch(0.68 0.09 245);
+  --warning: oklch(0.72 0.13 55);
+  --agent: oklch(0.68 0.15 300);
+
+  --chart-1: oklch(0.76 0.114 63);
+  --chart-2: oklch(0.66 0.12 158);
+  --chart-3: oklch(0.68 0.09 245);
+  --chart-4: oklch(0.68 0.15 300);
+  --chart-5: oklch(0.72 0.13 30);
+}
+
+/* ------------------------------------------------------------------ dark (the designed theme) */
+.dark {
+  --background: oklch(0.16 0.005 60); /* #0c0b0a */
+  --foreground: oklch(0.92 0.008 75); /* #eae7e2 */
+  --card: oklch(0.19 0.005 60); /* #131211 */
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.21 0.005 60); /* #161513 — the palette surface */
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.76 0.114 63); /* #eda45c */
+  --primary-foreground: oklch(0.2 0.03 60); /* #20160c */
+
+  --secondary: oklch(0.24 0.005 60);
+  --secondary-foreground: oklch(0.86 0.008 75);
+  --muted: oklch(0.24 0.005 60);
+  --muted-foreground: oklch(0.64 0.008 70); /* #948e85 */
+  --accent: oklch(0.26 0.005 60);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.15 30); /* #e08163 */
+  --destructive-foreground: oklch(0.16 0.005 60);
+
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.76 0.114 63);
+
+  --sidebar: oklch(0.175 0.005 60); /* #100f0e */
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --sidebar-accent: oklch(1 0 0 / 4.5%);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-ring: var(--ring);
+  --header: oklch(0.165 0.005 60); /* #0e0d0c */
+
+  --success: oklch(0.75 0.11 158); /* #6cc79a */
+  --info: oklch(0.74 0.08 245); /* #7bb4e0 */
+  --warning: oklch(0.75 0.12 60);
+  --agent: oklch(0.71 0.14 300); /* #b58ce8 */
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 3px);
+  --radius-xl: calc(var(--radius) + 7px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-header: var(--header);
+
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+  --color-agent: var(--agent);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+  --font-heading: var(--font-sans);
+
+  /* Fixed measurements the shell is built to. */
+  --spacing-sidebar: 232px;
+  --spacing-sidebar-collapsed: 52px;
+  --spacing-header: 45px;
+  --spacing-peek: 440px;
+}
+
+/*
+ * Density. Comfortable is the default; compact tightens rows for people who live in the
+ * item list all day. Everything that should respond reads --row-height / --row-padding
+ * rather than hard-coding a size, so one attribute on <html> changes the whole app.
+ */
+:root,
+:root[data-density='comfortable'] {
+  --row-height: 2.25rem;
+  --row-padding-y: 0.5rem;
+  --text-base: 13.5px;
+}
+
+:root[data-density='compact'] {
+  --row-height: 1.75rem;
+  --row-padding-y: 0.25rem;
+  --text-base: 12.5px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    font-size: var(--text-base);
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* The design's tight tracking is what makes it read as dense rather than cramped. */
+    letter-spacing: -0.005em;
+    line-height: 1.5;
+  }
+
+  /* Visible focus, always. Removing it is never the fix for it looking wrong. */
+  :focus-visible {
+    @apply outline-ring outline-2 outline-offset-2;
+  }
+
+  /* The mono face carries labels, counts and keys — small, wide-tracked, uppercase. */
+  .font-label {
+    @apply text-muted-foreground font-mono uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Markdown, rendered (`components/common/Markdown.vue`) and while being edited
+ * (`MarkdownEditor.vue`) — one set of rules so what you type is what everyone reads.
+ * Global rather than scoped: both are generated DOM that scoped attributes never reach.
+ */
+.aictiq-markdown > *:first-child {
+  margin-top: 0;
+}
+.aictiq-markdown > *:last-child {
+  margin-bottom: 0;
+}
+.aictiq-markdown p,
+.aictiq-markdown ul,
+.aictiq-markdown ol,
+.aictiq-markdown blockquote,
+.aictiq-markdown pre,
+.aictiq-markdown table {
+  margin: 0.75em 0;
+}
+.aictiq-markdown h1,
+.aictiq-markdown h2,
+.aictiq-markdown h3,
+.aictiq-markdown h4 {
+  margin: 1.25em 0 0.5em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.aictiq-markdown h1 {
+  font-size: 1.4em;
+}
+.aictiq-markdown h2 {
+  font-size: 1.2em;
+}
+.aictiq-markdown h3 {
+  font-size: 1.05em;
+}
+.aictiq-markdown ul,
+.aictiq-markdown ol {
+  padding-left: 1.35em;
+}
+.aictiq-markdown ul {
+  list-style: disc;
+}
+.aictiq-markdown ol {
+  list-style: decimal;
+}
+.aictiq-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.aictiq-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+}
+.aictiq-markdown pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75em 1em;
+  /* Wide code scrolls inside its own box rather than widening the page. */
+  overflow-x: auto;
+}
+.aictiq-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.aictiq-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.9em;
+  color: var(--muted-foreground);
+}
+.aictiq-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.aictiq-markdown th,
+.aictiq-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.6em;
+  text-align: left;
+}
+.aictiq-markdown th {
+  background: var(--muted);
+  font-weight: 600;
+}
+/* In the editor an empty cell must still be a target worth clicking. */
+.ProseMirror.aictiq-markdown th,
+.ProseMirror.aictiq-markdown td {
+  min-width: 6rem;
+  position: relative;
+}
+.ProseMirror.aictiq-markdown .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--primary) 15%, transparent);
+  pointer-events: none;
+}
+/* Images are thumbnails; `ImageLightbox.vue` opens the full size on click. */
+.aictiq-markdown img {
+  display: block;
+  max-width: min(100%, 24rem);
+  max-height: 16rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: zoom-in;
+}
+.aictiq-markdown a img {
+  cursor: pointer;
+}
+.aictiq-markdown img.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.aictiq-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.25em 0;
+}
+
+/* Task lists as the renderer writes them (`lib/markdown.ts`). */
+.aictiq-markdown ul.task-list {
+  list-style: none;
+  padding-left: 0.1em;
+}
+.aictiq-markdown li.task-list-item > input[type='checkbox'] {
+  margin: 0 0.5em 0 0;
+  vertical-align: -0.1em;
+}
+.aictiq-markdown li.task-list-item.checked {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+/* The same lists as the editor (Tiptap) writes them: a checkbox beside its text. */
+.aictiq-markdown ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.1em;
+}
+.aictiq-markdown ul[data-type='taskList'] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.aictiq-markdown ul[data-type='taskList'] > li > label {
+  flex: none;
+  margin-top: 0.15em;
+  user-select: none;
+}
+.aictiq-markdown ul[data-type='taskList'] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.aictiq-markdown ul[data-type='taskList'] > li[data-checked='true'] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+.aictiq-markdown ul[data-type='taskList'] > li > div > p {
+  margin: 0;
+}
+.aictiq-markdown li > p {
+  margin: 0.15em 0;
+}
+.aictiq-markdown input[type='checkbox'] {
+  accent-color: var(--primary);
+}

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Aictiq.Modules.Billing</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Stripe.net" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"><PrivateAssets>all</PrivateAssets></PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\SharedKernel\Aictiq.SharedKernel.csproj" />
+    <!-- For Tenancy's integration-event contracts only (membership changes drive seat sync),
+         as Wiki and WorkItems reference it for ProjectCreated. Tenancy never references Billing:
+         the event it consumes from Billing lives in SharedKernel. -->
+    <ProjectReference Include="..\Tenancy\Aictiq.Modules.Tenancy.csproj" />
+  </ItemGroup>
+</Project>

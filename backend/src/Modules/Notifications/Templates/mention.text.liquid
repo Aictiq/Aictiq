@@ -1,0 +1,9 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+{{ actorName }} mentioned you in {{ itemKey }} — {{ itemTitle }}.
+{%- if excerpt != blank %}
+
+  {{ excerpt }}
+{%- endif %}
+
+Open it: {{ itemUrl }}

@@ -1,0 +1,23 @@
+# Build output
+dist
+.vite
+
+# Node dependencies
+node_modules
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Local env files
+.env
+.env.*
+!.env.example

@@ -1,0 +1,61 @@
+name: dependency-audit
+
+# Dependency findings are merge blockers. The weekly run also catches newly disclosed
+# CVEs in unchanged lockfiles.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend-vue/**'
+      - 'cli/**'
+      - 'Directory.*.props'
+      - 'Aictiq.slnx'
+      - '.github/workflows/audit.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend-vue/**'
+      - 'cli/**'
+      - 'Directory.*.props'
+      - 'Aictiq.slnx'
+      - '.github/workflows/audit.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: .NET vulnerable packages
+        run: |
+          dotnet restore Aictiq.slnx
+          dotnet list Aictiq.slnx package --vulnerable --include-transitive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # pnpm, not npm: the lockfile is pnpm's, and `npm audit` on it audits nothing.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend-vue/package.json
+
+      - name: pnpm audit (web)
+        working-directory: frontend-vue
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm audit --audit-level=high
+
+      - name: pnpm audit (CLI)
+        working-directory: cli
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm audit --audit-level=high
