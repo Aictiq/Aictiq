@@ -2,7 +2,7 @@
 # deliberately separate targets so Compose starts the same API/worker topology used by
 # the published-image deployment.
 
-FROM node:24-bookworm-slim AS web-build
+FROM node:25-bookworm-slim AS web-build
 WORKDIR /src/frontend-vue
 
 # pnpm-workspace.yaml carries Aictiq's explicit allow-list for dependency install
