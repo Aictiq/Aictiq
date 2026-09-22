@@ -13,7 +13,6 @@ namespace Aictiq.IntegrationTests.Realtime;
 /// project cannot take a key away from a team, nor a bound token reach past its binding.
 /// </summary>
 [Trait("Category", "Realtime")]
-[Collection("postgres")]
 public sealed class ProjectKeyResolutionTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

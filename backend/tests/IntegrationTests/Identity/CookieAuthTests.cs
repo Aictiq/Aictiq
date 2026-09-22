@@ -12,7 +12,6 @@ namespace Aictiq.IntegrationTests.Identity;
 /// (CLI, MCP) has to keep working unchanged alongside it.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class CookieAuthTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

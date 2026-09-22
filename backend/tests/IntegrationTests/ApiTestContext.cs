@@ -86,12 +86,15 @@ public sealed class ApiTestContext : IAsyncDisposable
             await using var admin = new NpgsqlConnection(connectionString);
             await admin.OpenAsync();
             // Identity's migration creates aictiq_app too, but the login must exist before
-            // the API boots, and a role is cluster-wide, so another test may already have it.
+            // the API boots, and a role is cluster-wide, so another test may already have
+            // it - or be creating it right now, which is why this catches rather than
+            // checks first. The login itself is unique per context.
             await using var create = new NpgsqlCommand($"""
-                DO $$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aictiq_app') THEN
-                        CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-                    END IF;
+                DO $$
+                BEGIN
+                    CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+                EXCEPTION WHEN duplicate_object OR unique_violation THEN
+                    NULL;
                 END $$;
                 CREATE ROLE "{appLogin}" LOGIN PASSWORD 'app-role-test-password' IN ROLE aictiq_app;
                 """, admin);

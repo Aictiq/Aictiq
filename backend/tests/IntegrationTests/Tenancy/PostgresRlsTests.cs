@@ -10,7 +10,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// reading another organization.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class PostgresRlsTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly Guid Acme = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -31,10 +30,11 @@ public sealed class PostgresRlsTests(PostgresFixture postgres) : IAsyncLifetime
         {
             await admin.OpenAsync(TestContext.Current.CancellationToken);
             await ExecuteAsync(admin, """
-                DO $$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aictiq_app') THEN
-                        CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-                    END IF;
+                DO $$
+                BEGIN
+                    CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+                EXCEPTION WHEN duplicate_object OR unique_violation THEN
+                    NULL;
                 END $$;
                 """);
         }

@@ -20,7 +20,6 @@ namespace Aictiq.IntegrationTests.Auth;
 /// type an address they do not own would otherwise be a way into somebody else's Aictiq.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class ExternalSignInTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private readonly FakeOAuthProvider _provider = new();

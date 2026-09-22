@@ -9,7 +9,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// guarantee, and they have to hold when the code above them is wrong.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class OrganizationIntegrityTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

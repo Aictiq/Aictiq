@@ -27,7 +27,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// and hand an owner's answer to a stakeholder in production.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class CrossOrganizationRoleTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Hers = "dana-co";

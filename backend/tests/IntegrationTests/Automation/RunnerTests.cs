@@ -20,7 +20,6 @@ namespace Aictiq.IntegrationTests.Automation;
 /// reaches <c>/runner/*</c>.
 /// </summary>
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Acme = "acme";

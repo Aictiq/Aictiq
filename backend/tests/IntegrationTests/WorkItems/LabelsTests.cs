@@ -22,7 +22,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// uses, which lets every role be exercised without a separate membership call per test.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class LabelsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Org = "labels-org";

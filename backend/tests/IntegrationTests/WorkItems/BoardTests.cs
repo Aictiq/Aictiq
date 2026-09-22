@@ -8,7 +8,6 @@ using Aictiq.Modules.WorkItems.Endpoints;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "Planning")]
-[Collection("postgres")]
 public sealed class BoardTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

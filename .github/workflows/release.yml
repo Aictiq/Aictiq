@@ -131,7 +131,7 @@ jobs:
               -c Release \
               -t:PublishContainer \
               -p:Version='${{ needs.validate.outputs.version }}' \
-              -p:ContainerRuntimeIdentifiers='linux-x64;linux-arm64' \
+              -p:ContainerRuntimeIdentifiers='"linux-x64;linux-arm64"' \
               -p:ContainerRegistry=ghcr.io \
               -p:ContainerRepository='${{ needs.validate.outputs.owner }}/'"$name" \
               -p:ContainerImageTags="$tags"

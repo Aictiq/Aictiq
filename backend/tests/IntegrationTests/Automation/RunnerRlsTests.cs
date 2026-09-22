@@ -10,7 +10,6 @@ namespace Aictiq.IntegrationTests.Automation;
 /// exactly the row it names - never its neighbours, never another organization's runners.
 /// </summary>
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RunnerRlsTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private const string AcmeHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -31,10 +30,11 @@ public sealed class RunnerRlsTests(PostgresFixture postgres) : IAsyncLifetime
         {
             await admin.OpenAsync(Ct);
             await ExecuteAsync(admin, """
-                DO $$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aictiq_app') THEN
-                        CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-                    END IF;
+                DO $$
+                BEGIN
+                    CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+                EXCEPTION WHEN duplicate_object OR unique_violation THEN
+                    NULL;
                 END $$;
                 """);
         }

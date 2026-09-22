@@ -22,7 +22,6 @@ namespace Aictiq.IntegrationTests.Auth;
 /// raw SQL on purpose: the endpoint validating nicely is not the guarantee.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class OnboardingTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

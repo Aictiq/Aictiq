@@ -9,7 +9,6 @@ namespace Aictiq.IntegrationTests.Email;
 /// Email is optional, proved over HTTP against the real API: with SMTP unset
 /// the service starts and says so on its readiness endpoint.
 /// </summary>
-[Collection("postgres")]
 [Trait("Category", "Email")]
 public sealed class EmailReadinessTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {

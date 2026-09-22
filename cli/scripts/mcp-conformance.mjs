@@ -10,7 +10,8 @@ await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', `${url.re
 }))
 
 try {
-  const tools = await client.listTools()
+  // listTools resolves to a ListToolsResult - { tools, nextCursor? } - not an array.
+  const { tools } = await client.listTools()
   for (const name of ['whoami', 'list_projects', 'list_ready_work']) {
     if (!tools.some((tool) => tool.name === name)) throw new Error(`MCP discovery omitted ${name}`)
   }

@@ -17,7 +17,6 @@ namespace Aictiq.IntegrationTests.Billing;
 /// outbox drained the way Workers drain it.
 /// </summary>
 [Trait("Category", "Billing")]
-[Collection("postgres")]
 public sealed class StripeBillingTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private BillingTestHost _host = null!;

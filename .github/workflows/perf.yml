@@ -35,14 +35,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend-vue/pnpm-lock.yaml
 
-      - name: Build images from this branch
-        working-directory: deploy
-        run: ./build-local.sh
-
       - name: Write .env
         working-directory: deploy
         run: |
           set -euo pipefail
+          # Written before the images are built: without it `docker compose` cannot even
+          # interpolate the file, so a build failure would take the log dump and the
+          # teardown down with it and hide its own cause.
           # Same shape as .env.example, with generated secrets; nothing is reused and the
           # stack is destroyed at the end of the job.
           cat > .env <<EOF
@@ -70,6 +69,10 @@ jobs:
           # stock - perf/mcp.js paces itself under the 60/min tool budget.
           RATE_LIMITING_GLOBAL_PER_MINUTE=9000
           EOF
+
+      - name: Build images from this branch
+        working-directory: deploy
+        run: ./build-local.sh
 
       - name: Validate the compose file
         working-directory: deploy
@@ -160,9 +163,10 @@ jobs:
       - name: Dump logs on failure
         if: failure()
         working-directory: deploy
-        run: docker compose logs --no-color --tail 200
+        # Best effort: the step exists to explain an earlier failure, never to add one.
+        run: docker compose logs --no-color --tail 200 || true
 
       - name: Tear down
         if: always()
         working-directory: deploy
-        run: docker compose down -v
+        run: docker compose down -v || true

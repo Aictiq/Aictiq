@@ -19,7 +19,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// that the API returns a usable link either way and says which case the caller is in.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class InvitationsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

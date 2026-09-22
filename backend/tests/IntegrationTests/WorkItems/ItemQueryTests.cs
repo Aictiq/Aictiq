@@ -14,7 +14,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// production answered every query with nothing: its raw SQL never told Postgres the tenant.
 /// </summary>
 [Trait("Category", "Search")]
-[Collection("postgres")]
 public sealed class ItemQueryTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     protected override bool AppRole => true;

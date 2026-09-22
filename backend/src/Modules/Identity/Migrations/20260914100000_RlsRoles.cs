@@ -16,14 +16,25 @@ public partial class RlsRoles : Migration
         // Postgres guide). These fallback roles are NOLOGIN; deployment bootstrap turns
         // them into the distinct login principals before this migration runs.
         migrationBuilder.Sql("""
+            -- Roles are cluster-wide, so a check-then-create races any other database
+            -- migrating at the same moment: both see the role missing, both create it,
+            -- and one loses. Catching is the only form that is actually atomic. Both
+            -- codes are needed - CREATE ROLE's own pre-check raises duplicate_object
+            -- (42710), and a race that slips past it is caught by the unique index on
+            -- pg_authid.rolname as unique_violation (23505). The test suite migrates
+            -- dozens of databases in parallel and hits the second one constantly; so
+            -- would two deployments bootstrapping against one cluster.
             DO $$
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aictiq_admin') THEN
-                    CREATE ROLE aictiq_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aictiq_app') THEN
-                    CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-                END IF;
+                CREATE ROLE aictiq_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+            EXCEPTION WHEN duplicate_object OR unique_violation THEN
+                NULL;
+            END $$;
+            DO $$
+            BEGIN
+                CREATE ROLE aictiq_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+            EXCEPTION WHEN duplicate_object OR unique_violation THEN
+                NULL;
             END $$;
             GRANT USAGE ON SCHEMA identity, audit, shared TO aictiq_app;
             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA identity, audit, shared TO aictiq_app;

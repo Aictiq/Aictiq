@@ -17,7 +17,6 @@ namespace Aictiq.IntegrationTests.Storage;
 
 /// <summary>HTTP coverage for the metadata guard around direct-to-Garage attachment uploads.</summary>
 [Trait("Category", "Storage")]
-[Collection("postgres")]
 public sealed class AttachmentTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

@@ -9,7 +9,6 @@ using Aictiq.SharedKernel.Paging;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "Search")]
-[Collection("postgres")]
 public sealed class SearchTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

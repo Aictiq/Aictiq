@@ -21,7 +21,6 @@ namespace Aictiq.IntegrationTests.Agents;
 /// it.
 /// </summary>
 [Trait("Category", "Agents")]
-[Collection("postgres")]
 public sealed class AgentTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;
