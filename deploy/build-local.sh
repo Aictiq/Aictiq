@@ -9,10 +9,15 @@
 # Node and pnpm as well as the .NET SDK.
 #
 # The images are built for this machine's architecture only. The published ones are
-# multi-arch (see .github/workflows/containers.yml), but a multi-arch build produces an
-# image index, and Docker can only load one of those with the containerd image store
-# enabled - which is off by default, and off on GitHub's runners. Override with
-# AICTIQ_IMAGE_RID if you need a different one.
+# multi-arch (see .github/workflows/containers.yml), but anything built through
+# ContainerRuntimeIdentifiers comes out as an OCI image index even when only one RID is
+# named, and Docker can only load an index with the containerd image store enabled -
+# which is off by default and off on GitHub's runners:
+#
+#   CONTAINER1020: Failed to load image because containerd image store is not enabled
+#
+# Naming the architecture with the singular RuntimeIdentifier takes the plain-image path
+# instead, which loads through docker anywhere. Override it with AICTIQ_IMAGE_RID.
 #
 #   ./build-local.sh                 # tags aictiq-local/{api,workers}:local
 #   AICTIQ_IMAGE_TAG=v1 ./build-local.sh
@@ -59,7 +64,7 @@ publish() {
     -c Release \
     -t:PublishContainer \
     -p:SkipWebBuild="${SKIP_WEB_BUILD:-false}" \
-    -p:ContainerRuntimeIdentifiers="${rid}" \
+    -p:RuntimeIdentifier="${rid}" \
     -p:ContainerRegistry= \
     -p:ContainerRepository="${registry}/${name}" \
     -p:ContainerImageTag="${tag}"
