@@ -4,8 +4,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 // too. Aspire's generated PostgreSQL login remains the database owner/migration login;
 // the one-shot resource below creates and maintains the separate runtime login.
 var postgres = builder.AddPostgres("postgres")
-    .WithDataVolume("aictiq-pgdata")
-    .WithLifetime(ContainerLifetime.Persistent);
+    .WithDataVolume("aictiq-pgdata");
 
 if (builder.ExecutionContext.IsRunMode)
 {
@@ -49,8 +48,7 @@ var garage = builder.AddContainer("garage", "dxflrs/garage", "v2.1.0")
     .WithEnvironment("GARAGE_RPC_SECRET", garageRpcSecret)
     .WithEnvironment("GARAGE_ADMIN_TOKEN", garageAdminToken)
     .WithEndpoint(targetPort: 3900, name: "s3", scheme: "http")
-    .WithEndpoint(targetPort: 3903, name: "admin", scheme: "http")
-    .WithLifetime(ContainerLifetime.Persistent);
+    .WithEndpoint(targetPort: 3903, name: "admin", scheme: "http");
 
 var garageS3 = garage.GetEndpoint("s3");
 var garageAdmin = garage.GetEndpoint("admin");
@@ -120,6 +118,8 @@ builder.AddViteApp("web", "../../../frontend-vue")
     // The web app is on pnpm (see frontend-vue/pnpm-workspace.yaml); the version is
     // pinned by package.json's "packageManager" field.
     .WithPnpm()
+    // Keep a stable public Aspire URL while Vite listens on its development-server port.
+    .WithHttpEndpoint(targetPort: 5173, port: 21212)
     .WithEnvironment("AICTIQ_API_BASE", api.GetEndpoint("http"))
     .WaitFor(api)
     .WithExternalHttpEndpoints();
