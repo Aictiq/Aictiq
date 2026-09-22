@@ -17,7 +17,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// abandoned claim outlives the agent that made it.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class AgentPresenceTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

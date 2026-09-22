@@ -14,7 +14,6 @@ namespace Aictiq.IntegrationTests.Billing;
 /// billing adds is reachable the way Stripe reaches it.
 /// </summary>
 [Trait("Category", "Billing")]
-[Collection("postgres")]
 public sealed class BillingConfigurationTests(PostgresFixture postgres, GarageFixture garage)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

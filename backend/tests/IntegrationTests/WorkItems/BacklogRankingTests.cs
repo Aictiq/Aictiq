@@ -9,7 +9,6 @@ using Aictiq.SharedKernel.Paging;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "Planning")]
-[Collection("postgres")]
 public sealed class BacklogRankingTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

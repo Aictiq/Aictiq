@@ -39,7 +39,6 @@ namespace Aictiq.IntegrationTests.HardDelete;
 /// deleted prefixes. A neighbour that was not deleted must still be whole.
 /// </summary>
 [Trait("Category", "HardDelete")]
-[Collection("postgres")]
 public sealed class HardDeleteTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private static readonly string[] Schemas = ["tenancy", "work", "wiki", "analytics", "notify", "integrations", "billing", "automation", "identity", "audit"];

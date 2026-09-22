@@ -1,6 +1,13 @@
 using Npgsql;
 using Testcontainers.PostgreSql;
 
+// One Postgres container for the whole test run. An assembly fixture rather than a
+// collection fixture: a collection fixture would also have to put every test class in
+// that one collection, and xUnit runs a collection's classes one after another - which
+// is what made the suite take forty minutes. Each test gets its own database, so there
+// is nothing for parallel classes to step on. See GarageFixture for the same reasoning.
+[assembly: AssemblyFixture(typeof(Aictiq.IntegrationTests.PostgresFixture))]
+
 namespace Aictiq.IntegrationTests;
 
 /// <summary>
@@ -48,6 +55,3 @@ public sealed class PostgresFixture : IAsyncLifetime
         return builder.ConnectionString;
     }
 }
-
-[CollectionDefinition("postgres")]
-public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;

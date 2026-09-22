@@ -8,7 +8,6 @@ namespace Aictiq.IntegrationTests.Email;
 /// The whole path, end to end: a module raises an event, the outbox delivers it, the
 /// handler queues a rendered message, the delivery sweep hands it to a real SMTP server.
 /// </summary>
-[Collection("postgres")]
 [Trait("Category", "Email")]
 public sealed class EmailDeliveryTests(PostgresFixture postgres, MailpitFixture mailpit)
     : IClassFixture<MailpitFixture>, IAsyncLifetime

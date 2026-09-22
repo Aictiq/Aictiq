@@ -31,7 +31,6 @@ namespace Aictiq.IntegrationTests.Automation;
 /// expiry, not the handler that mints the window (that is <c>HostedOfferTests</c>).
 /// </summary>
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class BillingReadOnlyFactoryTests(PostgresFixture postgres, GarageFixture garage)
     : RunTestBase(postgres, garage)
 {
@@ -209,7 +208,6 @@ public sealed class BillingReadOnlyFactoryTests(PostgresFixture postgres, Garage
 /// fixed so the boundary - exactly 90 days - is a fact rather than a coin flip.
 /// </summary>
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RunLogRetentionEntitlementTests(PostgresFixture postgres, GarageFixture garage)
     : RunTestBase(postgres, garage)
 {

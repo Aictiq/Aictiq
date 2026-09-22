@@ -12,7 +12,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// back through EF.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class TenantIsolationTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly Guid Acme = Guid.Parse("11111111-1111-1111-1111-111111111111");

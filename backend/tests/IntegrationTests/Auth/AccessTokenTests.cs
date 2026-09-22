@@ -20,7 +20,6 @@ namespace Aictiq.IntegrationTests.Auth;
 /// never more, and every refusal it earns is a 403 rather than a surprise.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class AccessTokenTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

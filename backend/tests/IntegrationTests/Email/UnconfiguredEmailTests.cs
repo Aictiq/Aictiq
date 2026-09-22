@@ -10,7 +10,6 @@ namespace Aictiq.IntegrationTests.Email;
 /// An instance with no SMTP relay. This is a supported deployment, not a broken one, and
 /// these tests are what keeps it that way.
 /// </summary>
-[Collection("postgres")]
 [Trait("Category", "Email")]
 public sealed class UnconfiguredEmailTests(PostgresFixture postgres) : IAsyncLifetime
 {

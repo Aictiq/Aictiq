@@ -9,7 +9,6 @@ using Aictiq.SharedKernel.Paging;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class TemplatesAndBulkEditTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

@@ -19,7 +19,6 @@ public sealed class TestExplodingHandler : IDomainEventHandler<TestExplodingEven
 { public Task HandleAsync(TestExplodingEvent domainEvent, CancellationToken cancellationToken) => throw new InvalidOperationException("deliberate handler failure"); }
 
 /// <summary>The outbox is shared infrastructure, so it is exercised without retaining the deleted Notes sample.</summary>
-[Collection("postgres")]
 public sealed class OutboxProcessorTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private ServiceProvider _provider = null!;

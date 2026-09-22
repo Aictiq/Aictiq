@@ -22,7 +22,6 @@ namespace Aictiq.IntegrationTests.Perf;
 /// the class.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class QueryCountTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string OrgSlug = "query-count";

@@ -10,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aictiq.IntegrationTests.Notifications;
 
 [Trait("Category", "Notifications")]
-[Collection("postgres")]
 public sealed class NotificationEndpointsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext Context { get; set; } = null!;

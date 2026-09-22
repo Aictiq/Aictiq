@@ -8,7 +8,6 @@ using Aictiq.Api.Infrastructure;
 
 namespace Aictiq.IntegrationTests;
 
-[Collection("postgres")]
 public sealed class ApiSmokeTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

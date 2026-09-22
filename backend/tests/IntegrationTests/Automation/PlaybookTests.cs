@@ -18,7 +18,6 @@ using Npgsql;
 namespace Aictiq.IntegrationTests.Automation;
 
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "factory-playbooks";

@@ -20,7 +20,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// is the test rather than a fixture that writes ten gigabytes.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class AttachmentAllowanceTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "quota-co";

@@ -16,7 +16,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// resolved against the project the item belongs to.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class AuthorizationRegressionTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

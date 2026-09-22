@@ -17,7 +17,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// here is that the endpoints, the query filter and the cache all agree with it.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class ProjectsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

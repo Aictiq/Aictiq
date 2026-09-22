@@ -13,7 +13,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// cannot see each other's work.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class MembershipIntegrityTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

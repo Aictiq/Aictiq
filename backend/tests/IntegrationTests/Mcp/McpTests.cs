@@ -21,7 +21,6 @@ using SkiaSharp;
 namespace Aictiq.IntegrationTests.Mcp;
 
 [Trait("Category", "Mcp")]
-[Collection("postgres")]
 public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

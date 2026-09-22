@@ -10,7 +10,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// empty state whose only escape is a form the operator has to find first.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class TenancySeedingTests(PostgresFixture postgres, GarageFixture garage)
 {
     [Fact]

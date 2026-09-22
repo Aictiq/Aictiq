@@ -9,7 +9,6 @@ namespace Aictiq.IntegrationTests.Integrity;
 /// Proves the invariants hold at the DATABASE, bypassing the application entirely with
 /// raw SQL - the whole point of DB-enforced integrity is surviving buggy app code.
 /// </summary>
-[Collection("postgres")]
 public sealed class DataIntegrityTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

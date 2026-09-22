@@ -19,7 +19,6 @@ namespace Aictiq.IntegrationTests.Auth;
 /// else's hands.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class AccountRecoveryTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Email = "ada@test.local";

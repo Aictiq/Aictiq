@@ -25,7 +25,6 @@ namespace Aictiq.IntegrationTests.Automation;
 /// outbox would - including redelivering the very same event to prove the replay guard.
 /// </summary>
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RuleTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
 {
     private string RulesBase => $"{ProjectBase}/rules";

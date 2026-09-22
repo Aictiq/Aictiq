@@ -13,7 +13,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// that two customers on one database cannot see each other.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class OrganizationsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

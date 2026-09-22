@@ -20,7 +20,6 @@ namespace Aictiq.IntegrationTests.Auth;
 /// signature can fix a content type but cannot bound a size.
 /// </summary>
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class ProfileTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

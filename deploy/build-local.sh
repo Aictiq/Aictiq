@@ -8,8 +8,15 @@
 # api image includes the built SPA - see Aictiq.Api.csproj - which is why this needs
 # Node and pnpm as well as the .NET SDK.
 #
+# The images are built for this machine's architecture only. The published ones are
+# multi-arch (see .github/workflows/containers.yml), but a multi-arch build produces an
+# image index, and Docker can only load one of those with the containerd image store
+# enabled - which is off by default, and off on GitHub's runners. Override with
+# AICTIQ_IMAGE_RID if you need a different one.
+#
 #   ./build-local.sh                 # tags aictiq-local/{api,workers}:local
 #   AICTIQ_IMAGE_TAG=v1 ./build-local.sh
+#   AICTIQ_IMAGE_RID=linux-arm64 ./build-local.sh
 #
 # Then run compose against them without triggering its default source build:
 #   AICTIQ_IMAGE_PULL_POLICY=never AICTIQ_IMAGE_REGISTRY=aictiq-local AICTIQ_IMAGE_TAG=local docker compose up -d
@@ -20,6 +27,14 @@ set -euo pipefail
 registry="${AICTIQ_IMAGE_REGISTRY:-aictiq-local}"
 tag="${AICTIQ_IMAGE_TAG:-local}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# One RID, so the SDK emits a plain image rather than an index Docker cannot load.
+case "$(uname -m)" in
+  x86_64|amd64) host_rid=linux-x64 ;;
+  aarch64|arm64) host_rid=linux-arm64 ;;
+  *) host_rid=linux-x64 ;;
+esac
+rid="${AICTIQ_IMAGE_RID:-$host_rid}"
 
 missing=()
 command -v dotnet >/dev/null || missing+=("dotnet (.NET 10 SDK)")
@@ -34,7 +49,7 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "Building ${registry}/api:${tag} and ${registry}/workers:${tag} from ${root}"
+echo "Building ${registry}/api:${tag} and ${registry}/workers:${tag} (${rid}) from ${root}"
 
 # SKIP_WEB_BUILD=true produces a backend-only api image - useful for a quick API
 # iteration, useless for actually serving the app, so it is not the default.
@@ -44,6 +59,7 @@ publish() {
     -c Release \
     -t:PublishContainer \
     -p:SkipWebBuild="${SKIP_WEB_BUILD:-false}" \
+    -p:ContainerRuntimeIdentifiers="${rid}" \
     -p:ContainerRegistry= \
     -p:ContainerRepository="${registry}/${name}" \
     -p:ContainerImageTag="${tag}"
