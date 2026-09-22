@@ -1,0 +1,7 @@
+{{ content }}
+
+--
+{{ productName }}{% if organizationName != blank %} · {{ organizationName }}{% endif %}
+{%- if unsubscribeUrl != blank %}
+Manage which emails you get: {{ unsubscribeUrl }}
+{%- endif %}

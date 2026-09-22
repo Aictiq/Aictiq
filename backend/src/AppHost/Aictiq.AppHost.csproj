@@ -1,0 +1,24 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.3">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>aictiq-apphost</UserSecretsId>
+    <!-- The AppHost runs off the Aspire.Hosting.Orchestration / Aspire.Dashboard.Sdk
+         NuGet packages, so `dotnet run` works with nothing but the .NET SDK installed.
+         Aspire 13.5 nags (ASPIRE010) to switch to the Aspire CLI bundle instead, which
+         needs `aspire` on PATH (https://get.aspire.dev). When those packages are
+         actually retired, set AspireUseCliBundle=true and drop this NoWarn. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Api\Aictiq.Api.csproj" />
+    <ProjectReference Include="..\Workers\Aictiq.Workers.csproj" />
+  </ItemGroup>
+
+</Project>

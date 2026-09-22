@@ -1,0 +1,10 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+{{ inviterName }} invited you to join {{ organizationName }} as {{ roleArticle | default: "a" }} {{ roleName }}.
+
+Accept the invitation:
+{{ acceptUrl }}
+{%- if expiresOn != blank %}
+
+The invitation expires on {{ expiresOn }}.
+{%- endif %}

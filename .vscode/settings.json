@@ -1,0 +1,14 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "typescript.tsdk": "frontend-nuxt/node_modules/typescript/lib",
+  "tailwindCSS.includeLanguages": {
+    "vue": "html"
+  },
+  "css.validate": false,
+  "javascript.updateImportsOnFileMove.enabled": "always",
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "omnisharp.enableEditorConfigSupport": true
+}

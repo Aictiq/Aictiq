@@ -1,0 +1,14 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+Here is what happened in {{ organizationName }}{% if periodLabel != blank %} {{ periodLabel }}{% endif %}.
+{%- if summary != blank %}
+
+{{ summary }}
+{%- else %}
+
+Nothing needed your attention.
+{%- endif %}
+{%- if inboxUrl != blank %}
+
+Open your inbox: {{ inboxUrl }}
+{%- endif %}

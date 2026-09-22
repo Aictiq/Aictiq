@@ -1,0 +1,19 @@
+<p style="margin:0 0 12px 0;">Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},</p>
+<p style="margin:0 0 16px 0;">
+  <strong>{{ actorName }}</strong> assigned
+  <a href="{{ itemUrl }}" style="color:#1c1917;">{{ itemKey }} - {{ itemTitle }}</a> to you.
+</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0; font-size:13px; color:#57534e;">
+  {%- if stateName != blank %}
+  <tr><td style="padding:2px 16px 2px 0;">State</td><td style="padding:2px 0;">{{ stateName }}</td></tr>
+  {%- endif %}
+  {%- if priorityName != blank %}
+  <tr><td style="padding:2px 16px 2px 0;">Priority</td><td style="padding:2px 0;">{{ priorityName }}</td></tr>
+  {%- endif %}
+  {%- if dueOn != blank %}
+  <tr><td style="padding:2px 16px 2px 0;">Due</td><td style="padding:2px 0;">{{ dueOn }}</td></tr>
+  {%- endif %}
+</table>
+<p style="margin:0;">
+  <a href="{{ itemUrl }}" style="display:inline-block; background:#1c1917; color:#ffffff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:500;">Open {{ itemKey }}</a>
+</p>

@@ -1,0 +1,59 @@
+version: 2
+
+updates:
+  # Grouped so a week's updates arrive as one PR per ecosystem rather than a dozen -
+  # each PR runs the full CI matrix, and a flood of them is a flood nobody reviews.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dotnet:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: npm
+    directory: /frontend-vue
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      web:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      docs:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'chore(deps)'
+
+  # The compose bundle pins image tags (postgres, garage, caddy, alpine/curl); the docker
+  # ecosystem covers compose files as well as Dockerfiles.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'chore(deps)'

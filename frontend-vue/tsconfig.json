@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }],
+  // Declared here as well so tooling that only reads the root tsconfig (shadcn-vue's
+  // CLI) resolves the "@/" alias; tsconfig.app.json is what actually compiles.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

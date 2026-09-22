@@ -1,0 +1,46 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'Directory.*.props', 'Aictiq.slnx', '.github/workflows/backend.yml']
+  pull_request:
+    paths: ['backend/**', 'Directory.*.props', 'Aictiq.slnx', '.github/workflows/backend.yml']
+
+# A newer push to the same branch makes the running job's result irrelevant.
+# main is exempt: those results are the record of what was merged.
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build (warnings are errors)
+        run: dotnet build Aictiq.slnx -warnaserror
+
+      # ubuntu runners ship Docker, so Testcontainers spins up the real Postgres and
+      # Garage the integration tests need - no service containers to keep in sync.
+      - name: Test
+        run: |
+          dotnet test backend/tests/IntegrationTests/Aictiq.IntegrationTests.csproj \
+            --no-build \
+            --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=integration-tests.trx" \
+            --results-directory TestResults
+
+      - name: Upload test results
+        # The results are most useful precisely when the step above failed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: TestResults/*.trx
+          retention-days: 14

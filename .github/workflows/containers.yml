@@ -1,0 +1,80 @@
+name: containers
+
+# Main images are useful to adopters following development. Version-tag images are built
+# by release.yml, where they are coupled to the CLI package and compose bundle.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: containers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The api image serves the SPA from wwwroot, so the web toolchain is part of the
+      # image build (Aictiq.Api.csproj runs pnpm build before publish).
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend-vue/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend-vue/pnpm-lock.yaml
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        run: |
+          # GHCR repositories must be lowercase; the GitHub owner may not be.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+
+          # Always the commit sha, so any image can be traced to its source. Plus
+          # `latest` on main, or the version on a tag.
+          tags="sha-${GITHUB_SHA::12}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            tags="$tags;$version;latest"
+          else
+            tags="$tags;main"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Publish images
+        run: |
+          set -euo pipefail
+          for project in Api Workers; do
+            name=$(echo "$project" | tr '[:upper:]' '[:lower:]')
+            dotnet publish "backend/src/$project" \
+              -c Release \
+              -t:PublishContainer \
+              -p:ContainerRuntimeIdentifiers='linux-x64;linux-arm64' \
+              -p:ContainerRegistry=ghcr.io \
+              -p:ContainerRepository="${{ steps.meta.outputs.owner }}/$name" \
+              -p:ContainerImageTags='"${{ steps.meta.outputs.tags }}"'
+          done
+        env:
+          # The SDK's container tooling reads the credentials docker/login-action wrote.
+          DOTNET_NOLOGO: 'true'

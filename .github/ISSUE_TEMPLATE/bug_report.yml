@@ -1,0 +1,28 @@
+name: Bug report
+description: Tell us about a reproducible problem in Aictiq.
+title: "bug: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here. Use the private reporting path in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Aictiq version or commit
+      placeholder: v0.1.0 or abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: What did you do, what did you expect, and what happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Remove tokens, passwords, email addresses, and other sensitive data first.

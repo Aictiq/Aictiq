@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Aictiq.Modules.Analytics</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"><PrivateAssets>all</PrivateAssets></PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\..\\SharedKernel\\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\\WorkItems\\Aictiq.Modules.WorkItems.csproj" />
+  </ItemGroup>
+</Project>

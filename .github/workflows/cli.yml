@@ -1,0 +1,47 @@
+name: cli
+
+# Version-tag publication belongs to release.yml so the npm package, images and compose
+# bundle share one validated vX.Y.Z release. This workflow is the fast branch/PR check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ['cli/**', '.github/workflows/cli.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: cli-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the pnpm version pinned in package.json's "packageManager" field, so
+      # CI and local resolve identically (avoids pnpm-major lockfile drift).
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cli/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cli/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm test
+      - run: pnpm run build
+
+      # openapi-typescript parses the saved public document before generating the client.
+      # This makes invalid OpenAPI a CI failure even when no API host is available, and a
+      # diff means the committed TypeScript contract no longer matches the document.
+      - run: pnpm run gen:api -- --offline
+      - run: git diff --exit-code -- openapi/v1.json src/api/schema.d.ts

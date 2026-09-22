@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Aictiq.Workers</RootNamespace>
+    <UserSecretsId>aictiq-workers</UserSecretsId>
+    <!-- Restore assets for both container architectures so `dotnet publish
+         -t:PublishContainer -p:ContainerRuntimeIdentifiers="linux-x64;linux-arm64"`
+         can produce a multi-arch manifest (see .github/workflows/containers.yml).
+         No RID is selected here, so ordinary builds stay RID-agnostic. -->
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Npgsql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ServiceDefaults\Aictiq.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\SharedKernel\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\Modules\Identity\Aictiq.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Modules\Integrations\Aictiq.Modules.Integrations.csproj" />
+    <ProjectReference Include="..\Modules\Tenancy\Aictiq.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\Modules\Billing\Aictiq.Modules.Billing.csproj" />
+    <ProjectReference Include="..\Modules\WorkItems\Aictiq.Modules.WorkItems.csproj" />
+    <ProjectReference Include="..\Modules\Wiki\Aictiq.Modules.Wiki.csproj" />
+    <ProjectReference Include="..\Modules\Notifications\Aictiq.Modules.Notifications.csproj" />
+    <ProjectReference Include="..\Modules\Analytics\Aictiq.Modules.Analytics.csproj" />
+    <ProjectReference Include="..\Modules\Automation\Aictiq.Modules.Automation.csproj" />
+  </ItemGroup>
+
+</Project>

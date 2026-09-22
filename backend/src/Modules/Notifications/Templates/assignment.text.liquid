@@ -1,0 +1,14 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+{{ actorName }} assigned {{ itemKey }} - {{ itemTitle }} to you.
+{%- if stateName != blank %}
+State: {{ stateName }}
+{%- endif %}
+{%- if priorityName != blank %}
+Priority: {{ priorityName }}
+{%- endif %}
+{%- if dueOn != blank %}
+Due: {{ dueOn }}
+{%- endif %}
+
+Open it: {{ itemUrl }}

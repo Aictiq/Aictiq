@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Aictiq.Modules.Automation</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"><PrivateAssets>all</PrivateAssets></PackageReference>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- SharedKernel for the cross-module contracts (organizations, deletion events); no
+         module references Automation back - the runner credential is routed to this
+         module's handler through a BearerCredentialRoute, so Identity never learns what a
+         runner is. WorkItems is a direct reference, like Analytics' and Notifications': a
+         rule fires on WorkItemTransitioned (WorkItems/Contracts/WorkItemEvents.cs), which is
+         a plain type, not a SharedKernel contract, so the handler needs the real assembly. -->
+    <ProjectReference Include="..\..\SharedKernel\Aictiq.SharedKernel.csproj" />
+    <ProjectReference Include="..\WorkItems\Aictiq.Modules.WorkItems.csproj" />
+  </ItemGroup>
+</Project>

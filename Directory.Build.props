@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- One product version is stamped into every .NET executable. Release CI replaces
+         this with the validated version from its vX.Y.Z tag. Keep the local default
+         explicitly pre-release so a development image can never identify as a release. -->
+    <Version>0.1.0-dev</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

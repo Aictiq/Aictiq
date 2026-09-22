@@ -1,0 +1,30 @@
+# Single-node Garage for development and small self-hosted deployments.
+#
+# Aictiq only ever speaks the S3 API to this, so swapping Garage for MinIO, AWS S3 or
+# Cloudflare R2 is a matter of changing the S3__* environment variables - see
+# docs/self-host.md. Nothing in the application knows Garage exists.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# One node, one copy. A real multi-node cluster raises this and adds peers; that is a
+# deployment decision, not an application one.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+# The cluster never leaves this container in a single-node setup, so the node advertises
+# itself on loopback.
+rpc_public_addr = "127.0.0.1:3901"
+# Overridden by GARAGE_RPC_SECRET; this literal only exists so the file parses when the
+# variable is absent. It is not a secret in any deployment that sets the variable.
+rpc_secret = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+# Used only by the init step (layout, key, bucket) and by readiness probes.
+api_bind_addr = "[::]:3903"

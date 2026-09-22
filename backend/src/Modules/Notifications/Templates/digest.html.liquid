@@ -1,0 +1,12 @@
+<p style="margin:0 0 12px 0;">Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},</p>
+<p style="margin:0 0 16px 0;">Here is what happened in <strong>{{ organizationName }}</strong>{% if periodLabel != blank %} {{ periodLabel }}{% endif %}.</p>
+{%- if summary != blank %}
+<div style="margin:0 0 20px 0; white-space:pre-wrap;">{{ summary }}</div>
+{%- else %}
+<p style="margin:0 0 20px 0; color:#78716c;">Nothing needed your attention.</p>
+{%- endif %}
+{%- if inboxUrl != blank %}
+<p style="margin:0;">
+  <a href="{{ inboxUrl }}" style="display:inline-block; background:#1c1917; color:#ffffff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:500;">Open your inbox</a>
+</p>
+{%- endif %}

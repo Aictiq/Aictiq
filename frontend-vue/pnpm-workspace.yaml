@@ -1,0 +1,13 @@
+# pnpm 11 reads its settings from here rather than from .npmrc or package.json.
+
+# Install scripts are opt-in. esbuild and unrs-resolver unpack platform binaries
+# (Vite and ESLint fail without them) and vue-demi patches itself for the installed Vue
+# major (@vueuse/core needs it). Nothing else may run scripts on install.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  vue-demi: true
+
+# Don't pull a package version published in the last two days - the window in which
+# most npm supply-chain compromises are caught and unpublished.
+minimumReleaseAge: 2880

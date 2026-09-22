@@ -1,0 +1,163 @@
+name: compose-smoke
+
+# Proves the deploy/ bundle actually starts and serves the app, against the code in this
+# branch rather than against a published image. The backend and web workflows test the
+# code; this tests the thing a self-hoster runs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - 'backend/**'
+      - 'frontend-vue/**'
+      - 'Directory.*.props'
+      - 'Aictiq.slnx'
+      - '.github/workflows/compose-smoke.yml'
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - 'backend/**'
+      - 'frontend-vue/**'
+      - 'Directory.*.props'
+      - 'Aictiq.slnx'
+      - '.github/workflows/compose-smoke.yml'
+
+concurrency:
+  group: compose-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The api image bundles the SPA, so the web toolchain is part of building it.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend-vue/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend-vue/pnpm-lock.yaml
+
+      - name: Build images from this branch
+        run: ./build-local.sh
+
+      - name: Write .env
+        run: |
+          set -euo pipefail
+          # Same shape as .env.example, with generated secrets. Nothing here is reused
+          # anywhere, and the stack is destroyed at the end of the job.
+          cat > .env <<EOF
+          AICTIQ_URL=http://localhost:8080
+          HTTP_PORT=8080
+          HTTPS_PORT=8443
+          JWT_KEY=$(openssl rand -base64 48)
+          POSTGRES_ADMIN_PASSWORD=$(openssl rand -hex 24)
+          POSTGRES_APP_PASSWORD=$(openssl rand -hex 24)
+          GARAGE_RPC_SECRET=$(openssl rand -hex 32)
+          GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)
+          S3_ACCESS_KEY=GK$(openssl rand -hex 12)
+          S3_SECRET_KEY=$(openssl rand -hex 32)
+          S3_BUCKET=aictiq
+          GARAGE_CAPACITY_BYTES=1073741824
+          SEED_ADMIN_EMAIL=admin@example.com
+          SEED_ADMIN_PASSWORD=$(openssl rand -base64 24)
+          AICTIQ_IMAGE_REGISTRY=aictiq-local
+          AICTIQ_IMAGE_TAG=local
+          AICTIQ_IMAGE_PULL_POLICY=never
+          AICTIQ_SUBNET=10.89.7.0/24
+          CADDY_IP=10.89.7.10
+          EOF
+
+      - name: Validate the compose file
+        run: docker compose config >/dev/null
+
+      - name: Start the stack
+        run: docker compose up -d --wait --wait-timeout 300
+
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health/ready >/dev/null 2>&1; then
+              echo "ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the API never became ready" >&2
+          exit 1
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./.env
+
+          # The SPA is served by the API from wwwroot - proves the image contains it.
+          curl -fsS http://localhost:8080/ | grep -q '<title>Aictiq</title>'
+          echo "SPA served"
+
+          # A deep link must fall back to index.html, and an unknown API route must not.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/login)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/nope)" = "404"
+          curl -s http://localhost:8080/api/v1/nope | grep -q '"status":404'
+          echo "routing correct"
+
+          # Cookie sign-in end to end, through Caddy, as the seeded administrator.
+          # A cookie-mode login must NOT return a token in the body.
+          body=$(curl -fsS -c /tmp/jar -X POST http://localhost:8080/api/v1/auth/login \
+            -H 'Content-Type: application/json' -H 'X-Aictiq-Request: 1' \
+            -d "{\"email\":\"$SEED_ADMIN_EMAIL\",\"password\":\"$SEED_ADMIN_PASSWORD\"}")
+          echo "$body" | grep -q '"accessToken":null'
+          grep -q 'aictiq.at' /tmp/jar
+          echo "cookie login"
+
+          curl -fsS -b /tmp/jar -H 'X-Aictiq-Request: 1' \
+            http://localhost:8080/api/v1/auth/session | grep -q "$SEED_ADMIN_EMAIL"
+          echo "session resolves"
+
+          # Writes with cookies but no CSRF header must be refused.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar -X POST \
+            http://localhost:8080/api/v1/notes -H 'Content-Type: application/json' \
+            -d '{"title":"csrf","content":"x"}')" = "403"
+          echo "CSRF guard holds"
+
+      - name: MCP SDK conformance
+        run: |
+          set -euo pipefail
+          . ./.env
+          login=$(curl -fsS -X POST http://localhost:8080/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\":\"$SEED_ADMIN_EMAIL\",\"password\":\"$SEED_ADMIN_PASSWORD\"}")
+          access=$(printf '%s' "$login" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).accessToken))')
+          organization=$(curl -fsS -X POST http://localhost:8080/api/v1/orgs \
+            -H "Authorization: Bearer $access" -H 'Content-Type: application/json' \
+            -d '{"name":"MCP smoke","slug":"mcp-smoke"}')
+          organization_id=$(printf '%s' "$organization" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).id))')
+          issued=$(curl -fsS -X POST http://localhost:8080/api/v1/me/tokens \
+            -H "Authorization: Bearer $access" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"compose MCP conformance\",\"scopes\":[\"mcp\",\"read\"],\"organizationId\":\"$organization_id\"}")
+          mcp_token=$(printf '%s' "$issued" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).secret))')
+          pnpm --dir ../cli install --frozen-lockfile
+          pnpm --dir ../cli exec node scripts/mcp-conformance.mjs http://localhost:8080 "$mcp_token"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

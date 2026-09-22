@@ -1,0 +1,332 @@
+# Aictiq - evaluation and small production deployments.
+#
+#   cp .env.example .env      # then set JWT_KEY, POSTGRES_*_PASSWORD, GARAGE_* secrets
+#   docker compose up -d
+#   open http://localhost
+#
+# See README.md in this directory. Everything is one Docker network; only Caddy
+# publishes ports, so Postgres and Garage are never exposed to the host.
+
+name: aictiq
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    # Preloaded so pg_stat_statements can track every query; the extension itself is
+    # created by the init script below (fresh volumes only - which smoke and perf always
+    # use, and which is when a top-queries dump is meaningful anyway).
+    command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
+    environment:
+      POSTGRES_DB: aictiq
+      # The database owner is used only by the API migration runner. The request-time
+      # API and workers use aictiq_app below, which cannot bypass tenant RLS policies.
+      POSTGRES_USER: aictiq_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD in .env}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-statements.sql:/docker-entrypoint-initdb.d/init-statements.sql:ro
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro
+      - ./postgres/reconcile-app-grants.sh:/docker-entrypoint-initdb.d/reconcile-app-grants.sh:ro
+    healthcheck:
+      # -U and -d are required: without them pg_isready checks the "root" database
+      # and reports ready before ours exists.
+      test: ['CMD-SHELL', 'pg_isready -U aictiq_admin -d aictiq']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  garage:
+    image: dxflrs/garage:v2.1.0
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN in .env}
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+
+  # One-shot. A fresh Garage node rejects every S3 call until a layout is applied, so
+  # the bucket and key must exist before the API starts. The script is idempotent, so
+  # this runs again harmlessly on every `up`.
+  garage-init:
+    image: alpine/curl:8.19.0
+    restart: 'no'
+    depends_on:
+      garage:
+        condition: service_started
+    entrypoint: ['sh', '/init.sh']
+    volumes:
+      - ./garage/init.sh:/init.sh:ro
+    environment:
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+      GARAGE_BUCKET: ${S3_BUCKET:-aictiq}
+      GARAGE_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      GARAGE_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+      GARAGE_CAPACITY_BYTES: ${GARAGE_CAPACITY_BYTES:-107374182400}
+      GARAGE_ZONE: dc1
+
+  # Used by backup.sh/restore.sh. It remains opt-in and has no long-lived credentials.
+  aws-cli:
+    image: public.ecr.aws/aws-cli/aws-cli:2.24.7
+    profiles: ["backup"]
+    entrypoint: ["aws"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_DEFAULT_REGION: garage
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+
+  api:
+    # Source builds make the bundle work from a plain git checkout even when the
+    # optional GHCR packages are private. Set AICTIQ_IMAGE_PULL_POLICY=always (and
+    # AICTIQ_IMAGE_REGISTRY/TAG) to use an already-published image instead.
+    image: ${AICTIQ_IMAGE_REGISTRY:-aictiq-local}/api:${AICTIQ_IMAGE_TAG:-local}
+    pull_policy: ${AICTIQ_IMAGE_PULL_POLICY:-build}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      AllowedHosts: ${AICTIQ_ALLOWED_HOSTS:-localhost}
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      # Only migration startup has the owner login. Runtime requests deliberately use
+      # the RLS-constrained principal.
+      # Runtime API requests deliberately use the RLS-constrained principal.
+      ConnectionStrings__appdb: Host=postgres;Port=5432;Database=aictiq;Username=aictiq_app;Password=${POSTGRES_APP_PASSWORD}
+      ConnectionStrings__appdb-admin: Host=postgres;Port=5432;Database=aictiq;Username=aictiq_admin;Password=${POSTGRES_ADMIN_PASSWORD}
+      Jwt__Key: ${JWT_KEY:?set JWT_KEY in .env - openssl rand -base64 48}
+      Jwt__Issuer: aictiq-api
+      Jwt__Audience: aictiq-clients
+
+      # Caddy is the only thing that talks to the API, and it is what carries the real
+      # client address in X-Forwarded-For. Without this the rate limiter throttles
+      # Caddy's single IP for everybody, and HTTPS redirects loop. It has to be an exact
+      # address, which is why the network below has a fixed subnet and Caddy a static IP.
+      ReverseProxy__KnownProxies__0: ${CADDY_IP:-10.89.7.10}
+
+      S3__Endpoint: http://garage:3900
+      # The browser reaches Garage through Caddy on the app's own origin, so uploads are
+      # same-origin and need no CORS rule. The prefix is added to the URL *after* signing
+      # and stripped again by Caddy, so both ends sign the same path - see
+      # docs/self-host.md.
+      S3__PublicEndpoint: ${AICTIQ_URL:-http://localhost}
+      S3__PublicPathPrefix: /s3
+      S3__Bucket: ${S3_BUCKET:-aictiq}
+      S3__AccessKey: ${S3_ACCESS_KEY}
+      S3__SecretKey: ${S3_SECRET_KEY}
+      S3__Region: garage
+      S3__ForcePathStyle: 'true'
+
+      # Email is optional. Leave EMAIL_SMTP_HOST empty and the instance simply cannot
+      # send: invitations fall back to links you copy out yourself, and /health/ready
+      # answers `{"checks":{"email":"unconfigured"}}`. `--profile mailpit` plus
+      # EMAIL_SMTP_HOST=mailpit / EMAIL_SMTP_PORT=1025 / EMAIL_SMTP_STARTTLS=false
+      # captures everything in a browser instead of sending it anywhere.
+      Email__Smtp__Host: ${EMAIL_SMTP_HOST:-}
+      Email__Smtp__Port: ${EMAIL_SMTP_PORT:-587}
+      Email__Smtp__UserName: ${EMAIL_SMTP_USERNAME:-}
+      Email__Smtp__Password: ${EMAIL_SMTP_PASSWORD:-}
+      Email__Smtp__UseStartTls: ${EMAIL_SMTP_STARTTLS:-true}
+      Email__FromAddress: ${EMAIL_FROM_ADDRESS:-}
+      Email__FromName: ${EMAIL_FROM_NAME:-Aictiq}
+      # Links in email must point at the address a recipient's browser can reach, which
+      # is not the one the container binds to.
+      Email__BaseUrl: ${AICTIQ_URL:-http://localhost}
+
+      # This is deliberately opt-in. A missing endpoint is a no-op even when enabled;
+      # the reporter never sends identifiers, content, credentials, or configuration.
+      Telemetry__Enabled: ${TELEMETRY_ENABLED:-false}
+      Telemetry__Endpoint: ${TELEMETRY_ENDPOINT:-}
+
+      # Optional OAuth sign-in. With no credentials the login page offers only the
+      # password form - a supported deployment, not a degraded one.
+      Auth__Google__ClientId: ${AUTH_GOOGLE_CLIENT_ID:-}
+      Auth__Google__ClientSecret: ${AUTH_GOOGLE_CLIENT_SECRET:-}
+      Auth__GitHub__ClientId: ${AUTH_GITHUB_CLIENT_ID:-}
+      Auth__GitHub__ClientSecret: ${AUTH_GITHUB_CLIENT_SECRET:-}
+
+      Seed__AdminEmail: ${SEED_ADMIN_EMAIL:?set SEED_ADMIN_EMAIL in .env}
+      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
+      Seed__OrganizationName: ${SEED_ORG_NAME:-}
+      Seed__OrganizationSlug: ${SEED_ORG_SLUG:-}
+      Seed__OrganizationTimeZone: ${SEED_ORG_TIME_ZONE:-UTC}
+      Org__AllowSelfServeCreation: ${ORG_ALLOW_SELF_SERVE_CREATION:-true}
+
+      # Disabled by default: when enabled, signed-in browsers may ask GitHub for the
+      # newest public release and show it in the footer. No token is needed or used.
+      Release__UpdateCheck__Enabled: ${RELEASE_UPDATE_CHECK_ENABLED:-false}
+      Release__UpdateCheck__Repository: ${RELEASE_UPDATE_CHECK_REPOSITORY:-Green-Code-DEV/aictiq}
+
+      # Rate limits are configuration (Api/Program.cs), so they are pass-throughs rather
+      # than baked in: the nightly perf run drives ~20 req/s from one runner address and
+      # raises the global guard in .env, and a self-host whose users share one egress
+      # address can do the same. Defaults are the shipped values, unchanged.
+      RateLimiting__GlobalPermitLimitPerMinute: ${RATE_LIMITING_GLOBAL_PER_MINUTE:-300}
+      RateLimiting__UploadPermitLimitPerMinute: ${RATE_LIMITING_UPLOADS_PER_MINUTE:-20}
+      RateLimiting__SearchPermitLimitPerMinute: ${RATE_LIMITING_SEARCH_PER_MINUTE:-120}
+      RateLimiting__McpRequestPermitLimitPerMinute: ${RATE_LIMITING_MCP_REQUESTS_PER_MINUTE:-600}
+      RateLimiting__McpPermitLimitPerMinute: ${RATE_LIMITING_MCP_TOOLS_PER_MINUTE:-60}
+    healthcheck:
+      # The ASP.NET runtime image ships no curl, wget or nc, and adding one would mean a
+      # Dockerfile - a second build definition to keep in step with `dotnet publish`.
+      # bash's /dev/tcp is already there and is enough to prove Kestrel is answering.
+      test:
+        [
+          'CMD',
+          'bash',
+          '-c',
+          'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && head -1 <&3 | grep -q "200"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  workers:
+    image: ${AICTIQ_IMAGE_REGISTRY:-aictiq-local}/workers:${AICTIQ_IMAGE_TAG:-local}
+    pull_policy: ${AICTIQ_IMAGE_PULL_POLICY:-build}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: workers
+    restart: unless-stopped
+    depends_on:
+      # The API owns migrations, under a Postgres advisory lock. Workers must never
+      # start against a database it has not migrated yet - hence healthy, not started.
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      AllowedHosts: ${AICTIQ_ALLOWED_HOSTS:-localhost}
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      # Workers perform bounded cross-organization maintenance (outbox, retention,
+      # webhook and billing sweeps), so they use the private admin connection. They have
+      # no public application routes; browser/API traffic remains aictiq_app + RLS.
+      ConnectionStrings__appdb: Host=postgres;Port=5432;Database=aictiq;Username=aictiq_admin;Password=${POSTGRES_ADMIN_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      S3__Endpoint: http://garage:3900
+      S3__PublicEndpoint: ${AICTIQ_URL:-http://localhost}
+      S3__PublicPathPrefix: /s3
+      S3__Bucket: ${S3_BUCKET:-aictiq}
+      S3__AccessKey: ${S3_ACCESS_KEY}
+      S3__SecretKey: ${S3_SECRET_KEY}
+      S3__Region: garage
+      S3__ForcePathStyle: 'true'
+
+      # Email is optional. Leave EMAIL_SMTP_HOST empty and the instance simply cannot
+      # send: invitations fall back to links you copy out yourself, and /health/ready
+      # answers `{"checks":{"email":"unconfigured"}}`. `--profile mailpit` plus
+      # EMAIL_SMTP_HOST=mailpit / EMAIL_SMTP_PORT=1025 / EMAIL_SMTP_STARTTLS=false
+      # captures everything in a browser instead of sending it anywhere.
+      Email__Smtp__Host: ${EMAIL_SMTP_HOST:-}
+      Email__Smtp__Port: ${EMAIL_SMTP_PORT:-587}
+      Email__Smtp__UserName: ${EMAIL_SMTP_USERNAME:-}
+      Email__Smtp__Password: ${EMAIL_SMTP_PASSWORD:-}
+      Email__Smtp__UseStartTls: ${EMAIL_SMTP_STARTTLS:-true}
+      Email__FromAddress: ${EMAIL_FROM_ADDRESS:-}
+      Email__FromName: ${EMAIL_FROM_NAME:-Aictiq}
+      # Links in email must point at the address a recipient's browser can reach, which
+      # is not the one the container binds to.
+      Email__BaseUrl: ${AICTIQ_URL:-http://localhost}
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      # Same port inside and out. Caddy binds whatever port the site address names, so
+      # a AICTIQ_URL of http://localhost:8088 makes it listen on 8088 - mapping that to
+      # container port 80 would publish a port nothing is listening on. Keep HTTP_PORT
+      # in step with any port in AICTIQ_URL.
+      - '${HTTP_PORT:-80}:${HTTP_PORT:-80}'
+      - '${HTTPS_PORT:-443}:${HTTPS_PORT:-443}'
+    environment:
+      # A public hostname makes Caddy get a certificate automatically. The default
+      # `http://localhost` keeps it on plain HTTP, which is what you want for a local
+      # evaluation and never for a real deployment.
+      AICTIQ_SITE: ${AICTIQ_URL:-http://localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        ipv4_address: ${CADDY_IP:-10.89.7.10}
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.136.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes: ["./observability/otel-collector.yml:/etc/otelcol/config.yml:ro"]
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+  loki:
+    image: grafana/loki:3.5.5
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes: ["./observability/loki.yml:/etc/loki/local-config.yaml:ro"]
+  tempo:
+    image: grafana/tempo:2.8.2
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes: ["./observability/tempo.yml:/etc/tempo.yml:ro"]
+  grafana:
+    image: grafana/grafana:12.1.1
+    profiles: ["observability"]
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/aictiq.yml:ro
+      - ./observability/grafana-dashboard.yml:/etc/grafana/provisioning/dashboards/aictiq.yml:ro
+      - ./observability/aictiq.json:/var/lib/grafana/dashboards/aictiq.json:ro
+
+  # --profile mailpit - a local SMTP sink so invitation and notification email can be
+  # read in a browser without sending anything.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    profiles: ['mailpit']
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - '${MAILPIT_UI_PORT:-8025}:8025'
+
+# A fixed subnet so Caddy can have a static address: ASP.NET's KnownProxies takes exact
+# IPs, and a proxy whose address changes on every `up` cannot be trusted by the API.
+# Change AICTIQ_SUBNET and CADDY_IP together if this collides with an existing network.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${AICTIQ_SUBNET:-10.89.7.0/24}
+
+volumes:
+  pgdata:
+  garage-meta:
+  garage-data:
+  grafana-data:
+  caddy-data:
+  caddy-config:

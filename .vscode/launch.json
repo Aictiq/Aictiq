@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Aspire AppHost",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/backend/src/AppHost/Aictiq.AppHost.csproj"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        // Linux/OpenSSL: make .NET (and the Aspire dashboard's gRPC client) trust the
+        // ASP.NET dev cert. The cert is a self-signed leaf (CA:FALSE), so it can't live
+        // in the system CA bundle; `dotnet dev-certs https --trust` puts it in
+        // ~/.aspnet/dev-certs/trust and this var activates it. Harmless on macOS/Windows.
+        "SSL_CERT_DIR": "${env:HOME}/.aspnet/dev-certs/trust:/etc/ssl/certs"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Login to the dashboard at (https?://\\S+)"
+      }
+    },
+    {
+      "name": "Nuxt: Dev Server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/frontend-nuxt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Expo: Start Metro",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/mobile-expo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
