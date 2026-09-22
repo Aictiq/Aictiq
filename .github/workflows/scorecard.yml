@@ -34,7 +34,9 @@ jobs:
           # turned into one that does.
           persist-credentials: false
 
-      - uses: ossf/scorecard-action@v2
+      # Pinned to a released minor: this action publishes v2.x.y tags but no floating
+      # v2, so `@v2` fails the job at action resolution.
+      - uses: ossf/scorecard-action@v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif
