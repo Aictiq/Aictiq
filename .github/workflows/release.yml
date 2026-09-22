@@ -124,20 +124,22 @@ jobs:
           set -euo pipefail
           for project in Api Workers; do
             name=$(echo "$project" | tr '[:upper:]' '[:lower:]')
-            tags='${{ needs.validate.outputs.version }};sha-${GITHUB_SHA::12}'
+            tags="$VERSION;sha-${GITHUB_SHA::12}"
             # A release candidate must never replace a stable install following latest.
-            if [[ '${{ needs.validate.outputs.version }}' != *-* ]]; then tags="$tags;latest"; fi
+            if [[ "$VERSION" != *-* ]]; then tags="$tags;latest"; fi
             dotnet publish "backend/src/$project" \
               -c Release \
               -t:PublishContainer \
-              -p:Version='${{ needs.validate.outputs.version }}' \
+              -p:Version="$VERSION" \
               -p:ContainerRuntimeIdentifiers='"linux-x64;linux-arm64"' \
               -p:ContainerRegistry=ghcr.io \
-              -p:ContainerRepository='${{ needs.validate.outputs.owner }}/'"$name" \
-              -p:ContainerImageTags="$tags"
+              -p:ContainerRepository="$OWNER/$name" \
+              -p:ContainerImageTags="\"$tags\""
           done
         env:
           DOTNET_NOLOGO: "true"
+          VERSION: ${{ needs.validate.outputs.version }}
+          OWNER: ${{ needs.validate.outputs.owner }}
 
   cli:
     needs: [validate, check]
