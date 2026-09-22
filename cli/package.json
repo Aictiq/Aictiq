@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Command-line client for Aictiq, including an MCP stdio bridge for coding agents.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aictiq/Aictiq.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/Aictiq/Aictiq/tree/main/cli#readme",
+  "bugs": {
+    "url": "https://github.com/Aictiq/Aictiq/issues"
+  },
   "type": "module",
   "bin": {
     "aictiq": "dist/index.js"
@@ -11,6 +20,10 @@
     "dist",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -19,7 +32,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "gen:api": "node scripts/generate-api-types.mjs"
+    "gen:api": "node scripts/generate-api-types.mjs",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
