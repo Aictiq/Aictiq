@@ -7,6 +7,7 @@
 [![backend](https://github.com/aictiq/aictiq/actions/workflows/backend.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/backend.yml)
 [![web](https://github.com/aictiq/aictiq/actions/workflows/web.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/web.yml)
 [![CodeQL](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aictiq/aictiq/badge)](https://scorecard.dev/viewer/?uri=github.com/aictiq/aictiq)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)

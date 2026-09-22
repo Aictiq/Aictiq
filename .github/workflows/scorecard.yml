@@ -1,0 +1,54 @@
+name: scorecard
+
+# OSSF Scorecard grades this repository's supply-chain posture (branch protection, pinned
+# actions, token permissions, dangerous workflow patterns, published SAST) and writes the
+# findings into code scanning. The branch_protection_rule trigger means a weakened rule
+# shows up as a finding rather than going unnoticed.
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '23 4 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploading the SARIF is what puts findings in the Security tab.
+      security-events: write
+      # publish_results signs the run with an OIDC token so the public badge and the
+      # scorecard.dev viewer can attest the result came from this repository.
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Scorecard needs no credentials, and a workflow that cannot push cannot be
+          # turned into one that does.
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@v2
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload results
+        # Kept as an artifact too: the SARIF carries the per-check reasoning that the
+        # code scanning alerts summarise.
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 14
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
