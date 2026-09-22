@@ -24,7 +24,8 @@ Self-hosted, AGPL-3.0, one `docker compose up`.
 
 ## Quick start
 
-Install Docker Engine with the Compose plugin first. Then run:
+Install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin
+first; `docker compose version` must report v2 or newer. Then run:
 
 ```bash
 git clone https://github.com/aictiq/aictiq && cd aictiq/deploy
@@ -35,9 +36,32 @@ docker compose up --build -d
 docker compose ps
 ```
 
+The first run builds the API and the web app from source, which takes several minutes and
+wants 4 GB of RAM and 20 GB of disk. Later starts reuse the images and take seconds.
+
 Open <http://localhost> in a browser. On Linux, run `xdg-open http://localhost`; on macOS,
 run `open http://localhost`. Sign in with `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from
 your `.env` file.
+
+### Letting other people reach it
+
+`http://localhost` only works from the machine Docker runs on. To put an instance in front
+of public users, set **both** of these in `.env` to the address their browsers will use:
+
+```dotenv
+AICTIQ_URL=http://192.168.1.10
+AICTIQ_ALLOWED_HOSTS=192.168.1.10;localhost
+```
+
+`AICTIQ_ALLOWED_HOSTS` is semicolon-separated, and host names only - no scheme, no port.
+Setting `AICTIQ_URL` while leaving the allowed hosts at `localhost` is the easy mistake and
+a quiet one: every request comes back as a bare `400 Bad Request`, nothing is written to
+the log, and `docker compose ps` still reports the API as healthy, because its own health
+check calls itself as `localhost`.
+
+Plain HTTP is fine on a trusted network. For anything reachable from the internet, point a
+domain at the host and use `AICTIQ_URL=https://aictiq.example.com` instead - Caddy then
+obtains and renews a certificate on its own. See [Self-hosting](docs/self-host.md).
 
 `.env.example` lists every Compose setting, including optional SMTP, OAuth, telemetry,
 realtime, and rate-limit settings. Leave optional values at their defaults for a local
