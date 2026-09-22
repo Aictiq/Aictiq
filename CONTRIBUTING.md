@@ -51,4 +51,11 @@ Explain the problem, the change, and verification in the pull request template. 
 readable and scoped to one concern. Maintainers
 may ask for tests, docs, a migration review, or a smaller follow-up before merging.
 
+`main` is protected: every change lands through a pull request, and nothing merges while a
+required check is red or a review conversation is unresolved. CodeQL runs on every pull
+request and must pass. The branch also has to be current with `main` before merging, so
+expect to click "Update branch" if `main` moved while your review was open. Merges are
+squashed, so the pull request title becomes the commit subject on `main`: write it as the
+commit message you want in the history.
+
 Contributions are licensed under the repository's [AGPL-3.0-only license](LICENSE).

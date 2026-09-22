@@ -1,0 +1,14 @@
+# Blank issues are off so every report arrives through a form with the fields triage
+# needs. The links below cover what the forms deliberately do not.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Aictiq/Aictiq/security/advisories/new
+    about: Private vulnerability report, per SECURITY.md. Never open a public issue for an unpatched flaw.
+  - name: Documentation
+    url: https://aictiq.github.io/aictiq/
+    about: Getting started, self-hosting, the API and the agent integration.
+  - name: Contributing guide
+    url: https://github.com/Aictiq/Aictiq/blob/main/CONTRIBUTING.md
+    about: How to build the stack, which checks to run, and what a reviewable pull request looks like.
