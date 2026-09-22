@@ -268,6 +268,8 @@ services:
       # `http://localhost` keeps it on plain HTTP, which is what you want for a local
       # evaluation and never for a real deployment.
       AICTIQ_SITE: ${AICTIQ_URL:-http://localhost}
+      # Only when another reverse proxy sits in front of Caddy - see the Caddyfile.
+      AICTIQ_TRUSTED_PROXIES: ${AICTIQ_TRUSTED_PROXIES:-192.0.2.0/24}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

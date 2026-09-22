@@ -5,6 +5,20 @@
 #   http://localhost          plain HTTP, no certificate - local evaluation
 #   https://aictiq.example.com  Caddy obtains and renews a certificate automatically
 
+# When Aictiq sits behind another reverse proxy (Nginx Proxy Manager, an ALB, a
+# company edge) that one terminates TLS, and Caddy receives plain HTTP. Caddy
+# overwrites X-Forwarded-Proto with the scheme it saw unless the peer is trusted, and
+# the API would then believe the request arrived over HTTP: no Secure flag on the auth
+# cookies, and no upgrade-insecure-requests in the CSP, on a site that is really HTTPS.
+# Set AICTIQ_TRUSTED_PROXIES to that proxy's address or CIDR and Caddy passes the
+# upstream X-Forwarded-* through instead. The default is a documentation range that
+# never matches, so a deployment where Caddy is itself the edge trusts nothing.
+{
+	servers {
+		trusted_proxies static {$AICTIQ_TRUSTED_PROXIES:192.0.2.0/24}
+	}
+}
+
 {$AICTIQ_SITE} {
 	encode zstd gzip
 
