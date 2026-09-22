@@ -24,16 +24,29 @@ Self-hosted, AGPL-3.0, one `docker compose up`.
 
 ## Quick start
 
+Install Docker Engine with the Compose plugin first. Then run:
+
 ```bash
 git clone https://github.com/aictiq/aictiq && cd aictiq/deploy
 cp .env.example .env
-$EDITOR .env          # every CHANGE_ME; the file shows how to generate each secret
+$EDITOR .env          # replace every CHANGE_ME; generation commands are in the file
+docker compose config --quiet
 docker compose up --build -d
-open http://localhost
+docker compose ps
 ```
 
-The images build from source, so the host needs only Docker. Compose refuses to start
-rather than invent a default for a secret. See [Getting started](docs/getting-started.md).
+Open <http://localhost> in a browser. On Linux, run `xdg-open http://localhost`; on macOS,
+run `open http://localhost`. Sign in with `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from
+your `.env` file.
+
+`.env.example` lists every Compose setting, including optional SMTP, OAuth, telemetry,
+realtime, and rate-limit settings. Leave optional values at their defaults for a local
+installation. `docker compose config --quiet` checks the file before Docker builds the
+images. Compose stops when a required secret still has no value.
+
+The persistent data volumes have fixed names: `aictiq-postgres`, `aictiq-garage-meta`, and
+`aictiq-garage-data`. Docker retains them after `docker compose down`. See
+[Getting started](docs/getting-started.md).
 
 For development, one command starts Postgres, object storage, the API, the workers and the
 Vite dev server through Aspire:

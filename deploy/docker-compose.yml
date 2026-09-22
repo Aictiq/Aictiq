@@ -176,10 +176,14 @@ services:
       # raises the global guard in .env, and a self-host whose users share one egress
       # address can do the same. Defaults are the shipped values, unchanged.
       RateLimiting__GlobalPermitLimitPerMinute: ${RATE_LIMITING_GLOBAL_PER_MINUTE:-300}
+      RateLimiting__AuthPermitLimitPerMinute: ${RATE_LIMITING_AUTH_PER_MINUTE:-10}
       RateLimiting__UploadPermitLimitPerMinute: ${RATE_LIMITING_UPLOADS_PER_MINUTE:-20}
       RateLimiting__SearchPermitLimitPerMinute: ${RATE_LIMITING_SEARCH_PER_MINUTE:-120}
       RateLimiting__McpRequestPermitLimitPerMinute: ${RATE_LIMITING_MCP_REQUESTS_PER_MINUTE:-600}
       RateLimiting__McpPermitLimitPerMinute: ${RATE_LIMITING_MCP_TOOLS_PER_MINUTE:-60}
+
+      Realtime__Backplane: ${REALTIME_BACKPLANE:-postgres}
+      Realtime__RedisConnectionString: ${REALTIME_REDIS_CONNECTION_STRING:-}
     healthcheck:
       # The ASP.NET runtime image ships no curl, wget or nc, and adding one would mean a
       # Dockerfile - a second build definition to keep in step with `dotnet publish`.
@@ -244,6 +248,8 @@ services:
       # Links in email must point at the address a recipient's browser can reach, which
       # is not the one the container binds to.
       Email__BaseUrl: ${AICTIQ_URL:-http://localhost}
+
+      Realtime__Backplane: ${REALTIME_BACKPLANE:-postgres}
 
   caddy:
     image: caddy:2.10-alpine
@@ -325,8 +331,11 @@ networks:
 
 volumes:
   pgdata:
+    name: aictiq-postgres
   garage-meta:
+    name: aictiq-garage-meta
   garage-data:
+    name: aictiq-garage-data
   grafana-data:
   caddy-data:
   caddy-config:
