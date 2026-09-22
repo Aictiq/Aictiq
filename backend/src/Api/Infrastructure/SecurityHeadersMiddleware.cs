@@ -24,6 +24,9 @@ public static class SecurityHeadersMiddleware
         "font-src 'self' data:",
     ];
 
+    private static readonly string[] ProductionDirectives =
+        [.. BaseDirectives, "script-src 'self'", "connect-src 'self'"];
+
     /// <summary>
     /// The SPA is same-origin with the API, so <c>connect-src 'self'</c> covers every
     /// call the browser makes - including the SignalR hub and presigned S3 URLs, which
@@ -31,7 +34,17 @@ public static class SecurityHeadersMiddleware
     /// </summary>
     public static readonly string ProductionCsp = string.Join(
         "; ",
-        [.. BaseDirectives, "script-src 'self'", "connect-src 'self'", "upgrade-insecure-requests"]);
+        [.. ProductionDirectives, "upgrade-insecure-requests"]);
+
+    /// <summary>
+    /// The same policy without <c>upgrade-insecure-requests</c>, for an instance served
+    /// over plain HTTP - an evaluation or an internal network, which AICTIQ_URL supports
+    /// explicitly. The directive would otherwise rewrite every same-origin asset request
+    /// to https on a host that has no listener there, and the SPA would never load.
+    /// Browsers exempt localhost from the upgrade, which is why only a real hostname or
+    /// address shows it.
+    /// </summary>
+    public static readonly string ProductionCspWithoutUpgrade = string.Join("; ", ProductionDirectives);
 
     /// <summary>
     /// Vite's dev client evaluates modules and opens an HMR websocket. The relaxation is
@@ -51,8 +64,6 @@ public static class SecurityHeadersMiddleware
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app, bool isDevelopment) =>
         app.Use(async (context, next) =>
         {
-            var csp = isDevelopment ? DevelopmentCsp : ProductionCsp;
-
             context.Response.OnStarting(state =>
             {
                 var ctx = (HttpContext)state;
@@ -74,7 +85,11 @@ public static class SecurityHeadersMiddleware
                 }
                 else if (IsHtml(ctx.Response.ContentType))
                 {
-                    headers["Content-Security-Policy"] = csp;
+                    // Read after UseForwardedHeaders has run, so X-Forwarded-Proto from
+                    // the reverse proxy decides this and not the plain hop to Kestrel.
+                    headers["Content-Security-Policy"] = isDevelopment
+                        ? DevelopmentCsp
+                        : ctx.Request.IsHttps ? ProductionCsp : ProductionCspWithoutUpgrade;
                     // index.html names this deploy's hashed assets, so it must be
                     // revalidated; the assets themselves stay cacheable forever.
                     headers["Cache-Control"] = "no-cache";

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Aictiq.Modules.Identity.Endpoints;
 using Aictiq.IntegrationTests.Storage;
+using Aictiq.Api.Infrastructure;
 
 namespace Aictiq.IntegrationTests;
 
@@ -75,6 +76,22 @@ public sealed class ApiSmokeTests(PostgresFixture postgres, GarageFixture garage
 
         Assert.False(response.Headers.Contains("Content-Security-Policy"));
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    /// <summary>
+    /// A plain-HTTP instance is a supported deployment (AICTIQ_URL=http://...), and
+    /// <c>upgrade-insecure-requests</c> would rewrite every same-origin asset request to
+    /// https on a host with no listener there - a blank page. Browsers exempt localhost
+    /// from the upgrade, so only a real hostname or address ever showed it.
+    /// </summary>
+    [Fact]
+    public void the_plain_http_policy_is_the_https_one_without_the_upgrade_directive()
+    {
+        Assert.Contains("upgrade-insecure-requests", SecurityHeadersMiddleware.ProductionCsp);
+        Assert.DoesNotContain("upgrade-insecure-requests", SecurityHeadersMiddleware.ProductionCspWithoutUpgrade);
+        Assert.Equal(
+            SecurityHeadersMiddleware.ProductionCsp,
+            SecurityHeadersMiddleware.ProductionCspWithoutUpgrade + "; upgrade-insecure-requests");
     }
 
     [Fact]

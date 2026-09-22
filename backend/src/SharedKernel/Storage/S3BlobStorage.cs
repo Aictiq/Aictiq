@@ -99,14 +99,19 @@ public sealed class S3BlobStorage : IBlobStorage, IDisposable
     /// </summary>
     private Uri Presign(GetPreSignedUrlRequest request)
     {
-        var signed = new UriBuilder(_presigner.GetPreSignedURL(request));
+        var url = new Uri(_presigner.GetPreSignedURL(request));
+        var signed = new UriBuilder(url);
         var target = new Uri(_options.ResolvedPublicEndpoint);
 
         if (!string.Equals(signed.Scheme, target.Scheme, StringComparison.OrdinalIgnoreCase))
         {
-            // UriBuilder rewrites the port to the new scheme's default when the port was
-            // implicit, so it is restored explicitly.
-            var port = signed.Port;
+            // An explicit port came from ServiceURL and is both what the browser must
+            // connect to and what SigV4 put in the signed host header, so it is kept. A
+            // default one has to stay implicit: UriBuilder materialises it (443 for the
+            // SDK's https), and carrying that into an http URL would point the browser
+            // at port 443 and make it send `Host: host:443`, which the signature - taken
+            // over the bare host - does not cover.
+            var port = url.IsDefaultPort ? -1 : url.Port;
             signed.Scheme = target.Scheme;
             signed.Port = port;
         }

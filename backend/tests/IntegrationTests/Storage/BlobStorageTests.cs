@@ -188,6 +188,43 @@ public sealed class BlobStorageTests(GarageFixture garage)
     }
 
     /// <summary>
+    /// A plain-HTTP instance is a supported deployment. The SDK always signs https, so
+    /// the scheme is rewritten - and the port must stay implicit while it is. Carrying
+    /// the SDK's default 443 into an http URL sends the browser to a port nothing serves
+    /// and makes it send <c>Host: host:443</c>, which the signature does not cover.
+    /// </summary>
+    [Fact]
+    public async Task an_http_public_endpoint_keeps_the_default_port_implicit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var storage = CreateStorage(o => o.PublicEndpoint = "http://aictiq.internal");
+
+        var upload = await storage.PresignUploadAsync(
+            Key("plain-http"), "text/plain", maxBytes: 1024, cancellationToken: ct);
+
+        Assert.Equal("http", upload.Scheme);
+        Assert.Equal("aictiq.internal", upload.Authority);
+        Assert.True(upload.IsDefaultPort);
+    }
+
+    /// <summary>
+    /// A port that was written into the endpoint is not a default and must survive the
+    /// scheme rewrite - it is what the browser connects to and what SigV4 signed.
+    /// </summary>
+    [Fact]
+    public async Task an_explicit_port_survives_the_scheme_rewrite()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var storage = CreateStorage(o => o.PublicEndpoint = "http://aictiq.internal:8088");
+
+        var upload = await storage.PresignUploadAsync(
+            Key("plain-http-port"), "text/plain", maxBytes: 1024, cancellationToken: ct);
+
+        Assert.Equal("http", upload.Scheme);
+        Assert.Equal("aictiq.internal:8088", upload.Authority);
+    }
+
+    /// <summary>
     /// The compose deployment serves Garage under <c>/s3</c> on the app's own origin, and
     /// Caddy strips that prefix before Garage sees the request. So the prefix must be
     /// added <em>after</em> signing - signing the prefixed path would mean the two ends
