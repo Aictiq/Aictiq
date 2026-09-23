@@ -1,0 +1,11 @@
+<p style="margin:0 0 12px 0;">Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},</p>
+<p style="margin:0 0 16px 0;">
+  <strong>{{ actorName }}</strong> replied to your comment on
+  <a href="{{ itemUrl }}" style="color:#1c1917;">{{ itemKey }} - {{ itemTitle }}</a>.
+</p>
+{%- if excerpt != blank %}
+<blockquote style="margin:0 0 20px 0; padding:10px 14px; border-left:3px solid #e7e5e4; color:#57534e; white-space:pre-wrap;">{{ excerpt }}</blockquote>
+{%- endif %}
+<p style="margin:0;">
+  <a href="{{ itemUrl }}" style="display:inline-block; background:#1c1917; color:#ffffff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:500;">Open {{ itemKey }}</a>
+</p>

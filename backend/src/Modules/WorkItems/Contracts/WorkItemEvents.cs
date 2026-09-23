@@ -23,9 +23,33 @@ public sealed record BoardMoved(Guid ProjectId, Guid ItemId, string Key, string 
 public sealed record SprintChanged(Guid ProjectId, Guid SprintId, Guid TeamId, string ActorId) : DomainEvent;
 
 /// <summary>Durable notification input; recipients are resolved by Notifications/watchers.</summary>
+/// <remarks>The item and excerpt fields are what an email needs to say something useful
+/// without Notifications reaching into WorkItems' schema. They are init-only so an outbox
+/// row written before they existed still deserializes; its email falls back to less detail.</remarks>
 public sealed record CommentAdded(
     Guid OrganizationId, Guid ProjectId, Guid ItemId, Guid CommentId,
-    string AuthorId, IReadOnlyList<string> MentionedUserIds) : DomainEvent, IIntegrationEvent;
+    string AuthorId, IReadOnlyList<string> MentionedUserIds) : DomainEvent, IIntegrationEvent
+{
+    /// <summary>The root of the thread this comment replies to; null for a new thread.</summary>
+    public Guid? ParentCommentId { get; init; }
+    /// <summary>Who started that thread: the one person a reply is addressed to.</summary>
+    public string? ThreadAuthorId { get; init; }
+    public string? ProjectKey { get; init; }
+    public string? ItemKey { get; init; }
+    public string? ItemTitle { get; init; }
+    public string? Excerpt { get; init; }
+}
+
+/// <summary>An edit tagged people the comment did not tag before. Only they are told.</summary>
+public sealed record CommentMentionsAdded(
+    Guid OrganizationId, Guid ProjectId, Guid ItemId, Guid CommentId,
+    string AuthorId, IReadOnlyList<string> MentionedUserIds) : DomainEvent, IIntegrationEvent
+{
+    public string? ProjectKey { get; init; }
+    public string? ItemKey { get; init; }
+    public string? ItemTitle { get; init; }
+    public string? Excerpt { get; init; }
+}
 
 /// <summary>The metadata transaction has removed an attachment; blob deletion is retried by the outbox.</summary>
 public sealed record AttachmentDeleted(string ObjectKey) : DomainEvent, IIntegrationEvent;

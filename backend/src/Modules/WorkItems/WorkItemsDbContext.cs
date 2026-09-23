@@ -170,6 +170,10 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
             b.HasIndex(x => new { x.ItemId, x.EventId }).IsUnique().HasFilter("event_id IS NOT NULL")
                 .HasDatabaseName("ux_comments_item_id_event_id");
             b.HasOne<WorkItem>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
+            // Comments are tombstoned, never removed on their own, so the cascade only ever
+            // runs as part of the item's hard delete.
+            b.HasIndex(x => x.ParentCommentId);
+            b.HasOne<Comment>().WithMany().HasForeignKey(x => x.ParentCommentId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ItemWatcher>(b =>
         {
