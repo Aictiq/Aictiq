@@ -40,6 +40,19 @@ const loading = ref(true)
 const accepting = ref(false)
 const problem = ref<string | null>(null)
 
+/**
+ * A link stops matching the moment anyone clicks Resend: only the token's hash is stored,
+ * so a resend mints a new one and the link in the older email dies. The API cannot tell a
+ * superseded token from a made-up one - it has nothing left to compare it against - so one
+ * message has to cover both, and the useful half is where to find a working link.
+ *
+ * This is reached most often by someone who opened the invitation, went away to register,
+ * and came back to a page whose token was rotated while they were gone.
+ */
+const deadLinkMessage =
+  'This invitation link is no longer valid. It may have been replaced by a newer one, '
+  + 'so open the most recent invitation email you received - or ask whoever invited you to send a new link.'
+
 onMounted(async () => {
   // Both halves of the answer: is the link real, and is anyone signed in to use it.
   await session.load()
@@ -49,7 +62,7 @@ onMounted(async () => {
   } catch (error) {
     problem.value =
       error instanceof ApiError && error.status === 404
-        ? 'This invitation link is not valid. It may have been replaced by a newer one.'
+        ? deadLinkMessage
         : (error as Error).message
   } finally {
     loading.value = false
@@ -94,7 +107,7 @@ async function accept() {
     try {
       preview.value = await previewInvitation(token.value)
     } catch {
-      problem.value = 'This invitation link is no longer valid.'
+      problem.value = deadLinkMessage
     }
   } finally {
     accepting.value = false
@@ -107,8 +120,8 @@ async function accept() {
 
   <AuthCard
     v-else-if="problem || !preview"
-    title="Invitation not found"
-    :description="problem ?? 'This invitation link is not valid.'"
+    title="Invitation link not valid"
+    :description="problem ?? deadLinkMessage"
   >
     <Button class="w-full" @click="router.replace('/')">Go to Aictiq</Button>
   </AuthCard>
