@@ -103,9 +103,10 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         var issued = await RegisterAsync(_owner, Acme, "vps-1");
         using var runner = RunnerClient(issued.Secret);
 
-        // Its own organization's routes see a non-member: no user id, no membership.
-        Assert.Equal(HttpStatusCode.NotFound, (await runner.GetAsync($"/api/v1/orgs/{Acme}/projects", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await runner.GetAsync($"/api/v1/orgs/{Acme}/runners", Ct)).StatusCode);
+        // Even its own organization's routes see nobody: a runner has no user id, and a caller
+        // without one is challenged before the organization is looked up.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await runner.GetAsync($"/api/v1/orgs/{Acme}/projects", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await runner.GetAsync($"/api/v1/orgs/{Acme}/runners", Ct)).StatusCode);
         // Routes without an organization see nobody at all.
         Assert.Equal(HttpStatusCode.Unauthorized, (await runner.GetAsync("/api/v1/me", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await runner.GetAsync("/api/v1/orgs", Ct)).StatusCode);
@@ -212,7 +213,8 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         using var runner = RunnerClient(theirs.Secret);
         var hello = await runner.PostAsync("/api/v1/runner/hello", null, Ct);
         Assert.Equal(Globex, (await hello.Content.ReadFromJsonAsync<RunnerHelloView>(ApiTestContext.Json, Ct))!.OrganizationSlug);
-        Assert.Equal(HttpStatusCode.NotFound, (await runner.GetAsync($"/api/v1/orgs/{Acme}/runners", Ct)).StatusCode);
+        // Another organization's routes challenge it like anyone else without a user id.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await runner.GetAsync($"/api/v1/orgs/{Acme}/runners", Ct)).StatusCode);
 
         // Its hello marked itself, not the namesake in another organization.
         Assert.Null(Assert.Single(await ListAsync(_owner, Acme)).LastSeenAt);
