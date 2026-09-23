@@ -119,7 +119,7 @@ builder.AddViteApp("web", "../../../frontend-vue")
     // pinned by package.json's "packageManager" field.
     .WithPnpm()
     // Keep a stable public Aspire URL while Vite listens on its development-server port.
-    .WithHttpEndpoint(targetPort: 5173, port: 21212)
+    .WithHttpEndpoint(targetPort: 5173, port: DevWeb.Port)
     .WithEnvironment("AICTIQ_API_BASE", api.GetEndpoint("http"))
     .WaitFor(api)
     .WithExternalHttpEndpoints();
@@ -149,6 +149,13 @@ file sealed record StripeSettings(
     IResourceBuilder<ParameterResource>? WebhookSecret,
     string? BillingMode,
     IReadOnlyDictionary<string, string> Prices);
+
+/// <summary>The web app's stable host port, which is also where links in dev email point.</summary>
+file static class DevWeb
+{
+    public const int Port = 21212;
+    public const string Origin = "http://localhost:21212";
+}
 
 file static class StripeExtensions
 {
@@ -213,6 +220,9 @@ file static class GarageExtensions
             .WithEnvironment("Email__Smtp__UseStartTls", "false")
             .WithEnvironment("Email__FromAddress", "aictiq@localhost")
             .WithEnvironment("Email__FromName", "Aictiq (dev)")
+            // Without an origin for its links, every email that carries one is skipped as
+            // unsafe to send, so the sink would stay empty.
+            .WithEnvironment("Email__BaseUrl", DevWeb.Origin)
             .WaitFor(mailpit);
     }
 }
