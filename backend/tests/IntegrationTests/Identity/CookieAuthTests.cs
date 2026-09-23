@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Aictiq.Modules.Identity.Auth;
 using Aictiq.Modules.Identity.Endpoints;
+using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.IntegrationTests.Storage;
 
 namespace Aictiq.IntegrationTests.Identity;
@@ -127,6 +128,44 @@ public sealed class CookieAuthTests(PostgresFixture postgres, GarageFixture gara
         using var browser = _context.Browser();
         var response = await browser.PostAsync("/api/v1/auth/refresh", content: null, ct);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task an_expired_access_cookie_on_an_organization_route_is_401_so_the_spa_refreshes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var email = "cookie-expired-org@test.local";
+        var owner = await _context.RegisterAsync(email);
+        using (var bearer = _context.ClientFor(owner))
+        {
+            (await bearer.PostAsJsonAsync("/api/v1/orgs",
+                new CreateOrganizationRequest("Expiry", "expiry-org", null, null), ct)).EnsureSuccessStatusCode();
+        }
+
+        using var browser = _context.Browser();
+        var login = await CookieLoginAsync(browser, email, ct);
+
+        // The browser drops the 15 minute access cookie and keeps only the refresh one.
+        // A 404 here read as "you are not a member" and the SPA never tried to refresh.
+        using var expired = _context.Browser();
+        expired.DefaultRequestHeaders.Add("Cookie",
+            $"{AuthCookies.RefreshCookieName}={CookieValue(login, AuthCookies.RefreshCookieName)}");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await expired.GetAsync("/api/v1/orgs/expiry-org/projects", ct)).StatusCode);
+        // No identity says nothing about which slugs exist: an unknown one answers the same.
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await expired.GetAsync("/api/v1/orgs/no-such-org/projects", ct)).StatusCode);
+
+        var refreshed = await expired.PostAsync("/api/v1/auth/refresh", content: null, ct);
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+
+        using var retried = _context.Browser();
+        Send(retried, refreshed);
+        Assert.Equal(HttpStatusCode.OK,
+            (await retried.GetAsync("/api/v1/orgs/expiry-org/projects", ct)).StatusCode);
+        // A signed-in stranger still cannot tell a real slug from an unknown one.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await retried.GetAsync("/api/v1/orgs/no-such-org/projects", ct)).StatusCode);
     }
 
     [Fact]
