@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { Bell, Menu, Search } from '@lucide/vue'
+import { Bell, Menu, Monitor, Moon, Search, Sun } from '@lucide/vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import KeyChip from '@/components/common/KeyChip.vue'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useCommandStore } from '@/composables/useCommands'
 import { useSessionStore } from '@/stores/session'
-import { useUiStore } from '@/stores/ui'
+import { useUiStore, type ThemePreference } from '@/stores/ui'
 import { createHubConnection } from '@/utils/realtime'
 
 /**
@@ -58,6 +66,17 @@ const currentTitle = computed(() => {
     .replaceAll('-', ' ')
     .replace(/^./, (letter) => letter.toUpperCase())
 })
+
+// The trigger shows the theme in effect, so `system` reads as whatever the OS resolved to.
+const themeOptions = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'system', label: 'System', icon: Monitor },
+] as const
+const themeModel = computed({
+  get: () => ui.theme,
+  set: (next: ThemePreference) => ui.setTheme(next),
+})
 const crumbs = computed(() => ['Aictiq', currentTitle.value].filter(Boolean))
 </script>
 
@@ -95,6 +114,30 @@ const crumbs = computed(() => ['Aictiq', currentTitle.value].filter(Boolean))
     </nav>
 
     <div class="flex-1" />
+
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-tour="theme-switcher"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring grid size-9 flex-none place-items-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
+        :aria-label="`Theme: ${ui.theme}`"
+      >
+        <Moon v-if="ui.resolvedTheme === 'dark'" class="size-4" aria-hidden="true" />
+        <Sun v-else class="size-4" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" class="w-40">
+        <DropdownMenuLabel class="font-label">Theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup v-model="themeModel">
+          <DropdownMenuRadioItem
+            v-for="option in themeOptions"
+            :key="option.value"
+            :value="option.value"
+          >
+            <component :is="option.icon" class="size-3.5" aria-hidden="true" />
+            {{ option.label }}
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
 
     <RouterLink
       to="/inbox"
