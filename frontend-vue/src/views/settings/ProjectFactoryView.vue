@@ -200,7 +200,8 @@ async function save() {
           placeholder="/srv/repos/aictiq"
         />
         <p class="text-muted-foreground text-xs">
-          A hint for operators; each runner resolves the path on its own machine.
+          Runners use this path when it lies inside one of their repository roots
+          (<code>aictiq runner root</code>); a runner's own <code>aictiq runner map</code> wins.
         </p>
       </div>
 

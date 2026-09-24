@@ -29,8 +29,9 @@ Before touching the VPS:
 
 1. Create or enable an agent under **Settings → Agents**, and give it access to the project.
 2. Open **Project settings → Factory**. Choose **Runner-local checkout**, set the default
-   branch, and optionally choose a default agent. The path hint is for people; every runner
-   still needs its own project-to-path mapping.
+   branch, and optionally choose a default agent. A runner uses the path hint when the path
+   lies inside one of its repository roots (`aictiq runner root`); otherwise it needs its own
+   project-to-path mapping (`aictiq runner map`).
 3. Alternatively, choose **GitHub binding** after connecting a repository under the
    project's **Integrations** settings. A run then receives a short-lived GitHub App
    installation credential for its clone and push.
@@ -87,13 +88,22 @@ secret. It is shown once. On the VPS:
 
 ```bash
 aictiq runner register --url https://aictiq.example.com --token jrn_…
-aictiq runner map ACME ~/src/YOUR-REPOSITORY
+aictiq runner root ~/src
 aictiq runner status
 ```
 
-`register` verifies the secret before saving it. `map` is needed only for projects whose
-repository source is **Runner-local checkout**. Repeat it for each local project key.
-`status` should show a valid registration, the chosen harness, and every required repository.
+`register` verifies the secret before saving it. `root` and `map` matter only for projects
+whose repository source is **Runner-local checkout**. With a root, the runner uses each
+project's **Path hint** from the web UI when that path lies inside the root, so a new project
+needs no runner change: clone it under the root and set its path hint. Use
+`aictiq runner map ACME /path/to/clone` instead when a clone lives outside every root or its
+path differs from the hint; a mapping always wins over the hint. `status` should show a valid
+registration, the chosen harness, and every required repository or root.
+
+The hint comes from the instance, so the runner only trusts it inside roots named on this
+machine. It resolves `~/`, `..` and symlinks before that check, and refuses a hinted directory
+whose enclosing git repository is outside the root. The runner reads `runner.json` again for
+each run, so new roots and mappings apply without a restart.
 
 ### `runner.json` reference
 
@@ -110,6 +120,7 @@ file as `0600`:
     "ACME": "/home/aictiq/src/aictiq",
     "WEB": "/home/aictiq/src/web"
   },
+  "repoRoots": ["/home/aictiq/src"],
   "attachments": {
     "maxCount": 25,
     "maxBytes": 26214400
@@ -118,8 +129,10 @@ file as `0600`:
 ```
 
 `url` and `token` are required. `name` is a local label. `workspaces` maps uppercase project
-keys to existing git clones. Prefer `aictiq runner register` and `aictiq runner map` over
-editing the file; re-registering after a secret rotation preserves existing mappings. Never
+keys to existing git clones. `repoRoots` lists directories under which a project's path hint
+is used when it has no `workspaces` entry. Prefer `aictiq runner register`, `aictiq runner map`
+and `aictiq runner root` over editing the file; re-registering after a secret rotation
+preserves existing mappings and roots. Never
 copy this file to a repository or a different organization.
 
 `attachments` limits how much committed item and comment evidence a run downloads beside its
@@ -266,7 +279,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | Symptom or failure | Meaning | Fix |
 | --- | --- | --- |
 | `harness-unavailable` | The run asked for Claude Code, Codex, or OpenCode, but that executable did not work on the runner's service `PATH`. | Run `aictiq runner status` as the service user. Install and sign in to the playbook's harness, regenerate the systemd unit from the correct shell, then start a new run. |
-| `no-local-repository` | A Runner-local project has no mapping on this runner, or the mapped path is not a git repository. | Clone the repository, run `aictiq runner map PROJECT_KEY /absolute/path`, and confirm it appears in `aictiq runner status`. |
+| `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then start a new run. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner. |

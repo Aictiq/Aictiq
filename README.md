@@ -92,7 +92,7 @@ identity you own:
 ```bash
 npm install -g @aictiq/cli
 aictiq runner register --url https://aictiq.example.com --token jrn_…
-aictiq runner map ACME ~/src/acme
+aictiq runner root ~/src      # clones under ~/src follow each project's path hint
 aictiq runner start          # or: aictiq runner install-service (systemd)
 ```
 

@@ -39,6 +39,7 @@ import {
   orgSettingsPath,
   projectDashboardPath,
   projectItemsPath,
+  projectSettingsPath,
   wikiPath,
 } from '@/router/paths'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -123,6 +124,16 @@ const project = computed<NavItem[]>(() => {
       to: hasProject ? wikiPath(slug!, projectKey!) : '/',
       tour: 'wiki-link',
     },
+    // Only admins can open project settings; the projects page gates its gear the same way.
+    ...(hasProject && projects.current?.role === 'admin'
+      ? [
+          {
+            label: 'Settings',
+            icon: Settings,
+            to: projectSettingsPath(slug!, projectKey!),
+          },
+        ]
+      : []),
   ]
 })
 

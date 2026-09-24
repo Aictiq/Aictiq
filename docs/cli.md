@@ -176,9 +176,11 @@ See the [factory guide](factory.md#3-register-and-start-the-runner) for the comp
 
 ```bash
 aictiq runner register --url https://aictiq.example.com --token jrn_… [--name factory-vps]
-aictiq runner map ACME ~/src/aictiq    # project key → local clone, for "local" repositories
+aictiq runner root ~/src               # use the web UI path hint for clones under ~/src
+aictiq runner root ~/src --remove
+aictiq runner map ACME ~/src/aictiq    # project key → local clone; wins over the path hint
 aictiq runner map ACME --remove
-aictiq runner status                  # registration, detected harnesses, mapped repositories
+aictiq runner status                  # registration, detected harnesses, mapped repositories and roots
 aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>]
 aictiq runner install-service [--parallel 2] # prints a systemd user unit
 ```

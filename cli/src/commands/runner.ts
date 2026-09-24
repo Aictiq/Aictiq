@@ -71,6 +71,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         ...(options.name ? { name: options.name } : existing?.name ? { name: existing.name } : {}),
         // Re-registering (a rotated secret) keeps the repository map someone built up.
         workspaces: existing?.workspaces ?? {},
+        repoRoots: existing?.repoRoots ?? [],
         attachments: existing?.attachments ?? { maxCount: DefaultAttachmentMaxCount, maxBytes: DefaultAttachmentMaxBytes },
       }
       writeRunnerConfig(config)
@@ -112,6 +113,32 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     })
 
   runner
+    .command('root')
+    .description(
+      "Trust the web UI's path hint for local projects whose clone is under this directory",
+    )
+    .argument('[path]', 'Directory that holds your clones (default: the current directory)')
+    .option('--remove', 'Stop trusting path hints under this directory')
+    .action((path: string | undefined, options: { remove?: boolean }) => {
+      const config = requireConfig()
+      const absolute = resolve(path ?? '.')
+      if (options.remove) {
+        config.repoRoots = config.repoRoots.filter((root) => resolve(root) !== absolute)
+      } else {
+        if (!existsSync(absolute))
+          throw new CliError(`${absolute} does not exist.`, ExitCode.Validation)
+        if (!config.repoRoots.some((root) => resolve(root) === absolute))
+          config.repoRoots.push(absolute)
+      }
+      writeRunnerConfig(config)
+      print(
+        options.remove
+          ? `Path hints under ${absolute} are no longer used.`
+          : `Path hints under ${absolute} are used for projects without a mapping.`,
+      )
+    })
+
+  runner
     .command('status')
     .description('Show the registration, detected harnesses and mapped repositories')
     .action(async () => {
@@ -133,7 +160,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       }
 
       if (globals().json) {
-        printJson({ url: config.url, registration, capabilities, workspaces: config.workspaces, attachments: config.attachments })
+        printJson({ url: config.url, registration, capabilities, workspaces: config.workspaces, repoRoots: config.repoRoots, attachments: config.attachments })
         return
       }
       print(
@@ -165,6 +192,12 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
               { header: 'REPOSITORY', value: ([, path]) => path },
             ]),
       )
+      print('')
+      print(
+        config.repoRoots.length === 0
+          ? 'No repository roots; path hints from the web UI are not used (`aictiq runner root <path>`).'
+          : renderTable(config.repoRoots, [{ header: 'REPOSITORY ROOT', value: (root) => root }]),
+      )
     })
 
   runner
@@ -190,8 +223,11 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           parallel,
           probe: () => probe(parallel),
           local,
-          execute: (run, hello, shutdown) =>
-            executeRun(run, {
+          execute: (run, hello, shutdown) => {
+            // Re-read per run, so a new mapping or root applies without restarting the
+            // runner. The secret stays the one this process started with.
+            const current = readRunnerConfig() ?? config
+            return executeRun(run, {
               client,
               hello,
               adapters: harnesses,
@@ -200,13 +236,15 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
               local,
               workspace: {
                 root: workspaceRoot,
-                repositories: config.workspaces,
+                repositories: current.workspaces,
+                repoRoots: current.repoRoots,
                 keep: options.keepWorkspaces === true,
                 mcpServer: mcpServerCommand(),
-                attachmentMaxCount: config.attachments.maxCount,
-                attachmentMaxBytes: config.attachments.maxBytes,
+                attachmentMaxCount: current.attachments.maxCount,
+                attachmentMaxBytes: current.attachments.maxBytes,
               },
-            }),
+            })
+          },
         })
 
         let interrupts = 0
