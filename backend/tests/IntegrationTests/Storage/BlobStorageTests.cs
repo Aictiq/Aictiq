@@ -125,13 +125,14 @@ public sealed class BlobStorageTests(GarageFixture garage)
         await UploadAsync(storage, key, "text/plain", "hello"u8.ToArray(), ct);
 
         // The URL is the credential; a stale one must be worthless. A real (rather than
-        // negative) TTL is used so this exercises the expiry path Garage actually takes,
-        // which is why it waits rather than signing something already in the past.
+        // negative) TTL is used so this exercises the expiry path Garage actually takes.
+        // Give the initial request enough time: SigV4 timestamps have second precision,
+        // so a one-second URL can expire before the first HTTP round trip finishes.
         var download = await storage.PresignDownloadAsync(
-            key, ttl: TimeSpan.FromSeconds(1), cancellationToken: ct);
+            key, ttl: TimeSpan.FromSeconds(5), cancellationToken: ct);
         Assert.Equal(HttpStatusCode.OK, (await Browser.GetAsync(download, ct)).StatusCode);
 
-        await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        await Task.Delay(TimeSpan.FromSeconds(6), ct);
 
         var response = await Browser.GetAsync(download, ct);
         // Garage rejects an expired signature with 400; AWS S3 uses 403. What matters is
