@@ -684,9 +684,11 @@ watch(
               <Plus class="size-4" />
             </button>
           </header>
+          <!-- `relative` keeps the cards' absolutely positioned sr-only labels inside this
+               scroller; without it they anchor to the viewport and stretch the page. -->
           <div
             v-if="!collapsed.has(column.name)"
-            class="min-h-24 flex-1 space-y-3 overflow-y-auto p-2"
+            class="relative min-h-24 flex-1 space-y-3 overflow-y-auto p-2"
           >
             <form
               v-if="draft?.column === column.name"
