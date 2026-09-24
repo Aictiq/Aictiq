@@ -39,7 +39,7 @@ jobs:
         env:
           # GitHub Pages project sites are served beneath the repository name.
           DOCS_BASE: /${{ github.event.repository.name }}/
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/.vitepress/dist
 
