@@ -13,7 +13,6 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aictiq.IntegrationTests.Analytics;
 
 [Trait("Category", "Analytics")]
-[Collection("postgres")]
 public sealed class SprintMetricsTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

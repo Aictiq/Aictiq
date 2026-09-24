@@ -32,6 +32,8 @@ export interface WorkItemComment {
   mentions: string[]
   reactions: CommentReaction[]
   revisions: CommentRevision[]
+  /** The first comment of the thread this one answers; null when it starts a thread. */
+  parentCommentId: string | null
 }
 
 export interface CommentPage {
@@ -46,8 +48,16 @@ const base = (slug: string, itemKey: string) => `/orgs/${slug}/items/${itemKey}/
 export const listComments = (slug: string, itemKey: string, page = 1) =>
   apiFetch<CommentPage>(`${base(slug, itemKey)}?page=${page}`)
 
-export const createComment = (slug: string, itemKey: string, bodyMarkdown: string) =>
-  apiFetch<WorkItemComment>(base(slug, itemKey), { method: 'POST', body: { bodyMarkdown } })
+export const createComment = (
+  slug: string,
+  itemKey: string,
+  bodyMarkdown: string,
+  parentCommentId: string | null = null,
+) =>
+  apiFetch<WorkItemComment>(base(slug, itemKey), {
+    method: 'POST',
+    body: { bodyMarkdown, parentCommentId },
+  })
 
 export const updateComment = (slug: string, itemKey: string, commentId: string, bodyMarkdown: string) =>
   apiFetch<WorkItemComment>(`${base(slug, itemKey)}/${commentId}`, { method: 'PATCH', body: { bodyMarkdown } })

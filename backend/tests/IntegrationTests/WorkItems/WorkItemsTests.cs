@@ -16,7 +16,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// numbering, workflow state, and hierarchy assertions are never coupled to another test.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class WorkflowTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]
@@ -80,7 +79,6 @@ public sealed class WorkflowTests(PostgresFixture postgres, GarageFixture garage
 }
 
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class WorkItemCoreTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]
@@ -207,7 +205,6 @@ public sealed class WorkItemCoreTests(PostgresFixture postgres, GarageFixture ga
 }
 
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class WorkItemHierarchyTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

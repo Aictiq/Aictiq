@@ -98,14 +98,18 @@ public sealed class AuthorizationFilterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task an_anonymous_caller_gets_404_as_well()
+    public async Task an_anonymous_caller_gets_401_whether_or_not_the_slug_exists()
     {
         var ct = TestContext.Current.CancellationToken;
         using var client = As(userId: null);
 
-        await AssertProblemAsync(
-            await client.GetAsync("/orgs/acme/whoami", ct),
-            HttpStatusCode.NotFound, ProblemTypes.NotAMember, ct);
+        // 401, not 404: an expired session must read as "sign in again" so the SPA
+        // refreshes. It is answered before the lookup, so slug probing still learns nothing.
+        var known = await client.GetAsync("/orgs/acme/whoami", ct);
+        var unknown = await client.GetAsync("/orgs/no-such-org/whoami", ct);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, known.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, unknown.StatusCode);
     }
 
     [Fact]

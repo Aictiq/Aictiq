@@ -222,6 +222,10 @@ namespace Aictiq.Modules.WorkItems.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<Guid?>("ParentCommentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_comment_id");
+
                     b.Property<NpgsqlTsVector>("Search")
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
@@ -231,6 +235,9 @@ namespace Aictiq.Modules.WorkItems.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_comments");
+
+                    b.HasIndex("ParentCommentId")
+                        .HasDatabaseName("ix_comments_parent_comment_id");
 
                     b.HasIndex("ItemId", "CreatedAt")
                         .HasDatabaseName("ix_comments_item_id_created_at");
@@ -1494,6 +1501,12 @@ namespace Aictiq.Modules.WorkItems.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_comments_items_item_id");
+
+                    b.HasOne("Aictiq.Modules.WorkItems.Domain.Comment", null)
+                        .WithMany()
+                        .HasForeignKey("ParentCommentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_comments_comments_parent_comment_id");
                 });
 
             modelBuilder.Entity("Aictiq.Modules.WorkItems.Domain.CommentReaction", b =>

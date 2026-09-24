@@ -18,14 +18,18 @@ public sealed record CommentRevisionView(Guid Id, string BodyMarkdown, string Bo
 public sealed record CommentView(Guid Id, CommentAuthorView Author, string BodyMarkdown, string BodyHtml,
     DateTimeOffset CreatedAt, DateTimeOffset? EditedAt, DateTimeOffset? DeletedAt,
     IReadOnlyList<string> Mentions, IReadOnlyList<CommentReactionView> Reactions,
-    IReadOnlyList<CommentRevisionView> Revisions);
-public sealed record CreateCommentRequest(string? BodyMarkdown);
+    IReadOnlyList<CommentRevisionView> Revisions, Guid? ParentCommentId = null);
+/// <param name="ParentCommentId">The comment being answered. A reply to a reply joins the
+/// same thread, under its first comment.</param>
+public sealed record CreateCommentRequest(string? BodyMarkdown, Guid? ParentCommentId = null);
 public sealed record UpdateCommentRequest(string? BodyMarkdown);
 public sealed record ReactToCommentRequest(string? Emoji);
 
 public static class CommentEndpoints
 {
-    private static readonly Regex Mention = new(@"(?<![\w@])@(?<name>[A-Za-z0-9][A-Za-z0-9-]{0,63})", RegexOptions.Compiled);
+    // Letters in any script: a mention of @IvanaKovačević must not stop at the "č".
+    private static readonly Regex Mention = new(@"(?<![\w@])@(?<name>[\p{L}\p{N}][\p{L}\p{N}-]{0,63})", RegexOptions.Compiled);
+    private static readonly Regex NotMentionable = new(@"[^\p{L}\p{N}-]+", RegexOptions.Compiled);
 
     public static IEndpointRouteBuilder MapCommentEndpoints(this IEndpointRouteBuilder api)
     {
@@ -58,11 +62,23 @@ public static class CommentEndpoints
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         if (Validate(request.BodyMarkdown) is { } invalid) return invalid;
+        Comment? thread = null;
+        if (request.ParentCommentId is { } parentId)
+        {
+            var parent = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == parentId && x.ItemId == item.Id, ct);
+            if (parent is null)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentCommentId"] = ["The comment being replied to is not on this item."] });
+            thread = parent.ParentCommentId is { } rootId
+                ? await db.Comments.AsNoTracking().FirstAsync(x => x.Id == rootId, ct)
+                : parent;
+            if (thread.DeletedAt is not null)
+                return Results.Problem("A deleted comment's thread cannot be replied to.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
+        }
         var markdown = request.BodyMarkdown!.Trim();
         var mentions = await ResolveMentionsAsync(markdown, item.ProjectId, access, directory, ct);
         var now = clock.GetUtcNow();
-        var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, AuthorId = user.UserId!, BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown), MentionedUserIds = mentions.ToArray(), CreatedAt = now };
-        comment.Added(item.ProjectId, mentions, now);
+        var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, ParentCommentId = thread?.Id, AuthorId = user.UserId!, BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown), MentionedUserIds = mentions.ToArray(), CreatedAt = now };
+        comment.Added(item, mentions, thread?.AuthorId, now);
         db.Comments.Add(comment);
         await ItemWatcherRules.AddAsync(db, item, user.UserId, ItemWatchReason.Commenter, now, ct);
         foreach (var mentionedUserId in mentions)
@@ -90,6 +106,7 @@ public static class CommentEndpoints
             db.CommentRevisions.Add(new CommentRevision { CommentId = comment.Id, BodyMarkdown = comment.BodyMarkdown, BodyHtml = comment.BodyHtml, EditedBy = user.UserId!, EditedAt = now });
             comment.BodyMarkdown = markdown; comment.BodyHtml = WorkItemEndpoints.Render(markdown);
             var mentions = await ResolveMentionsAsync(markdown, item.ProjectId, access, directory, ct);
+            comment.Mentioned(item, mentions.Except(comment.MentionedUserIds, StringComparer.Ordinal).ToArray(), now);
             comment.MentionedUserIds = mentions.ToArray();
             foreach (var mentionedUserId in mentions)
                 await ItemWatcherRules.AddAsync(db, item, mentionedUserId, ItemWatchReason.Mentioned, now, ct);
@@ -156,19 +173,27 @@ public static class CommentEndpoints
         var matched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var token in tokens)
         {
-            var candidates = people.Values.Where(person => MatchesMention(person.DisplayName, token)).Select(person => person.Id).Distinct().ToArray();
+            // The whole name first: "@Ana" is Ana when there is one, even beside an Ana Horvat.
+            var candidates = people.Values.Where(person => MatchesMention(MentionToken(person.DisplayName), token)).Select(person => person.Id).Distinct().ToArray();
+            if (candidates.Length == 0)
+                candidates = people.Values.Where(person => MatchesMention(FirstNameToken(person.DisplayName), token)).Select(person => person.Id).Distinct().ToArray();
             if (candidates.Length == 1) matched.Add(candidates[0]);
         }
         return matched.Order(StringComparer.Ordinal).ToArray();
     }
 
-    private static bool MatchesMention(string displayName, string token)
-    {
-        var compact = Regex.Replace(displayName, @"\s+", "");
-        return string.Equals(compact, token, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(compact.Replace(" ", "", StringComparison.Ordinal), token, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(compact.Split(' ', 2)[0], token, StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>
+    /// A token names someone by their whole display name with everything but letters, digits
+    /// and hyphens dropped (the picker writes "@AnaKovač" for "Ana Kovač"), or by their first
+    /// name alone. The caller drops a token that fits more than one person.
+    /// </summary>
+    private static string MentionToken(string displayName) => NotMentionable.Replace(displayName, "");
+
+    private static string FirstNameToken(string displayName) =>
+        MentionToken(displayName.Trim().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "");
+
+    private static bool MatchesMention(string candidate, string token) =>
+        candidate.Length > 0 && string.Equals(candidate, token, StringComparison.OrdinalIgnoreCase);
 
     private static async Task<List<CommentView>> ViewsAsync(WorkItemsDbContext db, IUserDirectory directory, string currentUserId, IReadOnlyList<Comment> comments, CancellationToken ct)
     {
@@ -184,8 +209,8 @@ public static class CommentEndpoints
                 .Select(x => new CommentReactionView(x.Key, x.Count(), x.Any(y => y.UserId == currentUserId))).ToArray();
             var history = revisions.Where(x => x.CommentId == comment.Id).Select(x => new CommentRevisionView(x.Id, x.BodyMarkdown, x.BodyHtml, x.EditedBy, x.EditedAt)).ToArray();
             return comment.DeletedAt is null
-                ? new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), comment.BodyMarkdown, comment.BodyHtml, comment.CreatedAt, comment.EditedAt, null, comment.MentionedUserIds, grouped, history)
-                : new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), "", "", comment.CreatedAt, comment.EditedAt, comment.DeletedAt, [], grouped, history);
+                ? new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), comment.BodyMarkdown, comment.BodyHtml, comment.CreatedAt, comment.EditedAt, null, comment.MentionedUserIds, grouped, history, comment.ParentCommentId)
+                : new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), "", "", comment.CreatedAt, comment.EditedAt, comment.DeletedAt, [], grouped, history, comment.ParentCommentId);
         }).ToList();
     }
 }

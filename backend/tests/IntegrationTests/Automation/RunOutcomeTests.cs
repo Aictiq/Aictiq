@@ -12,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aictiq.IntegrationTests.Automation;
 
 [Trait("Category", "RunOutcome")]
-[Collection("postgres")]
 public sealed class RunOutcomeTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "acme";

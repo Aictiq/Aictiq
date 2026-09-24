@@ -4,10 +4,10 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Aictiq.Modules.Identity.Endpoints;
 using Aictiq.IntegrationTests.Storage;
+using Aictiq.Api.Infrastructure;
 
 namespace Aictiq.IntegrationTests;
 
-[Collection("postgres")]
 public sealed class ApiSmokeTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;
@@ -75,6 +75,49 @@ public sealed class ApiSmokeTests(PostgresFixture postgres, GarageFixture garage
 
         Assert.False(response.Headers.Contains("Content-Security-Policy"));
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    /// <summary>
+    /// A plain-HTTP instance is a supported deployment (AICTIQ_URL=http://...), and
+    /// <c>upgrade-insecure-requests</c> would rewrite every same-origin asset request to
+    /// https on a host with no listener there - a blank page. Browsers exempt localhost
+    /// from the upgrade, so only a real hostname or address ever showed it.
+    /// </summary>
+    [Fact]
+    public void the_plain_http_policy_is_the_https_one_without_the_upgrade_directive()
+    {
+        Assert.Contains("upgrade-insecure-requests", SecurityHeadersMiddleware.ProductionCsp);
+        Assert.DoesNotContain("upgrade-insecure-requests", SecurityHeadersMiddleware.ProductionCspWithoutUpgrade);
+        Assert.Equal(
+            SecurityHeadersMiddleware.ProductionCsp,
+            SecurityHeadersMiddleware.ProductionCspWithoutUpgrade + "; upgrade-insecure-requests");
+    }
+
+    /// <summary>
+    /// The SPA signs out and rotates its cookie session with a POST that has no body -
+    /// in cookie mode both tokens are httpOnly, so there is nothing for it to send. An
+    /// inferred JSON body parameter used to make these two endpoints match
+    /// <c>application/json</c> only, so a bodyless POST matched nothing and fell through
+    /// to the API's 404 fallback: signing out left the cookies in place and silent
+    /// refresh could never succeed. Both must answer on their own terms instead.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/v1/auth/logout", HttpStatusCode.NoContent)]
+    [InlineData("/api/v1/auth/refresh", HttpStatusCode.Unauthorized)]
+    public async Task a_bodyless_post_reaches_the_endpoint_and_is_not_a_404(
+        string path, HttpStatusCode expected)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = _context.Anonymous();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, path);
+        // The CSRF header is what puts the API in cookie mode, which is the SPA's path.
+        request.Headers.Add("X-Aictiq-Request", "1");
+
+        var response = await client.SendAsync(request, ct);
+
+        Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(expected, response.StatusCode);
     }
 
     [Fact]

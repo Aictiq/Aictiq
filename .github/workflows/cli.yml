@@ -1,5 +1,8 @@
 name: cli
 
+permissions:
+  contents: read
+
 # Version-tag publication belongs to release.yml so the npm package, images and compose
 # bundle share one validated vX.Y.Z release. This workflow is the fast branch/PR check.
 on:
@@ -24,7 +27,7 @@ jobs:
 
       # Installs the pnpm version pinned in package.json's "packageManager" field, so
       # CI and local resolve identically (avoids pnpm-major lockfile drift).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: cli/package.json
 

@@ -52,6 +52,7 @@ public static class NotificationsModule
         services.AddScoped<NotificationEmailService>();
         services.AddScoped<IDomainEventHandler<SendEmailRequested>, SendEmailRequestedHandler>();
         services.AddScoped<IDomainEventHandler<CommentAdded>, CommentNotificationHandler>();
+        services.AddScoped<IDomainEventHandler<CommentMentionsAdded>, CommentMentionsNotificationHandler>();
         services.AddScoped<IDomainEventHandler<WorkItemTransitioned>, TransitionNotificationHandler>();
         services.AddScoped<IDomainEventHandler<WorkItemsDeleted>, NotificationsWorkItemsDeletedHandler>();
         services.AddScoped<IDomainEventHandler<ProjectDeleted>, NotificationsProjectDeletedHandler>();

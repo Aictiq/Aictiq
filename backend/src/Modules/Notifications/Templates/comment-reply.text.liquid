@@ -1,0 +1,9 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+{{ actorName }} replied to your comment on {{ itemKey }} - {{ itemTitle }}.
+{%- if excerpt != blank %}
+
+  {{ excerpt }}
+{%- endif %}
+
+Open it: {{ itemUrl }}

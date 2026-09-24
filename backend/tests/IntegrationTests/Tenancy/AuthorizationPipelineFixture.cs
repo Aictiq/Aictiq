@@ -1,10 +1,14 @@
 using System.Security.Claims;
+using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Aictiq.Api.Infrastructure;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
@@ -40,6 +44,10 @@ public sealed class AuthorizationPipelineFixture : IAsyncDisposable
         builder.WebHost.UseTestServer();
 
         builder.Services.AddRoutingCore();
+        // Only for the middleware's challenge of a caller with no identity; the principal
+        // itself comes from the header middleware below.
+        builder.Services.AddAuthentication(ChallengeOnly.Name)
+            .AddScheme<AuthenticationSchemeOptions, ChallengeOnly>(ChallengeOnly.Name, null);
         builder.Services.AddAuthorization();
         builder.Services.AddProblemDetails();
         builder.Services.AddHttpContextAccessor();
@@ -105,6 +113,17 @@ public sealed class AuthorizationPipelineFixture : IAsyncDisposable
     public HttpClient Client() => _app.GetTestClient();
 
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();
+
+    /// <summary>Authenticates nobody; its challenge is the stock 401.</summary>
+    private sealed class ChallengeOnly(
+        IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
+        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        public const string Name = "challenge-only";
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
+            Task.FromResult(AuthenticateResult.NoResult());
+    }
 
     private sealed class FakeOrganizations : IOrganizationLookup
     {

@@ -1,5 +1,8 @@
 name: release
 
+permissions:
+  contents: read
+
 # A release is intentionally one tag and one workflow. It validates the tag before any
 # package is published, then stamps the same SemVer into the API, Workers, CLI, compose
 # bundle and GitHub Release. Create tags from the fully tested main commit only.
@@ -52,7 +55,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend-vue/package.json
 
@@ -102,7 +105,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend-vue/package.json
 
@@ -124,20 +127,22 @@ jobs:
           set -euo pipefail
           for project in Api Workers; do
             name=$(echo "$project" | tr '[:upper:]' '[:lower:]')
-            tags='${{ needs.validate.outputs.version }};sha-${GITHUB_SHA::12}'
+            tags="$VERSION;sha-${GITHUB_SHA::12}"
             # A release candidate must never replace a stable install following latest.
-            if [[ '${{ needs.validate.outputs.version }}' != *-* ]]; then tags="$tags;latest"; fi
+            if [[ "$VERSION" != *-* ]]; then tags="$tags;latest"; fi
             dotnet publish "backend/src/$project" \
               -c Release \
               -t:PublishContainer \
-              -p:Version='${{ needs.validate.outputs.version }}' \
-              -p:ContainerRuntimeIdentifiers='linux-x64;linux-arm64' \
+              -p:Version="$VERSION" \
+              -p:ContainerRuntimeIdentifiers='"linux-x64;linux-arm64"' \
               -p:ContainerRegistry=ghcr.io \
-              -p:ContainerRepository='${{ needs.validate.outputs.owner }}/'"$name" \
-              -p:ContainerImageTags="$tags"
+              -p:ContainerRepository="$OWNER/$name" \
+              -p:ContainerImageTags="\"$tags\""
           done
         env:
           DOTNET_NOLOGO: "true"
+          VERSION: ${{ needs.validate.outputs.version }}
+          OWNER: ${{ needs.validate.outputs.owner }}
 
   cli:
     needs: [validate, check]
@@ -150,7 +155,7 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: cli/package.json
       - uses: actions/setup-node@v4
@@ -161,15 +166,39 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # npm trusted publishing uses the GitHub OIDC token. Configure the npm package's
-      # trusted publisher once; no long-lived NPM_TOKEN is stored in this repository.
-      - name: Publish to npm
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1. Node 24 normally bundles a newer
+      # npm, but upgrade defensively rather than fail with a confusing ENEEDAUTH.
+      - name: Ensure npm supports trusted publishing
         shell: bash
         run: |
-          if [[ '${{ needs.validate.outputs.version }}' == *-* ]]; then
-            npm publish --access public --provenance --tag next
+          set -euo pipefail
+          current=$(npm --version)
+          if [ "$(printf '%s\n' 11.5.1 "$current" | sort -V | head -1)" != 11.5.1 ]; then
+            npm install -g npm@^11.5.1
+          fi
+          npm --version
+
+      # npm trusted publishing exchanges the GitHub OIDC token for a short-lived publish
+      # credential, so no NPM_TOKEN secret exists anywhere. The package's trusted publisher
+      # on npmjs.com must name Aictiq/Aictiq and the workflow file release.yml. npm adds
+      # provenance automatically when the repository is public; it is not forced here
+      # because provenance is rejected for private repositories.
+      - name: Publish to npm
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Re-running a partly failed release must not fail on an already published version.
+          if npm view "@aictiq/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "@aictiq/cli@$VERSION is already on npm; skipping publish."
+            exit 0
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            npm publish --access public --tag next
           else
-            npm publish --access public --provenance
+            npm publish --access public
           fi
 
   bundle:

@@ -1,5 +1,8 @@
 name: dependency-audit
 
+permissions:
+  contents: read
+
 # Dependency findings are merge blockers. The weekly run also catches newly disclosed
 # CVEs in unchanged lockfiles.
 on:
@@ -44,7 +47,7 @@ jobs:
           node-version: 24
 
       # pnpm, not npm: the lockfile is pnpm's, and `npm audit` on it audits nothing.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend-vue/package.json
 

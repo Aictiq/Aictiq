@@ -12,7 +12,9 @@ import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { Bold, Code, List, ListTodo, Minus, Paperclip, Plus, Table as TableIcon, Trash2 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import UserAvatar from '@/components/common/UserAvatar.vue'
 import { useToast } from '@/composables/useToast'
+import { mentionToken, type Mentionable, searchMentionables } from '@/lib/mentions'
 import { planLimitMessage } from '@/lib/billing'
 import { ApiError } from '@/utils/api'
 
@@ -29,19 +31,95 @@ const props = withDefaults(
     compact?: boolean
     upload?: (file: File) => Promise<string>
     accept?: string
+    /** People an "@" can tag. Without it, typing "@" is just typing. */
+    mentionables?: Mentionable[]
+    /** Put the cursor at the end as soon as the editor exists, e.g. in a reply box just opened. */
+    autofocus?: boolean
   }>(),
-  { placeholder: 'Write a description…', disabled: false, compact: false, upload: undefined, accept: undefined },
+  {
+    placeholder: 'Write a description…',
+    disabled: false,
+    compact: false,
+    upload: undefined,
+    accept: undefined,
+    mentionables: undefined,
+    autofocus: false,
+  },
 )
 const emit = defineEmits<{ 'update:modelValue': [markdown: string]; blur: [] }>()
 const toast = useToast()
 const uploading = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
-defineExpose({ uploading: computed(() => uploading.value > 0) })
+defineExpose({
+  uploading: computed(() => uploading.value > 0),
+  focus: () => editor.value?.commands.focus('end'),
+})
+
+// ── Mentions ───────────────────────────────────────────────────────────────────────
+// "@" followed by the start of a name opens a list of the people who can see this item.
+// Picking one writes "@AnaKovač" as plain text: the Markdown stays readable anywhere, and
+// the server resolves the same token back to the person when the comment is saved.
+const root = ref<HTMLElement | null>(null)
+const mention = ref<{ from: number; to: number; query: string; left: number; top: number } | null>(null)
+const mentionIndex = ref(0)
+const mentionMatches = computed(() =>
+  mention.value && props.mentionables ? searchMentionables(props.mentionables, mention.value.query) : [],
+)
+watch(mentionMatches, () => (mentionIndex.value = 0))
+
+function trackMention() {
+  const current = editor.value
+  if (!current || !props.mentionables?.length || !current.isFocused) return void (mention.value = null)
+  const { $from, empty } = current.state.selection
+  if (!empty || $from.parent.type.spec.code) return void (mention.value = null)
+  const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
+  const match = /(?:^|[\s(])@([\p{L}\p{N}-]{0,40})$/u.exec(before)
+  if (!match) return void (mention.value = null)
+  const query = match[1]!
+  const from = $from.pos - query.length - 1
+  const at = current.view.coordsAtPos(from)
+  const box = root.value?.getBoundingClientRect()
+  mention.value = {
+    from,
+    to: $from.pos,
+    query,
+    left: box ? at.left - box.left : 0,
+    top: box ? at.bottom - box.top + 4 : 0,
+  }
+}
+
+function pickMention(person: Mentionable) {
+  const range = mention.value
+  if (!range) return
+  mention.value = null
+  editor.value
+    ?.chain()
+    .focus()
+    .insertContentAt({ from: range.from, to: range.to }, `@${mentionToken(person.name)} `)
+    .run()
+}
+
+/** Arrow keys, Enter and Tab drive the open list; true means the editor must not also act. */
+function mentionKey(event: KeyboardEvent): boolean {
+  const matches = mentionMatches.value
+  if (!mention.value || matches.length === 0) return false
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    mentionIndex.value = (mentionIndex.value + step + matches.length) % matches.length
+    return true
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    pickMention(matches[mentionIndex.value]!)
+    return true
+  }
+  return false
+}
 
 const editor = useEditor({
   content: props.modelValue,
   contentType: 'markdown',
   editable: !props.disabled,
+  autofocus: props.autofocus ? 'end' : false,
   extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Markdown],
   editorProps: {
     attributes: {
@@ -51,7 +129,19 @@ const editor = useEditor({
     // ProseMirror binds Escape to "select parent node" and marks the key handled, which a
     // surrounding dialog reads as "do not close". Escape in a text box means "leave", so
     // the editor steps aside: true here skips ProseMirror without preventing the default.
-    handleDOMEvents: { keydown: (_view, event) => event.key === 'Escape' },
+    // With the mention list open, Escape closes the list and nothing else.
+    handleDOMEvents: {
+      keydown: (_view, event) => {
+        if (event.key !== 'Escape') return false
+        if (mention.value) {
+          mention.value = null
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        return true
+      },
+    },
+    handleKeyDown: (_view, event) => mentionKey(event),
     handlePaste: (_view, event) => insertFiles(event.clipboardData?.files),
     handleDrop: (view, event) => {
       const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
@@ -59,8 +149,13 @@ const editor = useEditor({
     },
   },
   onUpdate: ({ editor: current }) => emit('update:modelValue', current.getMarkdown()),
+  onSelectionUpdate: trackMention,
+  onTransaction: trackMention,
   // Leaving the editor to pick a file is not "done editing" - a blur-save would race the upload.
-  onBlur: () => { if (uploading.value === 0) emit('blur') },
+  onBlur: () => {
+    mention.value = null
+    if (uploading.value === 0) emit('blur')
+  },
 })
 
 /** True when the event carried files and the editor took ownership of it. */
@@ -134,7 +229,7 @@ onBeforeUnmount(() => editor.value?.destroy())
 </script>
 
 <template>
-  <div class="border-input bg-background rounded-md border">
+  <div ref="root" class="border-input bg-background relative rounded-md border">
     <div class="border-border flex items-center gap-0.5 border-b p-1" role="toolbar" aria-label="Formatting">
       <button
         v-for="action in actions"
@@ -185,5 +280,27 @@ onBeforeUnmount(() => editor.value?.destroy())
       </template>
     </div>
     <EditorContent :editor="editor" />
+    <ul
+      v-if="mention && mentionMatches.length"
+      class="bg-popover text-popover-foreground absolute z-50 w-64 overflow-hidden rounded-md border py-1 text-sm shadow-md"
+      :style="{ left: `${mention.left}px`, top: `${mention.top}px` }"
+      role="listbox"
+      aria-label="People to mention"
+      data-testid="mention-list"
+    >
+      <li
+        v-for="(person, index) in mentionMatches"
+        :key="person.id"
+        role="option"
+        :aria-selected="index === mentionIndex"
+        class="flex cursor-pointer items-center gap-2 px-2 py-1.5"
+        :class="index === mentionIndex && 'bg-accent text-accent-foreground'"
+        @mousedown.prevent="pickMention(person)"
+        @mouseenter="mentionIndex = index"
+      >
+        <UserAvatar :name="person.name" :src="person.avatarSrc" :is-agent="person.isAgent" size="sm" />
+        <span class="truncate">{{ person.name }}</span>
+      </li>
+    </ul>
   </div>
 </template>

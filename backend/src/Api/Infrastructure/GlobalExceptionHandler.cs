@@ -79,8 +79,11 @@ public sealed class GlobalExceptionHandler(
 
         if (status == StatusCodes.Status500InternalServerError)
         {
+            // Request targets can contain encoded line breaks; keep each event on one line.
+            var method = httpContext.Request.Method.Replace("\r", "\\r").Replace("\n", "\\n");
+            var path = httpContext.Request.Path.Value?.Replace("\r", "\\r").Replace("\n", "\\n");
             logger.LogError(exception, "Unhandled exception for {Method} {Path}",
-                httpContext.Request.Method, httpContext.Request.Path);
+                method, path);
         }
 
         httpContext.Response.StatusCode = status;

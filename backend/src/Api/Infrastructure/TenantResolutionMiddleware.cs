@@ -1,6 +1,7 @@
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
+using Microsoft.AspNetCore.Authentication;
 
 namespace Aictiq.Api.Infrastructure;
 
@@ -20,6 +21,11 @@ namespace Aictiq.Api.Infrastructure;
 /// Membership is verified here rather than in each endpoint, and a non-member gets a
 /// <b>404</b>: a 403 would confirm that an organization with that slug exists, which is
 /// exactly what a stranger probing slugs wants to learn.
+///
+/// A caller with no identity at all gets a <b>401</b> instead, before the slug is looked
+/// up, so it reveals nothing about which organizations exist. This is the answer the SPA
+/// needs when its access cookie expires: a 401 makes it rotate the session and retry,
+/// while a 404 read as "you are not a member" and left the user stranded until a reload.
 /// </summary>
 public sealed class TenantResolutionMiddleware(RequestDelegate next)
 {
@@ -37,6 +43,12 @@ public sealed class TenantResolutionMiddleware(RequestDelegate next)
 
         if (!string.IsNullOrEmpty(slug))
         {
+            if (user.UserId is null)
+            {
+                await context.ChallengeAsync();
+                return;
+            }
+
             var organization = await organizations.FindBySlugAsync(slug, context.RequestAborted);
             if (organization is null)
             {

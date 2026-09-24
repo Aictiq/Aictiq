@@ -11,7 +11,7 @@ import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { flattenBacklog, rankMoveForDrop } from '@/lib/backlog'
 import { vNearEnd } from '@/lib/nearEnd'
-import { allowsParent, childTypes, requiresParent, typeLabels } from '@/lib/hierarchy'
+import { allowsParent, childTypes, opensOnCreate, requiresParent, typeLabels } from '@/lib/hierarchy'
 import { useItemModal } from '@/composables/useItemModal'
 import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryParams'
 import { useShortcut } from '@/composables/useShortcuts'
@@ -167,16 +167,17 @@ async function startChild(parent: WorkItem) {
 }
 
 async function submit(type: WorkItemType, title: string, parentId: string | null) {
-  if (!title.trim() || saving.value) return false
+  if (!title.trim() || saving.value) return null
   saving.value = true
   try {
     const created = await createItem(props.slug, props.projectKey, { type, title: title.trim(), teamId: props.teamId, parentId })
     toast.success(`${created.key} created.`)
     await invalidate()
-    return true
+    if (opensOnCreate(created.type)) itemModal.open(created.key)
+    return created
   } catch (error) {
     toast.error(error, 'The item could not be created.')
-    return false
+    return null
   } finally {
     saving.value = false
   }
@@ -186,17 +187,19 @@ async function submitQuick() {
     toast.info(`A ${typeLabels[quickType.value].toLowerCase()} needs a parent.`, 'Pick one, or add it from the parent row’s + button.')
     return
   }
-  if (await submit(quickType.value, quickTitle.value, quickParentId.value || null)) {
+  const created = await submit(quickType.value, quickTitle.value, quickParentId.value || null)
+  if (created) {
     quickTitle.value = ''
-    quickInput.value?.focus()
+    if (!opensOnCreate(created.type)) quickInput.value?.focus()
   }
 }
 async function submitChild() {
   const draft = childDraft.value
   if (!draft) return
-  if (await submit(draft.type, draft.title, draft.parent.id)) {
+  const created = await submit(draft.type, draft.title, draft.parent.id)
+  if (created) {
     draft.title = ''
-    childInput.value?.[0]?.focus()
+    if (!opensOnCreate(created.type)) childInput.value?.[0]?.focus()
   }
 }
 

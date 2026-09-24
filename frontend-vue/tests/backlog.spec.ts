@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { flattenBacklog, rankMoveForDrop } from '@/lib/backlog'
 import type { WorkItem } from '@/api/items'
-import { allowsParent, childTypes, requiresParent } from '@/lib/hierarchy'
+import { allowsParent, childTypes, opensOnCreate, requiresParent } from '@/lib/hierarchy'
 
 function item(id: string, parentId: string | null = null): WorkItem {
   return {
@@ -47,5 +47,13 @@ describe('item hierarchy', () => {
     expect(childTypes('bug')).toEqual(['task'])
     expect(childTypes('task')).toEqual([])
     expect(requiresParent('feature')).toBe(true)
+  })
+
+  it('opens only new stories and bugs for their details', () => {
+    expect(opensOnCreate('story')).toBe(true)
+    expect(opensOnCreate('bug')).toBe(true)
+    expect(opensOnCreate('epic')).toBe(false)
+    expect(opensOnCreate('feature')).toBe(false)
+    expect(opensOnCreate('task')).toBe(false)
   })
 })

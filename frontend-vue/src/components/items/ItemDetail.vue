@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useRouter } from 'vue-router'
-import { Bot, Check, Copy, GitBranch, Save, Trash2, X } from '@lucide/vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Bot, Check, Copy, GitBranch, Reply, Save, Trash2, X } from '@lucide/vue'
 import {
   attachmentContentTypes,
   attachmentUrl,
@@ -10,7 +10,7 @@ import {
   settleAttachments,
   uploadAttachment,
 } from '@/api/attachments'
-import { createComment, listComments } from '@/api/comments'
+import { createComment, listComments, type WorkItemComment } from '@/api/comments'
 import { itemHistory } from '@/api/history'
 import {
   deleteItem,
@@ -57,6 +57,7 @@ import type { TimeTrackingItem } from '@/api/time-tracking'
 import { useItemModal } from '@/composables/useItemModal'
 import { useCommands } from '@/composables/useCommands'
 import { since } from '@/lib/claims'
+import { mentionToken, type Mentionable } from '@/lib/mentions'
 import { factoryRunPath } from '@/router/paths'
 import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useOrganizationsStore } from '@/stores/organizations'
@@ -71,6 +72,7 @@ import { toApiError } from '@/utils/api'
 const props = defineProps<{ slug: string; projectKey: string; itemKey: string; modal?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
+const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
 const tab = ref<'comments' | 'activity' | 'relations'>('comments')
@@ -136,6 +138,21 @@ const selectedStateId = ref('')
 const changingStatus = ref(false)
 const statusError = ref<string | null>(null)
 const commentItems = computed(() => comments.data.value?.items ?? [])
+/**
+ * Jira-style threads: each top-level comment with its replies beneath it, oldest first. A
+ * reply whose first comment is not on this page still shows, as a thread of its own.
+ */
+const threads = computed(() => {
+  const ids = new Set(commentItems.value.map((entry) => entry.id))
+  const replies = new Map<string, WorkItemComment[]>()
+  const roots: WorkItemComment[] = []
+  for (const entry of commentItems.value) {
+    if (entry.parentCommentId && ids.has(entry.parentCommentId))
+      replies.set(entry.parentCommentId, [...(replies.get(entry.parentCommentId) ?? []), entry])
+    else roots.push(entry)
+  }
+  return roots.map((root) => ({ root, replies: replies.get(root.id) ?? [] }))
+})
 const historyItems = computed(() => history.data.value?.items ?? [])
 const relationItems = computed(() => relations.data.value ?? [])
 const linkItems = computed(() => links.data.value ?? [])
@@ -162,6 +179,17 @@ const projectMembers = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'project-members']),
   queryFn: () => listProjectMembers(props.slug, props.projectKey),
 })
+// Everyone who can see the project can be tagged; the API resolves tags against the same set.
+const mentionables = computed<Mentionable[]>(() =>
+  (projectMembers.data.value ?? [])
+    .filter((member) => member.userId !== session.user?.id)
+    .map((member) => ({
+      id: member.userId,
+      name: member.displayName,
+      avatarSrc: avatarUrl(member.userId, member.avatarKey),
+      isAgent: member.isAgent,
+    })),
+)
 const membersById = computed(
   () => new Map((projectMembers.data.value ?? []).map((member) => [member.userId, member])),
 )
@@ -300,7 +328,8 @@ const isDirty = computed(() => {
   return (
     title.value.trim() !== current.title ||
     description.value !== (current.descriptionMarkdown ?? '') ||
-    comment.value.trim() !== ''
+    comment.value.trim() !== '' ||
+    reply.value.trim() !== ''
   )
 })
 // The modal closes by changing `?item=` on the same route, which is a route *update* rather
@@ -340,6 +369,7 @@ function discardAndLeave() {
     description.value = current.descriptionMarkdown ?? ''
   }
   comment.value = ''
+  closeReply()
   answerLeave(true)
 }
 const titleInput = ref<HTMLTextAreaElement | null>(null)
@@ -430,6 +460,7 @@ async function destroy() {
     title.value = current.title
     description.value = current.descriptionMarkdown ?? ''
     comment.value = ''
+    closeReply()
     for (const key of doomed) client.removeQueries({ queryKey: [props.slug, key] })
     await invalidateLists(current)
     await client.invalidateQueries({ queryKey: [props.slug, props.projectKey] })
@@ -602,6 +633,78 @@ async function addComment() {
     sending.value = false
   }
 }
+// ── Replies ───────────────────────────────────────────────────────────────────────
+// One reply box at a time, under the thread it answers. Replying to a reply tags that
+// reply's author, since the thread's first author is the only one told otherwise.
+const replyTo = ref<{ threadId: string; commentId: string } | null>(null)
+const reply = ref('')
+const replyEditor = ref<{ uploading: boolean; focus: () => void } | null>(null)
+const replySending = ref(false)
+const replyError = ref<string | null>(null)
+const pendingReplyFiles = new Set<string>()
+async function uploadToReply(file: File) {
+  const id = await uploadAttachment(props.slug, props.projectKey, file)
+  pendingReplyFiles.add(id)
+  return attachmentUrl(props.slug, id)
+}
+function startReply(entry: WorkItemComment) {
+  const threadId = entry.parentCommentId ?? entry.id
+  if (replyTo.value?.commentId === entry.id) return void replyEditor.value?.focus()
+  // A draft already under way is kept when the same thread is answered again.
+  const keepDraft = replyTo.value?.threadId === threadId && reply.value.trim() !== ''
+  const reopen = replyTo.value !== null
+  replyTo.value = { threadId, commentId: entry.id }
+  replyError.value = null
+  if (!keepDraft)
+    reply.value =
+      entry.parentCommentId && entry.author.id !== session.user?.id
+        ? `@${mentionToken(entry.author.displayName)} `
+        : ''
+  // A box that is already open keeps its editor, which the autofocus will not move again.
+  if (reopen) void nextTick(() => replyEditor.value?.focus())
+}
+function closeReply() {
+  replyTo.value = null
+  reply.value = ''
+  replyError.value = null
+  pendingReplyFiles.clear()
+}
+async function sendReply() {
+  const target = replyTo.value
+  const body = reply.value.trim()
+  if (!target || !body || replySending.value || replyEditor.value?.uploading) return
+  replySending.value = true
+  replyError.value = null
+  try {
+    const created = await createComment(props.slug, props.itemKey, body, target.threadId)
+    const pending = [...pendingReplyFiles]
+    closeReply()
+    await settleAttachments(props.slug, pending, body, { commentId: created.id })
+    await client.invalidateQueries({ queryKey: [props.slug, props.itemKey, 'comments'] })
+  } catch (error) {
+    const problem = toApiError(error)
+    replyError.value = problem.problem?.detail ?? problem.title
+  } finally {
+    replySending.value = false
+  }
+}
+
+// An email links to `#comment-<id>`: once the comments are in, bring that one into view.
+const highlighted = ref<string | null>(null)
+watch(
+  [commentItems, () => route.hash],
+  ([items, hash]) => {
+    const id = /^#comment-(.+)$/.exec(hash)?.[1]
+    if (!id || highlighted.value === id || !items.some((entry) => entry.id === id)) return
+    tab.value = 'comments'
+    highlighted.value = id
+    void nextTick(() =>
+      document.getElementById(`comment-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+    )
+  },
+  { immediate: true },
+)
+
 async function copy(value: string) {
   await navigator.clipboard.writeText(value)
 }
@@ -871,9 +974,10 @@ function logged(updated: TimeTrackingItem) {
             ref="commentEditor"
             v-model="comment"
             compact
-            placeholder="Add a comment - paste or drop images"
+            placeholder="Add a comment - @ to tag someone, paste or drop images"
             :upload="uploadToComment"
             :accept="acceptedFiles"
+            :mentionables="mentionables"
           />
           <div class="flex justify-end">
             <button
@@ -884,24 +988,92 @@ function logged(updated: TimeTrackingItem) {
             </button>
           </div>
         </form>
-        <article v-for="entry in commentItems" :key="entry.id" class="border-border border-b py-3">
-          <div class="flex items-baseline gap-2">
-            <strong class="text-sm">{{ entry.author.displayName }}</strong>
-            <time
-              class="text-muted-foreground text-xs"
-              :datetime="entry.createdAt"
-              :title="new Date(entry.createdAt).toLocaleString()"
-              >{{ since(entry.createdAt) }}</time
-            >
-            <span
-              v-if="entry.editedAt"
-              class="text-muted-foreground text-xs"
-              :title="`Edited ${new Date(entry.editedAt).toLocaleString()}`"
-              >(edited)</span
-            >
-          </div>
-          <Markdown :source="entry.bodyMarkdown" class="mt-1" />
-        </article>
+        <div
+          v-for="thread in threads"
+          :key="thread.root.id"
+          class="border-border border-b py-3"
+          data-testid="comment-thread"
+        >
+          <article
+            v-for="entry in [thread.root, ...thread.replies]"
+            :id="`comment-${entry.id}`"
+            :key="entry.id"
+            class="rounded-md px-2 py-2 transition-colors"
+            :class="[
+              entry.id !== thread.root.id && 'border-border ml-6 mt-1 border-l-2 pl-3',
+              highlighted === entry.id && 'bg-primary/10',
+            ]"
+            data-testid="comment"
+          >
+            <div class="flex items-center gap-2">
+              <UserAvatar
+                :name="entry.author.displayName"
+                :is-agent="entry.author.isAgent"
+                :src="avatarUrl(entry.author.id, entry.author.avatarKey)"
+                size="sm"
+              />
+              <strong class="text-sm">{{ entry.author.displayName }}</strong>
+              <time
+                class="text-muted-foreground text-xs"
+                :datetime="entry.createdAt"
+                :title="new Date(entry.createdAt).toLocaleString()"
+                >{{ since(entry.createdAt) }}</time
+              >
+              <span
+                v-if="entry.editedAt"
+                class="text-muted-foreground text-xs"
+                :title="`Edited ${new Date(entry.editedAt).toLocaleString()}`"
+                >(edited)</span
+              >
+            </div>
+            <p v-if="entry.deletedAt" class="text-muted-foreground mt-1 text-sm italic">
+              This comment was deleted.
+            </p>
+            <template v-else>
+              <Markdown :source="entry.bodyMarkdown" class="mt-1" />
+              <button
+                v-if="!thread.root.deletedAt && !project.data.value?.isArchived"
+                type="button"
+                class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
+                :aria-label="`Reply to ${entry.author.displayName}`"
+                @click="startReply(entry)"
+              >
+                <Reply class="size-3.5" aria-hidden="true" /> Reply
+              </button>
+            </template>
+          </article>
+          <form
+            v-if="replyTo?.threadId === thread.root.id"
+            class="mt-2 ml-6 space-y-2 pl-3"
+            data-testid="reply-form"
+            @submit.prevent="sendReply"
+            @keydown.meta.enter.prevent="sendReply"
+            @keydown.ctrl.enter.prevent="sendReply"
+          >
+            <MarkdownEditor
+              ref="replyEditor"
+              v-model="reply"
+              compact
+              autofocus
+              :placeholder="`Reply to ${thread.root.author.displayName}`"
+              :upload="uploadToReply"
+              :accept="acceptedFiles"
+              :mentionables="mentionables"
+            />
+            <p v-if="replyError" class="text-destructive text-xs">{{ replyError }}</p>
+            <div class="flex justify-end gap-2">
+              <button type="button" class="rounded border px-3 py-1.5 text-sm" @click="closeReply">
+                Cancel
+              </button>
+              <button
+                class="bg-primary text-primary-foreground rounded px-3 py-1.5 text-sm disabled:opacity-50"
+                :disabled="replySending || replyEditor?.uploading || !reply.trim()"
+              >
+                {{ replyEditor?.uploading ? 'Uploading…' : 'Reply' }}
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
       <section v-else-if="tab === 'activity'" class="mt-4 space-y-3">
         <div v-for="entry in historyItems" :key="entry.eventId" class="text-sm">
@@ -1301,7 +1473,7 @@ function logged(updated: TimeTrackingItem) {
           <DialogTitle>Save changes to {{ currentItem.key }}?</DialogTitle>
           <DialogDescription>
             {{
-              comment.trim() && title.trim() === currentItem.title
+              (comment.trim() || reply.trim()) && title.trim() === currentItem.title
                 ? 'Your comment has not been sent. Discarding throws it away.'
                 : 'The title or description has changes that are not saved yet.'
             }}

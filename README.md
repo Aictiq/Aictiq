@@ -7,6 +7,7 @@
 [![backend](https://github.com/aictiq/aictiq/actions/workflows/backend.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/backend.yml)
 [![web](https://github.com/aictiq/aictiq/actions/workflows/web.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/web.yml)
 [![CodeQL](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml/badge.svg)](https://github.com/aictiq/aictiq/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aictiq/aictiq/badge)](https://scorecard.dev/viewer/?uri=github.com/aictiq/aictiq)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)
@@ -24,16 +25,53 @@ Self-hosted, AGPL-3.0, one `docker compose up`.
 
 ## Quick start
 
+Install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin
+first; `docker compose version` must report v2 or newer. Then run:
+
 ```bash
 git clone https://github.com/aictiq/aictiq && cd aictiq/deploy
 cp .env.example .env
-$EDITOR .env          # every CHANGE_ME; the file shows how to generate each secret
+$EDITOR .env          # replace every CHANGE_ME; generation commands are in the file
+docker compose config --quiet
 docker compose up --build -d
-open http://localhost
+docker compose ps
 ```
 
-The images build from source, so the host needs only Docker. Compose refuses to start
-rather than invent a default for a secret. See [Getting started](docs/getting-started.md).
+The first run builds the API and the web app from source, which takes several minutes and
+wants 4 GB of RAM and 20 GB of disk. Later starts reuse the images and take seconds.
+
+Open <http://localhost> in a browser. On Linux, run `xdg-open http://localhost`; on macOS,
+run `open http://localhost`. Sign in with `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from
+your `.env` file.
+
+### Letting other people reach it
+
+`http://localhost` only works from the machine Docker runs on. To put an instance in front
+of public users, set **both** of these in `.env` to the address their browsers will use:
+
+```dotenv
+AICTIQ_URL=http://192.168.1.10
+AICTIQ_ALLOWED_HOSTS=192.168.1.10;localhost
+```
+
+`AICTIQ_ALLOWED_HOSTS` is semicolon-separated, and host names only - no scheme, no port.
+Setting `AICTIQ_URL` while leaving the allowed hosts at `localhost` is the easy mistake and
+a quiet one: every request comes back as a bare `400 Bad Request`, nothing is written to
+the log, and `docker compose ps` still reports the API as healthy, because its own health
+check calls itself as `localhost`.
+
+Plain HTTP is fine on a trusted network. For anything reachable from the internet, point a
+domain at the host and use `AICTIQ_URL=https://aictiq.example.com` instead - Caddy then
+obtains and renews a certificate on its own. See [Self-hosting](docs/self-host.md).
+
+`.env.example` lists every Compose setting, including optional SMTP, OAuth, telemetry,
+realtime, and rate-limit settings. Leave optional values at their defaults for a local
+installation. `docker compose config --quiet` checks the file before Docker builds the
+images. Compose stops when a required secret still has no value.
+
+The persistent data volumes have fixed names: `aictiq-postgres`, `aictiq-garage-meta`, and
+`aictiq-garage-data`. Docker retains them after `docker compose down`. See
+[Getting started](docs/getting-started.md).
 
 For development, one command starts Postgres, object storage, the API, the workers and the
 Vite dev server through Aspire:

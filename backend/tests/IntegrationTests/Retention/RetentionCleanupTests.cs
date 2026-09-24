@@ -10,7 +10,6 @@ namespace Aictiq.IntegrationTests.Retention;
 /// The Workers-side retention sweep. Rows are seeded and asserted with raw SQL because
 /// the point is what the tables look like afterwards, not what any endpoint returns.
 /// </summary>
-[Collection("postgres")]
 public sealed class RetentionCleanupTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

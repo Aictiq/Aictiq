@@ -18,7 +18,6 @@ namespace Aictiq.IntegrationTests.Tenancy;
 /// whole reason <c>is_lead</c> is a flag rather than a project role.
 /// </summary>
 [Trait("Category", "Tenancy")]
-[Collection("postgres")]
 public sealed class TeamsTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

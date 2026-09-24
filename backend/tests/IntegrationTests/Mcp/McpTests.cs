@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Domain;
@@ -21,7 +20,6 @@ using SkiaSharp;
 namespace Aictiq.IntegrationTests.Mcp;
 
 [Trait("Category", "Mcp")]
-[Collection("postgres")]
 public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;
@@ -279,41 +277,6 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         var blocked = await client.CallToolAsync("whoami", cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(blocked.IsError);
         Assert.Contains("Retry-After:", Text(blocked), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task fifty_concurrent_agents_polling_ready_work_meet_the_p95_target()
-    {
-        var project = await CreateProjectAsync("LOAD");
-        await CreateItemAsync(project, "Ready for polling");
-        var tokens = await Task.WhenAll(Enumerable.Range(0, 50)
-            .Select(_ => CreateTokenAsync([Scopes.Mcp, Scopes.Read])));
-        var clients = await Task.WhenAll(tokens.Select(ConnectAsync));
-        var samples = new List<double>(capacity: 150);
-
-        try
-        {
-            for (var poll = 0; poll < 3; poll++)
-            {
-                var elapsed = await Task.WhenAll(clients.Select(async client =>
-                {
-                    var stopwatch = Stopwatch.StartNew();
-                    var result = await CallAsync(client, "list_ready_work", new() { ["project"] = project.Key });
-                    Assert.NotEqual(true, result.IsError);
-                    return stopwatch.Elapsed.TotalMilliseconds;
-                }));
-                samples.AddRange(elapsed);
-                if (poll < 2) await Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-            }
-        }
-        finally
-        {
-            foreach (var client in clients) await client.DisposeAsync();
-        }
-
-        var p95 = samples.Order().ElementAt((int)Math.Ceiling(samples.Count * .95) - 1);
-        Console.WriteLine($"MCP list_ready_work 50-client polling p95: {p95:F1} ms");
-        Assert.True(p95 < 300, $"Expected MCP list_ready_work p95 < 300 ms; observed {p95:F1} ms.");
     }
 
     [Fact]

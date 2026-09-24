@@ -42,7 +42,7 @@ import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useToast } from '@/composables/useToast'
 import { vNearEnd } from '@/lib/nearEnd'
 import { destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
-import { typeLabels } from '@/lib/hierarchy'
+import { opensOnCreate, typeLabels } from '@/lib/hierarchy'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -535,6 +535,7 @@ async function submitDraft(column: { name: string; stateIds: string[] }) {
     await client.invalidateQueries({
       queryKey: ['board', slug.value, projectKey.value, teamId.value],
     })
+    if (opensOnCreate(created.type)) itemModal.open(created.key)
   } catch (error) {
     toast.error(error, 'The item could not be created.')
   } finally {
@@ -683,9 +684,11 @@ watch(
               <Plus class="size-4" />
             </button>
           </header>
+          <!-- `relative` keeps the cards' absolutely positioned sr-only labels inside this
+               scroller; without it they anchor to the viewport and stretch the page. -->
           <div
             v-if="!collapsed.has(column.name)"
-            class="min-h-24 flex-1 space-y-3 overflow-y-auto p-2"
+            class="relative min-h-24 flex-1 space-y-3 overflow-y-auto p-2"
           >
             <form
               v-if="draft?.column === column.name"

@@ -1,0 +1,11 @@
+# Every path has an owner, so a pull request always arrives with a review request
+# attached rather than waiting for someone to notice it. Add more owners here as the
+# maintainer set grows; the last matching pattern wins, so put narrow rules below.
+*                       @BlagoCuljak
+
+# Changes here alter what CI enforces and who can merge, so they are never incidental
+# to a feature branch.
+/.github/               @BlagoCuljak
+/SECURITY.md            @BlagoCuljak
+/LICENSE                @BlagoCuljak
+/TRADEMARK.md           @BlagoCuljak

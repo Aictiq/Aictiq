@@ -6,7 +6,6 @@ using Aictiq.Modules.WorkItems.Endpoints;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class WatchersTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

@@ -7,7 +7,6 @@ using Aictiq.IntegrationTests.Storage;
 namespace Aictiq.IntegrationTests.Identity;
 
 [Trait("Category", "Auth")]
-[Collection("postgres")]
 public sealed class AuthFlowTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

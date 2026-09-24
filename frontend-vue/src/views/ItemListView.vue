@@ -130,10 +130,11 @@ function open(item: WorkItem) {
 }
 async function create() {
   if (!title.value.trim()) return
-  await createItem(props.slug, props.projectKey, { type: 'bug', title: title.value.trim() })
+  const created = await createItem(props.slug, props.projectKey, { type: 'bug', title: title.value.trim() })
   title.value = ''
   creating.value = false
   await client.invalidateQueries({ queryKey: [props.slug, props.projectKey, 'items'] })
+  open(created)
 }
 async function saveView() {
   const name = window.prompt('Name this view')

@@ -15,7 +15,6 @@ namespace Aictiq.IntegrationTests.Integrations;
 /// received every organization's events on the instance.
 /// </summary>
 [Trait("Category", "Integrations")]
-[Collection("postgres")]
 public sealed class WebhookFanoutTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

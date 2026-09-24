@@ -10,7 +10,6 @@ using Aictiq.SharedKernel.Authorization;
 namespace Aictiq.IntegrationTests.WorkItems;
 
 [Trait("Category", "Planning")]
-[Collection("postgres")]
 public sealed class PortfolioTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

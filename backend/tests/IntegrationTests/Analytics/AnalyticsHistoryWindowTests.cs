@@ -21,7 +21,6 @@ namespace Aictiq.IntegrationTests.Analytics;
 /// what a report shows and never prunes the source.
 /// </summary>
 [Trait("Category", "Analytics")]
-[Collection("postgres")]
 public sealed class AnalyticsHistoryWindowTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "history-co";

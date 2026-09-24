@@ -14,7 +14,6 @@ namespace Aictiq.IntegrationTests.WorkItems;
 /// has no operator for - every claim failed with a 500 and nothing noticed.
 /// </summary>
 [Trait("Category", "WorkItems")]
-[Collection("postgres")]
 public sealed class ClaimTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

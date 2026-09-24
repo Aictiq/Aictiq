@@ -22,7 +22,6 @@ namespace Aictiq.IntegrationTests.Billing;
 /// "expiry never charges a card" is an assertion about recorded calls rather than a hope.
 /// </summary>
 [Trait("Category", "Billing")]
-[Collection("postgres")]
 public sealed class HostedOfferTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "hosted-co";
@@ -282,7 +281,6 @@ public sealed class HostedOfferTests(PostgresFixture postgres, GarageFixture gar
 /// the Plan page has nothing to sell, and no quota applies.
 /// </summary>
 [Trait("Category", "Billing")]
-[Collection("postgres")]
 public sealed class SelfHostedOfferTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "self-hosted-co";
@@ -351,7 +349,6 @@ public sealed class SelfHostedOfferTests(PostgresFixture postgres, GarageFixture
 /// what the organization may do.
 /// </summary>
 [Trait("Category", "Billing")]
-[Collection("postgres")]
 public sealed class FoundingOfferTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private const string Slug = "founding-co";

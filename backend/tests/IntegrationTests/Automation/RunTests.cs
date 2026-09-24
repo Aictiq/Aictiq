@@ -264,7 +264,6 @@ public abstract class RunTestBase(PostgresFixture postgres, GarageFixture garage
 }
 
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
 {
     // An idle claim long-polls; a short poll keeps "nothing to claim" from costing 25 s a test.
@@ -571,7 +570,6 @@ public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : R
 }
 
 [Trait("Category", "Automation")]
-[Collection("postgres")]
 public sealed class RunLogLimitTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
 {
     protected override Action<IDictionary<string, string?>>? Configure => settings =>

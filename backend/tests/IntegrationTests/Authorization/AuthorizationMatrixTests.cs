@@ -5,7 +5,6 @@ using Aictiq.IntegrationTests.Storage;
 
 namespace Aictiq.IntegrationTests.Authorization;
 
-[Collection("postgres")]
 public sealed class AuthorizationMatrixTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

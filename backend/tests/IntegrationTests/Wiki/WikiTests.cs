@@ -23,7 +23,6 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aictiq.IntegrationTests.Wiki;
 
 [Trait("Category", "Wiki")]
-[Collection("postgres")]
 public sealed class WikiTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;

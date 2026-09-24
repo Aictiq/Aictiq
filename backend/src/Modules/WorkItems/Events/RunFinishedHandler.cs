@@ -123,7 +123,7 @@ public sealed class RunFinishedHandler(
         };
         // The comment's own event carries the run's news to watchers through the outbox;
         // the column above is the replay guard, unrelated to it.
-        comment.Added(item.ProjectId, mentionedUserIds: [], now);
+        comment.Added(item, mentionedUserIds: [], threadAuthorId: null, now);
         db.Comments.Add(comment);
 
         db.ItemHistory.Add(new ItemHistory

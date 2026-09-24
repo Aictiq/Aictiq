@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -38,6 +39,40 @@ public sealed record AuthResponse(
 
 public static class AuthEndpoints
 {
+    /// <summary>
+    /// The refresh token a non-browser client puts in the request body.
+    ///
+    /// Read by hand rather than bound as a <c>RefreshRequest?</c> parameter. An inferred
+    /// JSON body parameter makes the endpoint match <c>application/json</c> only, so a
+    /// POST with no body - which is exactly what the SPA sends to sign out and to rotate
+    /// a cookie session, because there is nothing for it to send - matched no endpoint
+    /// and fell through to the API's 404 fallback in Program.cs. Signing out then never
+    /// cleared the cookies and silent refresh never succeeded.
+    ///
+    /// Returns null when there is no JSON body, which leaves "no token presented" to the
+    /// caller to interpret: a required-field problem for refresh, and a no-op for logout.
+    /// </summary>
+    private static async Task<string?> ReadRefreshTokenAsync(
+        HttpRequest request, CancellationToken cancellationToken)
+    {
+        if (request.ContentLength is null or 0 || !request.HasJsonContentType())
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = await request.ReadFromJsonAsync<RefreshRequest>(cancellationToken);
+            return payload?.RefreshToken;
+        }
+        catch (JsonException)
+        {
+            // A body we cannot parse carries no token. Treated as none rather than as a
+            // 500, so a malformed request gets the same answer as an empty one.
+            return null;
+        }
+    }
+
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder api)
     {
         var group = api.MapGroup("/auth").WithTags("Auth").RequireRateLimiting("auth");
@@ -147,7 +182,6 @@ public static class AuthEndpoints
         });
 
         group.MapPost("/refresh", async (
-            RefreshRequest? request,
             HttpContext http,
             string? mode,
             ITokenService tokenService,
@@ -159,7 +193,7 @@ public static class AuthEndpoints
             // In cookie mode the caller has no way to send the token - it is httpOnly.
             var presented = useCookies
                 ? http.Request.Cookies[AuthCookies.RefreshCookieName]
-                : request?.RefreshToken;
+                : await ReadRefreshTokenAsync(http.Request, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(presented))
             {
@@ -202,7 +236,6 @@ public static class AuthEndpoints
         // Not RequireAuthorization: signing out must work even when the access token has
         // already expired, and it must still clear the cookies.
         group.MapPost("/logout", async (
-            RefreshRequest? request,
             HttpContext http,
             string? mode,
             ITokenService tokenService,
@@ -211,7 +244,7 @@ public static class AuthEndpoints
             var useCookies = AuthCookies.UseCookies(http.Request, mode);
             var presented = useCookies
                 ? http.Request.Cookies[AuthCookies.RefreshCookieName]
-                : request?.RefreshToken;
+                : await ReadRefreshTokenAsync(http.Request, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(presented))
             {

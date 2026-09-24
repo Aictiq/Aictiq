@@ -163,12 +163,15 @@ Release notes call out any breaking configuration changes before the migration n
 
 ## Backups
 
-The state worth keeping lives in three volumes: `aictiq_pgdata` (everything relational),
-`aictiq_garage-meta` and `aictiq_garage-data` (uploaded files). The scripts below stop the stack, archive both halves and restore them.
+The state lives in three fixed Docker volumes: `aictiq-postgres` (everything relational),
+`aictiq-garage-meta`, and `aictiq-garage-data` (uploaded files). Docker keeps them when
+you run `docker compose down`. Archive all three before an upgrade:
 
 ```bash
 docker compose down
-docker run --rm -v aictiq_pgdata:/v -v "$PWD":/out alpine tar czf /out/pgdata.tgz -C /v .
+docker run --rm -v aictiq-postgres:/v -v "$PWD":/out alpine tar czf /out/postgres.tgz -C /v .
+docker run --rm -v aictiq-garage-meta:/v -v "$PWD":/out alpine tar czf /out/garage-meta.tgz -C /v .
+docker run --rm -v aictiq-garage-data:/v -v "$PWD":/out alpine tar czf /out/garage-data.tgz -C /v .
 ```
 
 ## Troubleshooting
