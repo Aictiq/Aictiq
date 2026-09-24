@@ -1,5 +1,6 @@
 import { RunnerHttpError, RunnerNetworkError } from './client.js'
 import type { RunnerClient } from './client.js'
+import type { Floor } from './floor.js'
 import type { ClaimedRun, RunnerCapabilities, RunnerHello } from './types.js'
 
 /** Every harness the CLI has an adapter for, offered when none is detected (see below). */
@@ -12,6 +13,15 @@ export interface RunnerLoopOptions {
   execute: (run: ClaimedRun, hello: RunnerHello, shutdown: AbortSignal) => Promise<unknown>
   local: (message: string) => void
   backoffMs?: (attempt: number) => number
+  /**
+   * Shared by every organization this machine serves, so their runs never execute at the
+   * same time. Absent, the loop answers only to its own `parallel`.
+   */
+  floor?: Floor
+  /** This loop's place on the floor: one key per organization. */
+  floorKey?: string
+  /** Called once the instance has said who this runner is. */
+  onHello?: (hello: RunnerHello) => void
 }
 
 export class RunnerRevokedError extends Error {
@@ -60,6 +70,7 @@ export class RunnerLoop {
     let capabilities = await this.options.probe()
     const hello = await this.retrying(() => client.hello(capabilities))
     if (!hello) return
+    this.options.onHello?.(hello)
     local(
       `Runner "${hello.name}" connected to ${client.baseUrl} (${hello.organizationSlug}); harnesses: ${
         capabilities.harnesses.map((h) => h.name).join(', ') || 'none detected'
@@ -78,9 +89,15 @@ export class RunnerLoop {
       })()
     }, hello.heartbeatIntervalSeconds * 1000)
 
+    const { floor } = this.options
+    const floorKey = this.options.floorKey ?? client.baseUrl
     try {
       let attempt = 0
       while (!this.stopping) {
+        if (floor) {
+          await floor.turn(floorKey, this.claimAbort.signal)
+          if (this.stopping) break
+        }
         const free = this.options.parallel - this.active.size
         if (free <= 0) {
           await this.waitForSlot()
@@ -112,6 +129,8 @@ export class RunnerLoop {
           continue
         }
         if (!claimed) continue
+        if (floor && !floor.enter(floorKey) && !(await this.handBack(claimed, floor, floorKey)))
+          continue
 
         local(`Claimed ${claimed.itemKey} (run ${claimed.runId}, ${claimed.harness})`)
         const execution = this.options
@@ -125,6 +144,7 @@ export class RunnerLoop {
               )
           })
           .finally(() => {
+            floor?.leave(floorKey)
             this.active.delete(execution)
             this.wake?.()
           })
@@ -138,6 +158,36 @@ export class RunnerLoop {
     }
 
     if (this.revoked) throw this.revoked
+  }
+
+  /**
+   * A run claimed while another organization took the floor. It goes back to the queue;
+   * true only when it could not be given back and has now waited for the floor instead,
+   * so the caller executes it.
+   */
+  private async handBack(run: ClaimedRun, floor: Floor, key: string): Promise<boolean> {
+    const { client, local } = this.options
+    try {
+      await client.release(run.runId)
+      local(
+        `Gave ${run.itemKey} back to the queue: another organization has runs executing on this machine`,
+      )
+      return false
+    } catch (error) {
+      if (error instanceof RunnerHttpError && error.revoked) {
+        this.revoke(error)
+        return false
+      }
+      // A problem document means the instance answered about the run: it was cancelled or
+      // swept meanwhile and is no longer ours. A bare 404 or a network failure means the
+      // run is still ours (an instance without the release route): wait, then execute it.
+      if (error instanceof RunnerHttpError && error.problem?.type) return false
+      local(
+        `Could not give ${run.itemKey} back (${error instanceof Error ? error.message : String(error)}); it starts when the other organization's runs finish`,
+      )
+      while (!floor.enter(key)) await floor.turn(key)
+      return true
+    }
   }
 
   private revoke(error: RunnerHttpError): void {

@@ -19,6 +19,8 @@ export interface RunnerCapabilities {
   arch: string | null
   cliVersion: string | null
   maxParallel: number
+  /** The same for every organization this machine serves; groups them in the web UI, authorizes nothing. */
+  machineId?: string
 }
 
 export interface RunnerHello {

@@ -176,11 +176,13 @@ See the [factory guide](factory.md#3-register-and-start-the-runner) for the comp
 
 ```bash
 aictiq runner register --url https://aictiq.example.com --token jrn_… [--name factory-vps]
-aictiq runner root ~/src               # use the web UI path hint for clones under ~/src
-aictiq runner root ~/src --remove
-aictiq runner map ACME ~/src/aictiq    # project key → local clone; wins over the path hint
-aictiq runner map ACME --remove
-aictiq runner status                  # registration, detected harnesses, mapped repositories and roots
+                                      # another organization's secret adds a profile
+aictiq runner root ~/src [--org <slug>]  # use the web UI path hint for clones under ~/src
+aictiq runner root ~/src --remove [--org <slug>]
+aictiq runner map ACME ~/src/aictiq [--org <slug>]  # project key → local clone; wins over the path hint
+aictiq runner map ACME --remove [--org <slug>]
+aictiq runner remove <org>            # stop running for one organization on this machine
+aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
 aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>]
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
@@ -191,8 +193,17 @@ only hands over runs the machine can execute. Each run gets
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
 MCP configuration sit beside it, outside anything the agent could commit. The harness runs
 there as the user who started the runner, with `AICTIQ_URL`, `AICTIQ_TOKEN` (the run's own
-agent token, revoked when the run ends) and `AICTIQ_ITEM` in its environment. There is no
-sandbox: **one runner is one trust domain**.
+agent token, revoked when the run ends) and `AICTIQ_ITEM` in its environment. The runner's own
+`AICTIQ_*` variables are removed first. There is no sandbox: **one OS user is one trust
+domain**.
+
+One machine can run for several organizations. Each has a profile in `runner.json` with its
+own secret, `workspaces` and `repoRoots`, and `--org` picks the profile for `map` and `root`
+once there is more than one. `start` polls every profile. Runs of different organizations never
+execute at the same time, and `--parallel` applies within one organization. `start` reads
+`runner.json` every few seconds, so a profile added with `register` connects, and one dropped
+with `remove` stops, without a restart. See
+[one machine, several organizations](factory.md#one-machine-several-organizations).
 
 Committed item attachments (including comment attachments) are downloaded with the run's
 short-lived agent token into `<run-dir>/attachments/`, outside `repo/`. `prompt.md` names
@@ -205,7 +216,8 @@ The runner streams the log (tokens redacted), heartbeats the run and the item, s
 harness on a cancel or at the run's time limit (SIGTERM to its process group, SIGKILL ten
 seconds later), and reports the outcome with the last pull request URL the harness printed
 (or `gh pr view` of the branch). The first SIGINT/SIGTERM stops claiming and waits for runs
-in flight; a second cancels them. A disabled, deleted or rotated runner exits with code 5.
+in flight; a second cancels them. A disabled, deleted or rotated runner stops that
+organization's profile; the process exits with code 5 once no profile works.
 
 ## Development
 

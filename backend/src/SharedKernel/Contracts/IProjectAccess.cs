@@ -19,6 +19,9 @@ namespace Aictiq.SharedKernel.Contracts;
 /// </summary>
 public sealed record ProjectRef(Guid Id, string Key, string Name, bool IsArchived);
 
+/// <summary>An organization the user belongs to, and the role they hold there.</summary>
+public sealed record OrganizationMembershipRef(OrganizationRef Organization, OrgRole Role);
+
 public interface IProjectAccess
 {
     Task<OrgRole?> GetOrgRoleAsync(
@@ -97,4 +100,15 @@ public interface IProjectAccess
     Task<bool> CanOperateFactoryAsync(
         string userId, Guid organizationId, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
+
+    /// <summary>
+    /// Every organization the user belongs to, with their role there - for the rare read that
+    /// is about one person across organizations, such as the runners they registered
+    /// elsewhere. Uncached, so a membership removed a moment ago is already gone. The caller
+    /// still scopes each organization it reads with its own tenant; this only says which ones
+    /// the person may be asked about. Empty by default: a missing module lists nothing.
+    /// </summary>
+    Task<IReadOnlyList<OrganizationMembershipRef>> ListOrganizationsAsync(
+        string userId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<OrganizationMembershipRef>>([]);
 }

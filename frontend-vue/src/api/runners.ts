@@ -21,6 +21,8 @@ export interface RunnerCapabilities {
   arch: string | null
   cliVersion: string | null
   maxParallel: number
+  /** The same for every organization one machine serves; only groups them for display. */
+  machineId?: string | null
 }
 
 export interface Runner {
@@ -44,10 +46,47 @@ export interface RunnerIssued {
   secret: string
 }
 
+/** One of the organizations a machine already runs for, and its runner there. */
+export interface RunnerMachineOrganization {
+  slug: string
+  name: string
+  runnerId: string
+  runnerName: string
+}
+
+/**
+ * A machine the caller already runs for other organizations they administer: their own runners
+ * there, one entry per machine however many organizations it serves.
+ */
+export interface RunnerMachine {
+  /** Its most recently seen runner; what `sameMachineAs` names. */
+  runnerId: string
+  name: string
+  capabilities: RunnerCapabilities | null
+  lastSeenAt: string | null
+  isOnline: boolean
+  /** This organization already has a runner on the same machine. */
+  isConnectedHere: boolean
+  organizations: RunnerMachineOrganization[]
+}
+
 export const listRunners = (slug: string) => apiFetch<Runner[]>(`/orgs/${slug}/runners`)
+
+export const listRunnerMachinesElsewhere = (slug: string) =>
+  apiFetch<RunnerMachine[]>(`/orgs/${slug}/runners/elsewhere`)
 
 export const registerRunner = (slug: string, name: string) =>
   apiFetch<RunnerIssued>(`/orgs/${slug}/runners`, { method: 'POST', body: { name } })
+
+/**
+ * Registers a machine that already runs for another organization. It gets its own secret here;
+ * pasted on the machine, it becomes one more profile there. The name defaults to the machine's.
+ */
+export const registerRunnerOnMachine = (slug: string, sameMachineAs: string, name?: string) =>
+  apiFetch<RunnerIssued>(`/orgs/${slug}/runners`, {
+    method: 'POST',
+    body: name ? { name, sameMachineAs } : { sameMachineAs },
+  })
 
 /**
  * No version to echo: the runner rewrites its own row on every heartbeat, so a version token

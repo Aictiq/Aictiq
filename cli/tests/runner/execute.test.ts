@@ -70,6 +70,22 @@ describe('executeRun', () => {
       .flatMap((r) => (r.body as { chunks: LogChunk[] }).chunks)
       .sort((a, b) => a.seq - b.seq)
 
+  it('passes the harness none of the runner’s own AICTIQ_ variables, only the run’s', async () => {
+    process.env.AICTIQ_RUNNER_TOKEN = 'jrn_other_org_secret_value'
+    process.env.AICTIQ_CONFIG_HOME = '/somewhere/else'
+    try {
+      options.adapters.fake = scriptAdapter(`
+        console.log('inherited ' + Object.keys(process.env).filter((k) => k.startsWith('AICTIQ_')).sort().join(','))
+        console.log('RESULT ok')
+      `)
+      await executeRun(claimedRun(), options)
+    } finally {
+      delete process.env.AICTIQ_RUNNER_TOKEN
+      delete process.env.AICTIQ_CONFIG_HOME
+    }
+    expect(logLines().map((c) => c.text)).toContain('inherited AICTIQ_ITEM,AICTIQ_ORG,AICTIQ_RUN,AICTIQ_TOKEN,AICTIQ_URL')
+  })
+
   it('runs the harness in the workspace, streams its log and reports success with the pull request', async () => {
     options.adapters.fake = scriptAdapter(`
       let prompt = ''

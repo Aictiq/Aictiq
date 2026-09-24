@@ -103,13 +103,20 @@ public static class RunnerCredential
 /// the dispatcher matches runs against <see cref="Harnesses"/>, so the shape is a contract between
 /// the CLI and the server, not an implementation detail of either.
 /// </summary>
+/// <param name="MachineId">
+/// A random id the CLI keeps in its <c>runner.json</c>, the same for every organization that
+/// machine is registered with. It only groups one person's runners into machines for display
+/// ("use a runner I already have"); nothing is authorized by it, because a runner could
+/// report any value.
+/// </param>
 public sealed record RunnerCapabilities(
     int V,
     IReadOnlyList<RunnerHarness> Harnesses,
     string? Os,
     string? Arch,
     string? CliVersion,
-    int MaxParallel);
+    int MaxParallel,
+    string? MachineId = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);

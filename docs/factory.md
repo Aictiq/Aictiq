@@ -105,6 +105,50 @@ machine. It resolves `~/`, `..` and symlinks before that check, and refuses a hi
 whose enclosing git repository is outside the root. The runner reads `runner.json` again for
 each run, so new roots and mappings apply without a restart.
 
+### One machine, several organizations
+
+A developer who works for several clients can run all of them from one machine. Each
+organization registers the machine as its own runner with its own secret. In an organization
+with no runner yet, **Use a runner I already have** lists the runners you registered in your
+other organizations where you are an Owner or Admin. A machine that runs for several of them
+appears once. Pick one, and the command it gives you adds this organization as one more profile
+on that machine:
+
+```bash
+aictiq runner register --url https://aictiq.example.com --token jrn_…   # adds a profile
+aictiq runner root ~/clients/globex --org globex
+aictiq runner status                                                     # every organization
+```
+
+A running `aictiq runner start` or service picks up the new profile within a few seconds, with
+no restart. What the runner can separate, it does:
+
+- **Separate credentials.** Each profile keeps its own `jrn_` secret. The instance still ties
+  each secret to one organization, and each run gets an agent token for that run's
+  organization only.
+- **Separate repositories.** `workspaces` and `repoRoots` belong to each profile. A path hint
+  from one organization is never resolved under another organization's roots, and a project
+  key used in two organizations maps to two different clones.
+- **One organization at a time.** Runs of one organization can run side by side
+  (`--parallel`); runs of two organizations never do. This keeps an agent from reading another
+  organization's run token from the process table, finding its checkout under the workspace
+  root, or pushing with its GitHub token. The machine polls every organization while idle. If
+  two runs arrive together, it gives one back to its queue, and it takes that run again as soon
+  as the machine is free. After a run, the organization that just ran waits two seconds before
+  it claims again, so that one busy queue cannot keep the others waiting.
+- **No inherited Aictiq settings.** The harness gets none of the runner's own `AICTIQ_*`
+  environment variables, only the run's.
+
+What a profile cannot separate is the operating-system user. Every organization's agent runs
+as that user, so it can read that user's files, including `runner.json` with the other
+organizations' secrets, their clones, and the harness and `git` sign-ins. Connect only
+organizations you trust equally. For clients that must not see each other, use a separate OS
+user or VM for each client, each with its own `runner.json` (see
+[security](security.md#factory-runners-and-prompts)).
+
+`aictiq runner remove <org>` drops one organization from the machine. Disable or delete its
+runner in that organization too, because the secret keeps working until you do.
+
 ### `runner.json` reference
 
 The default path is `~/.config/aictiq/runner.json`. `AICTIQ_CONFIG_HOME` or
@@ -113,27 +157,39 @@ file as `0600`:
 
 ```json
 {
-  "url": "https://aictiq.example.com",
-  "token": "jrn_…",
+  "machineId": "4d1c7f2e-9b1a-4c3e-8f5d-2a6b7c8d9e0f",
   "name": "factory-vps-1",
-  "workspaces": {
-    "ACME": "/home/aictiq/src/aictiq",
-    "WEB": "/home/aictiq/src/web"
-  },
-  "repoRoots": ["/home/aictiq/src"],
   "attachments": {
     "maxCount": 25,
     "maxBytes": 26214400
-  }
+  },
+  "profiles": [
+    {
+      "organization": "acme",
+      "url": "https://aictiq.example.com",
+      "token": "jrn_…",
+      "workspaces": {
+        "ACME": "/home/aictiq/src/aictiq",
+        "WEB": "/home/aictiq/src/web"
+      },
+      "repoRoots": ["/home/aictiq/src"]
+    }
+  ]
 }
 ```
 
-`url` and `token` are required. `name` is a local label. `workspaces` maps uppercase project
-keys to existing git clones. `repoRoots` lists directories under which a project's path hint
-is used when it has no `workspaces` entry. Prefer `aictiq runner register`, `aictiq runner map`
-and `aictiq runner root` over editing the file; re-registering after a secret rotation
-preserves existing mappings and roots. Never
-copy this file to a repository or a different organization.
+Each profile is one organization: `url` and `token` are required, and `organization` is the
+slug the instance reported on hello. `workspaces` maps uppercase project keys to existing git
+clones. `repoRoots` lists directories under which a project's path hint is used when it has no
+`workspaces` entry. Both apply only to that profile's runs. `machineId` is random. The runner
+reports it to every organization so the web UI can show this machine once; it authorizes
+nothing. `name` is a local label, and `attachments` applies to every profile.
+
+Prefer `aictiq runner register`, `aictiq runner map` and `aictiq runner root` (with `--org`
+once there are several profiles) over editing the file. Re-registering an organization after a
+secret rotation keeps that profile's mappings and roots. A file written before profiles existed,
+with `url` and `token` at the top level, is read as one profile and rewritten in this shape on
+the next `start`. Never copy this file into a repository.
 
 `attachments` limits how much committed item and comment evidence a run downloads beside its
 checkout (25 files / 25 MiB by default; zero disables it). The runner records skipped or failed

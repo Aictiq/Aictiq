@@ -25,7 +25,25 @@ public sealed record RunnerView(
 /// <param name="Secret">Returned exactly once. Aictiq keeps only its hash.</param>
 public sealed record RunnerIssuedView(RunnerView Runner, string Secret);
 
-public sealed record CreateRunnerRequest(string? Name);
+/// <param name="SameMachineAs">
+/// One of the caller's runners in another organization they administer (from
+/// <c>GET runners/elsewhere</c>). The new runner is that machine's registration here: it
+/// gets its own secret, and the machine adds this organization as a separate profile. The
+/// name defaults to the other runner's.
+/// </param>
+public sealed record CreateRunnerRequest(string? Name, Guid? SameMachineAs = null);
+
+/// <summary>
+/// A machine the caller already runs for other organizations: their own live runners there,
+/// grouped by the machine id the CLI reports, so a machine with three profiles is one entry.
+/// </summary>
+/// <param name="RunnerId">The most recently seen of its runners; what <c>sameMachineAs</c> names.</param>
+/// <param name="IsConnectedHere">This organization already has a runner reporting the same machine.</param>
+public sealed record RunnerMachineView(
+    Guid RunnerId, string Name, RunnerCapabilities? Capabilities, DateTimeOffset? LastSeenAt, bool IsOnline,
+    bool IsConnectedHere, IReadOnlyList<RunnerMachineOrganizationView> Organizations);
+
+public sealed record RunnerMachineOrganizationView(string Slug, string Name, Guid RunnerId, string RunnerName);
 
 /// <summary>
 /// No <c>version</c>, deliberately - the documented exception to the xmin round-trip, like a
@@ -62,6 +80,7 @@ public static partial class RunnerEndpoints
             .RequireAuthorization();
 
         roster.MapGet("/", ListAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
+        roster.MapGet("/elsewhere", ElsewhereAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
         // Registering or rotating mints a credential, so it takes the admin scope exactly as
         // creating a token does: a leaked read-write token must not be a way to a machine
         // that will be handed agent credentials.
@@ -95,17 +114,111 @@ public static partial class RunnerEndpoints
         return Results.Ok(runners.Select(r => ToView(r, people, options.Value, now)).ToList());
     }
 
-    private static async Task<IResult> CreateAsync(
-        string orgSlug, CreateRunnerRequest request, AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
-        IUserDirectory directory, IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken cancellationToken)
+    /// <summary>
+    /// The caller's own machines in their other organizations. Only organizations where they
+    /// are an Admin now (the roster there is theirs to see anyway), only runners they
+    /// registered themselves, and nothing at all for a token bound to one organization or an
+    /// agent: that credential must not learn where else its owner works.
+    /// </summary>
+    private static async Task<IResult> ElsewhereAsync(
+        AutomationDbContext db, AmbientCurrentTenant tenant, ICurrentUser user, IProjectAccess access,
+        IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken cancellationToken)
     {
-        if (NameError(request.Name) is { } error)
+        var hereMachines = (await db.Runners.AsNoTracking()
+                .Where(r => r.DeletedAt == null)
+                .Select(r => r.Capabilities)
+                .ToListAsync(cancellationToken))
+            .Select(c => c?.MachineId)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+
+        var now = clock.GetUtcNow();
+        var elsewhere = await OwnRunnersElsewhereAsync(db, tenant, user, access, cancellationToken);
+        var machines = elsewhere
+            .GroupBy(x => x.Runner.Capabilities?.MachineId ?? x.Runner.Id.ToString())
+            .Select(group =>
+            {
+                var latest = group.OrderByDescending(x => x.Runner.LastSeenAt ?? x.Runner.CreatedAt).First().Runner;
+                return new RunnerMachineView(
+                    latest.Id, latest.Name, latest.Capabilities,
+                    group.Max(x => x.Runner.LastSeenAt),
+                    group.Any(x => IsOnline(x.Runner, options.Value, now)),
+                    latest.Capabilities?.MachineId is { } machineId && hereMachines.Contains(machineId),
+                    [.. group
+                        .OrderBy(x => x.Organization.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(x => new RunnerMachineOrganizationView(
+                            x.Organization.Slug, x.Organization.Name, x.Runner.Id, x.Runner.Name))]);
+            })
+            .OrderBy(machine => machine.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return Results.Ok(machines);
+    }
+
+    /// <summary>
+    /// The one cross-organization read of the roster. Each organization is read under its own
+    /// tenant, so the query filter and RLS stay what they are everywhere else; the membership
+    /// list only decides which organizations are asked.
+    /// </summary>
+    private static async Task<List<(OrganizationRef Organization, Runner Runner)>> OwnRunnersElsewhereAsync(
+        AutomationDbContext db, AmbientCurrentTenant tenant, ICurrentUser user, IProjectAccess access,
+        CancellationToken cancellationToken)
+    {
+        if (user.UserId is not { } userId || user.IsAgent || user.OrganizationId is not null)
+        {
+            return [];
+        }
+
+        var here = tenant.OrganizationId;
+        var found = new List<(OrganizationRef, Runner)>();
+        foreach (var membership in await access.ListOrganizationsAsync(userId, cancellationToken))
+        {
+            if (membership.Organization.Id == here || !membership.Role.Satisfies(OrgRole.Admin))
+            {
+                continue;
+            }
+
+            using (tenant.Use(membership.Organization.Id))
+            {
+                var runners = await db.Runners.AsNoTracking()
+                    .Where(r => r.RegisteredBy == userId && r.DeletedAt == null && r.DisabledAt == null)
+                    .ToListAsync(cancellationToken);
+                found.AddRange(runners.Select(r => (membership.Organization, r)));
+            }
+        }
+
+        return found;
+    }
+
+    private static async Task<IResult> CreateAsync(
+        string orgSlug, CreateRunnerRequest request, AutomationDbContext db, AmbientCurrentTenant tenant,
+        ICurrentUser user, IProjectAccess access, IUserDirectory directory, IOptions<AutomationOptions> options,
+        TimeProvider clock, CancellationToken cancellationToken)
+    {
+        Runner? source = null;
+        if (request.SameMachineAs is { } sourceId)
+        {
+            var elsewhere = await OwnRunnersElsewhereAsync(db, tenant, user, access, cancellationToken);
+            source = elsewhere.Select(x => x.Runner).FirstOrDefault(r => r.Id == sourceId);
+            if (source is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["sameMachineAs"] = ["Pick one of your own runners in another organization you administer."],
+                }, type: ProblemTypes.Validation);
+            }
+        }
+
+        var name = string.IsNullOrWhiteSpace(request.Name) ? source?.Name : request.Name;
+        if (NameError(name) is { } error)
         {
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = [error] }, type: ProblemTypes.Validation);
         }
 
         var now = clock.GetUtcNow();
-        var runner = Runner.Register(tenant.OrganizationId!.Value, request.Name!.Trim(), user.UserId!, now, out var secret);
+        var runner = Runner.Register(tenant.OrganizationId!.Value, name!.Trim(), user.UserId!, now, out var secret);
+        // The machine's last report, so it groups with its other registrations at once. The
+        // runner replaces it with its own on its first hello here.
+        runner.Capabilities = source?.Capabilities;
         db.Runners.Add(runner);
         // A name another live runner already has is a unique violation → 409.
         await db.SaveChangesAsync(cancellationToken);
@@ -254,9 +367,12 @@ public static partial class RunnerEndpoints
         new(runner.Id, runner.Name, runner.Display, runner.RegisteredBy,
             people.TryGetValue(runner.RegisteredBy, out var person) ? person.DisplayName : null,
             runner.Capabilities, runner.LastSeenAt,
-            IsOnline: runner.IsUsable && runner.LastSeenAt is { } seen && now - seen <= options.OnlineWindow,
+            IsOnline: IsOnline(runner, options, now),
             IsDisabled: runner.DisabledAt is not null,
             runner.CreatedAt);
+
+    private static bool IsOnline(Runner runner, AutomationOptions options, DateTimeOffset now) =>
+        runner.IsUsable && runner.LastSeenAt is { } seen && now - seen <= options.OnlineWindow;
 
     private static Guid RunnerId(HttpContext http) =>
         // The policy requires the claim, so a parse failure is a bug rather than a request to refuse.
@@ -297,6 +413,10 @@ public static partial class RunnerEndpoints
         if (capabilities.MaxParallel is < 1 or > 64)
         {
             errors["capabilities.maxParallel"] = ["Between 1 and 64."];
+        }
+        if (capabilities.MachineId is { } machineId && !Guid.TryParseExact(machineId, "D", out _))
+        {
+            errors["capabilities.machineId"] = ["A UUID, the same for every organization this machine is registered with."];
         }
 
         return errors;

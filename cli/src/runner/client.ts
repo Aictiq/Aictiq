@@ -80,6 +80,11 @@ export class RunnerClient {
     return (await this.send<ClaimedRun>('/runner/runs/claim', { harnesses, slots }, signal)) ?? null
   }
 
+  /** Hands a claimed run back before it starts; the instance queues it again and revokes its token. */
+  async release(runId: string): Promise<void> {
+    await this.send(`/runner/runs/${runId}/release`)
+  }
+
   async started(runId: string): Promise<void> {
     await this.send(`/runner/runs/${runId}/started`)
   }
