@@ -21,7 +21,7 @@ function stubFetch(...responses: unknown[]) {
   let call = 0
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     // The presigned PUT is a plain 200 with no body; everything else is JSON.
-    if (String(input).startsWith('http://store.test')) {
+    if (new URL(String(input), 'http://localhost').origin === 'http://store.test') {
       return new Response(null, { status: 200 })
     }
     const body = responses[Math.min(call++, responses.length - 1)]
@@ -101,7 +101,7 @@ describe('uploading a picture', () => {
 
   it('does not commit a key the store refused', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      String(input).startsWith('http://store.test')
+      new URL(String(input), 'http://localhost').origin === 'http://store.test'
         ? new Response(null, { status: 403 })
         : new Response(JSON.stringify({ key: 'k', uploadUrl: 'http://store.test/a.png' }), {
             status: 200,

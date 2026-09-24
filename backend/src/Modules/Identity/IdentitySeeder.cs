@@ -67,7 +67,7 @@ public static class IdentitySeeder
         }
 
         await userManager.AddToRoleAsync(admin, Roles.Admin);
-        logger.LogInformation("Created initial administrator {Email}", email);
+        logger.LogInformation("Created initial administrator");
         return admin.Id;
     }
 }

@@ -1,5 +1,8 @@
 name: compose-smoke
 
+permissions:
+  contents: read
+
 # Proves the deploy/ bundle actually starts and serves the app, against the code in this
 # branch rather than against a published image. The backend and web workflows test the
 # code; this tests the thing a self-hoster runs.

@@ -1,5 +1,8 @@
 name: cli
 
+permissions:
+  contents: read
+
 # Version-tag publication belongs to release.yml so the npm package, images and compose
 # bundle share one validated vX.Y.Z release. This workflow is the fast branch/PR check.
 on:

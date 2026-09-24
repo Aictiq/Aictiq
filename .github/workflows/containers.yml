@@ -1,5 +1,8 @@
 name: containers
 
+permissions:
+  contents: read
+
 # Main images are useful to adopters following development. Version-tag images are built
 # by release.yml, where they are coupled to the CLI package and compose bundle.
 on:

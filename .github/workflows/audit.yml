@@ -1,5 +1,8 @@
 name: dependency-audit
 
+permissions:
+  contents: read
+
 # Dependency findings are merge blockers. The weekly run also catches newly disclosed
 # CVEs in unchanged lockfiles.
 on:

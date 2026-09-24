@@ -14,8 +14,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: docs-pages
@@ -46,6 +44,9 @@ jobs:
           path: docs/.vitepress/dist
 
   deploy:
+    permissions:
+      pages: write
+      id-token: write
     # Keep Pages private until the repository launch: this job only publishes from main.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build

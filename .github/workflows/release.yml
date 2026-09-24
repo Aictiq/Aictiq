@@ -1,5 +1,8 @@
 name: release
 
+permissions:
+  contents: read
+
 # A release is intentionally one tag and one workflow. It validates the tag before any
 # package is published, then stamps the same SemVer into the API, Workers, CLI, compose
 # bundle and GitHub Release. Create tags from the fully tested main commit only.

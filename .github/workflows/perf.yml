@@ -1,5 +1,8 @@
 name: perf
 
+permissions:
+  contents: read
+
 # Nightly performance pass: boots the compose bundle from this branch, seeds
 # the ~100k-item perf organization, runs the k6 scripts in perf/ against it, and dumps
 # the top queries from pg_stat_statements. A failed threshold fails the job (k6 exits
