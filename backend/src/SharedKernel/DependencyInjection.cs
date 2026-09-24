@@ -45,6 +45,7 @@ public static class DependencyInjection
         services.TryAddScoped<IUnreadNotificationCounter, NullUnreadNotificationCounter>();
         services.TryAddScoped<IWikiPageContent, NullWikiPageContent>();
         services.TryAddScoped<IWikiPageCreator, NullWikiPageCreator>();
+        services.TryAddScoped<IFactoryPages, NullFactoryPages>();
         services.TryAddScoped<IProjectWorkflowAccess, NullProjectWorkflowAccess>();
 
         // Deliberately permissive, unlike the stubs above: "no billing module" means the

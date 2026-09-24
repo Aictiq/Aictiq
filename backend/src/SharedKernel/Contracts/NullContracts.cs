@@ -92,12 +92,30 @@ public sealed class NullWikiPageContent : IWikiPageContent
         Task.FromResult<WikiPageContent?>(null);
 }
 
-/// <summary>No Wiki module means Factory cannot create its starter page.</summary>
+/// <summary>No Wiki module means Factory cannot create or write its pages.</summary>
 public sealed class NullWikiPageCreator : IWikiPageCreator
 {
     public Task<Guid?> CreateStarterPageAsync(
         Guid organizationId, Guid projectId, string actorId, string markdown,
         CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
+
+    public Task<Guid?> CreateFactoryPageAsync(
+        Guid organizationId, Guid projectId, string actorId, string title, string markdown,
+        CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
+
+    public Task<bool> WriteFactoryPageAsync(
+        Guid pageId, Guid projectId, string actorId, string markdown,
+        CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    public Task<bool> IsInFactorySectionAsync(
+        Guid pageId, Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+}
+
+/// <summary>No Automation module means no playbooks, so no page is one.</summary>
+public sealed class NullFactoryPages : IFactoryPages
+{
+    public Task<IReadOnlyList<Guid>> ListPlaybookPageIdsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>([]);
 }
 
 /// <summary>No WorkItems module means no workflow state can be accepted.</summary>

@@ -14,6 +14,7 @@ using Aictiq.Modules.WorkItems.Contracts;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel.Authorization;
+using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Domain;
 using Aictiq.SharedKernel.Paging;
 using Microsoft.Extensions.DependencyInjection;
@@ -137,6 +138,36 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
         emails = await EmailsAsync();
         Assert.Equal(3, emails.Count);
         Assert.Single(emails, x => x.To.StartsWith("threads-owner-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task an_agents_comment_is_not_news_to_a_stakeholder_watching_the_item()
+    {
+        // JoinAsync's members may not operate the factory: they are stakeholders.
+        var (anaId, ana) = await JoinAsync("Ana", "Kovač");
+        var item = await CreateItemAsync("Checkout times out");
+        await CommentAsync(ana, item.Key, "Happens every Friday.");
+
+        var created = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/agents",
+            new CreateAgentRequest("builder", [_project.Id]), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        var agentId = (await created.Content.ReadFromJsonAsync<AgentView>(ApiTestContext.Json, Ct))!.UserId;
+        var token = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/agents/{agentId}/tokens",
+            new CreateAgentTokenRequest("CI", [], null), ApiTestContext.Json, Ct);
+        token.EnsureSuccessStatusCode();
+        using var agent = _context.Factory.CreateClient();
+        agent.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",
+            (await token.Content.ReadFromJsonAsync<AgentTokenIssued>(ApiTestContext.Json, Ct))!.Secret);
+
+        var progress = await CommentAsync(agent, item.Key, "Found it: the Friday batch job holds the lock. @Ana");
+        await HandleAddedAsync(progress.Id);
+        Assert.Equal([_ownerId], (await NotificationsAsync(progress.Id)).Select(x => x.UserId));
+
+        // Nor does a person's reply in the agent's thread reach them.
+        var reply = await CommentAsync(_owner, item.Key, "Good catch.", progress.Id);
+        await HandleAddedAsync(reply.Id);
+        Assert.DoesNotContain(anaId, (await NotificationsAsync(reply.Id)).Select(x => x.UserId));
+        Assert.Empty(await EmailsAsync());
     }
 
     private async Task HandleAddedAsync(Guid commentId)

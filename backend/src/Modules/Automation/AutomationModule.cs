@@ -1,3 +1,4 @@
+using Aictiq.Modules.Automation.Access;
 using Aictiq.Modules.Automation.Endpoints;
 using Aictiq.Modules.Automation.Events;
 using Aictiq.Modules.Automation.Mcp;
@@ -31,6 +32,7 @@ public static class AutomationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<RunDispatcher>();
+        services.AddScoped<IFactoryPages, AutomationFactoryPages>();
         // The run tools, the aictiq://run/{id} resource: the API host discovers them from
         // this assembly exactly as it discovers WorkItems'.
         services.AddSingleton<IMcpToolProvider>(new McpToolProvider(typeof(RunMcpTools).Assembly));

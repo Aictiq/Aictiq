@@ -14,8 +14,8 @@ namespace Aictiq.Modules.Notifications.Events;
 /// someone reaches them by email. Actor exclusion and the database unique key make outbox
 /// retries safe.</summary>
 public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemWatchers watchers, IUserRealtimePublisher realtime,
-    NotificationEmailService email, AmbientCurrentTenant tenant, TimeProvider clock)
-    : CommentNotifier(db, realtime, email, clock), IDomainEventHandler<CommentAdded>
+    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
+    : CommentNotifier(db, realtime, email, access, directory, clock), IDomainEventHandler<CommentAdded>
 {
     public async Task HandleAsync(CommentAdded e, CancellationToken cancellationToken)
     {
@@ -27,6 +27,7 @@ public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemW
             e.MentionedUserIds.Contains(recipient) ? NotificationKind.Mentioned
             : recipient == e.ThreadAuthorId ? NotificationKind.Replied
             : NotificationKind.Commented;
+        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId, .. e.ThreadAuthorId is null ? [] : new[] { e.ThreadAuthorId }], cancellationToken);
         await NotifyAsync(e.EventId, e.OrganizationId, e.ProjectId, e.ItemId, e.ItemKey, recipients, KindFor,
             new CommentEmail(e.OrganizationId, e.CommentId, e.AuthorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt), cancellationToken);
     }
@@ -34,13 +35,14 @@ public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemW
 
 /// <summary>An edit that tags someone new tells only them - never the watchers again.</summary>
 public sealed class CommentMentionsNotificationHandler(NotificationsDbContext db, IUserRealtimePublisher realtime,
-    NotificationEmailService email, AmbientCurrentTenant tenant, TimeProvider clock)
-    : CommentNotifier(db, realtime, email, clock), IDomainEventHandler<CommentMentionsAdded>
+    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
+    : CommentNotifier(db, realtime, email, access, directory, clock), IDomainEventHandler<CommentMentionsAdded>
 {
     public async Task HandleAsync(CommentMentionsAdded e, CancellationToken cancellationToken)
     {
         using var scope = tenant.Use(e.OrganizationId);
         var recipients = e.MentionedUserIds.Where(x => x != e.AuthorId).Distinct().ToArray();
+        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId], cancellationToken);
         await NotifyAsync(e.EventId, e.OrganizationId, e.ProjectId, e.ItemId, e.ItemKey, recipients, _ => NotificationKind.Mentioned,
             new CommentEmail(e.OrganizationId, e.CommentId, e.AuthorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt), cancellationToken);
     }
@@ -48,8 +50,24 @@ public sealed class CommentMentionsNotificationHandler(NotificationsDbContext db
 
 /// <summary>Writes one inbox row per recipient and mails the ones the comment was addressed to.</summary>
 public abstract class CommentNotifier(NotificationsDbContext db, IUserRealtimePublisher realtime,
-    NotificationEmailService email, TimeProvider clock)
+    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, TimeProvider clock)
 {
+    /// <summary>
+    /// A comment an agent wrote, or one in a thread an agent started, is the factory at work,
+    /// and whoever may not operate the factory never sees it on the item. They are not told
+    /// about it either: a notification would point at a comment that is not there for them.
+    /// </summary>
+    protected async Task<string[]> WithoutStakeholdersAsync(Guid organizationId, string[] recipients,
+        string[] factoryAuthors, CancellationToken cancellationToken)
+    {
+        if (recipients.Length == 0 || (await directory.FilterAgentsAsync(factoryAuthors, cancellationToken)).Count == 0) return recipients;
+        var operators = new List<string>(recipients.Length);
+        // One at a time: the contract is served by a single scoped DbContext.
+        foreach (var recipient in recipients)
+            if (await access.CanOperateFactoryAsync(recipient, organizationId, cancellationToken)) operators.Add(recipient);
+        return [.. operators];
+    }
+
     protected async Task NotifyAsync(Guid eventId, Guid organizationId, Guid projectId, Guid itemId, string? itemKey,
         string[] recipients, Func<string, NotificationKind> kindFor, CommentEmail comment, CancellationToken cancellationToken)
     {

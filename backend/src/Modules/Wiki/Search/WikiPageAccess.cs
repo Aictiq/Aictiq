@@ -9,7 +9,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 namespace Aictiq.Modules.Wiki.Search;
 
 /// <summary>Resolves the closest explicit rule set once for the complete project tree.</summary>
-public sealed class WikiPageAccess(WikiDbContext db, IProjectAccess projects, HybridCache cache, ICurrentTenant tenant) : IWikiPageAccess
+public sealed class WikiPageAccess(WikiDbContext db, IProjectAccess projects, IFactoryPages factory, HybridCache cache, ICurrentTenant tenant) : IWikiPageAccess
 {
     private sealed record PageAccess(IReadOnlySet<Guid> Readable, IReadOnlySet<Guid> Writable);
     public sealed record Snapshot(Guid[] Readable, Guid[] Writable);
@@ -60,8 +60,27 @@ public sealed class WikiPageAccess(WikiDbContext db, IProjectAccess projects, Hy
         var role = await projects.GetProjectRoleAsync(userId, projectId, ct);
         if (role is null) return new PageAccess(new HashSet<Guid>(), new HashSet<Guid>());
         var pages = await db.Pages.AsNoTracking().Where(page => page.ProjectId == projectId)
-            .Select(page => new { page.Id, page.ParentId }).ToListAsync(ct);
+            .Select(page => new { page.Id, page.ParentId, page.IsFactorySection }).ToListAsync(ct);
         if (pages.Count == 0) return new PageAccess(new HashSet<Guid>(), new HashSet<Guid>());
+        var parents = pages.ToDictionary(page => page.Id, page => page.ParentId);
+
+        // The factory's pages - the Factory section every playbook's page lives in, and any
+        // playbook page from before that rule - with everything below them, are for those who operate
+        // the factory. Above the role on purpose: a project Admin who is a stakeholder in
+        // the organization still sees the work, not the machinery.
+        var factoryPages = new HashSet<Guid>();
+        if (tenant.OrganizationId is not { } organizationId || !await projects.CanOperateFactoryAsync(userId, organizationId, ct))
+        {
+            var roots = (await factory.ListPlaybookPageIdsAsync(projectId, ct)).ToHashSet();
+            roots.UnionWith(pages.Where(page => page.IsFactorySection).Select(page => page.Id));
+            foreach (var page in pages)
+            {
+                for (Guid? current = page.Id; current is { } id; current = parents[id])
+                    if (roots.Contains(id)) { factoryPages.Add(page.Id); break; }
+            }
+        }
+        pages.RemoveAll(page => factoryPages.Contains(page.Id));
+
         if (role == ProjectRole.Admin)
         {
             var all = pages.Select(page => page.Id).ToHashSet();
@@ -70,7 +89,6 @@ public sealed class WikiPageAccess(WikiDbContext db, IProjectAccess projects, Hy
         var pageIds = pages.Select(page => page.Id).ToArray();
         var rules = await db.PagePermissions.AsNoTracking().Where(rule => pageIds.Contains(rule.PageId)).ToListAsync(ct);
         var byPage = rules.GroupBy(rule => rule.PageId).ToDictionary(group => group.Key, group => group.ToArray());
-        var parents = pages.ToDictionary(page => page.Id, page => page.ParentId);
         var teams = (await projects.ListTeamIdsForUserAsync(projectId, userId, ct)).Select(id => id.ToString()).ToHashSet(StringComparer.Ordinal);
         var roleSubject = role.Value.ToString().ToLowerInvariant();
         var readable = new HashSet<Guid>(); var writable = new HashSet<Guid>();

@@ -173,7 +173,7 @@ public static class AttachmentEndpoints
     }
 
     private static async Task<IResult> Download(HttpContext http, Guid attachmentId, WorkItemsDbContext db, ICurrentUser user,
-        IProjectAccess access, IWikiPageAccess pages, IBlobStorage storage, CancellationToken ct)
+        IProjectAccess access, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, CancellationToken ct)
     {
         // A pending upload is visible to its uploader only: a comment has no id until it is
         // posted, so the image being pasted into it is still pending while it is previewed.
@@ -183,6 +183,10 @@ public static class AttachmentEndpoints
         // A page's attachment is part of the page: a project member the page's permissions
         // hide it from must not read its images by id.
         if (attachment.WikiPageId is { } pageId && !await pages.CanReadAsync(pageId, attachment.ProjectId, user.UserId!, ct)) return Results.NotFound();
+        // The same for a comment's, when the comment is the factory's and the caller may not see it.
+        if (attachment.CommentId is { } commentId
+            && await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId, ct) is { } comment
+            && await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
         var blob = await storage.OpenReadAsync(attachment.ObjectKey, ct);
         if (blob is null) return Results.NotFound();
 
@@ -207,18 +211,23 @@ public static class AttachmentEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> List(string itemKey, string? include, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, CancellationToken ct)
+    private static async Task<IResult> List(string itemKey, string? include, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user,
+        IUserDirectory directory, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         var includeComments = string.Equals(include, "comments", StringComparison.OrdinalIgnoreCase);
+        var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
+        var comments = includeComments
+            ? onItem.WithoutFactory(db, await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct))
+            : onItem;
         // An attachment pasted into a comment belongs to the comment rather than the item.
         // The opt-in keeps the existing item's-files panel concise while runners can ask for
         // all visual context with `?include=comments`.
         var attachments = await db.Attachments.AsNoTracking()
             .Where(x => x.Status == AttachmentStatus.Committed &&
                 (x.ItemId == item.Id || includeComments && x.CommentId != null &&
-                    db.Comments.Any(comment => comment.Id == x.CommentId && comment.ItemId == item.Id && comment.DeletedAt == null)))
+                    comments.Any(comment => comment.Id == x.CommentId && comment.DeletedAt == null)))
             .OrderBy(x => x.CreatedAt)
             .ToListAsync(ct);
         return Results.Ok(attachments.Select(View));
