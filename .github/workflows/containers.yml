@@ -30,7 +30,7 @@ jobs:
 
       # The api image serves the SPA from wwwroot, so the web toolchain is part of the
       # image build (Aictiq.Api.csproj runs pnpm build before publish).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend-vue/package.json
 

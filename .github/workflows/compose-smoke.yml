@@ -44,7 +44,7 @@ jobs:
           dotnet-version: 10.0.x
 
       # The api image bundles the SPA, so the web toolchain is part of building it.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend-vue/package.json
 
