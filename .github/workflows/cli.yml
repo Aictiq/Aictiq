@@ -65,6 +65,9 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The credential test must see only the runner's own git credential scripts.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
         with:

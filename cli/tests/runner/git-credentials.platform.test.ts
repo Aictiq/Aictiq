@@ -17,13 +17,21 @@ import { ASKPASS_SCRIPT, CREDENTIAL_HELPER, TOKEN_ENV } from '../../src/runner/w
 const url = 'https://github.com/Aictiq/aictiq-platform-check-does-not-exist.git'
 
 function lsRemote(config: string[], env: Record<string, string>) {
+  // Outside any checkout and without global or system config: a CI checkout carries the
+  // workflow token as an extraheader, and a runner image may have credential helpers, and
+  // either would answer GitHub before the scripts under test are asked.
+  const cwd = mkdtempSync(join(tmpdir(), 'aictiq-git-'))
+  const globalConfig = join(cwd, 'gitconfig')
+  writeFileSync(globalConfig, '')
   const result = spawnSync('git', [...config, 'ls-remote', url], {
+    cwd,
     encoding: 'utf8',
     timeout: 60_000,
     env: {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0',
       GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: globalConfig,
       [TOKEN_ENV]: 'ghs_bogusPlatformCheckToken000000000000',
       ...env,
     },

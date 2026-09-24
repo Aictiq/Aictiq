@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { posix } from 'node:path'
 
 /**
  * What `aictiq runner install-service` prints: a definition that keeps `aictiq runner start`
@@ -91,7 +91,8 @@ if [ "$status" -eq ${RevokedExitCode} ]; then exit 0; fi
 exit "$status"`
 
 export function launchdAgent({ node, entry, parallel, path, home }: ServiceOptions): string {
-  const log = join(home, 'Library', 'Logs', 'aictiq-runner.log')
+  // A macOS path even when the definition is generated elsewhere (`--platform macos`).
+  const log = posix.join(home, 'Library', 'Logs', 'aictiq-runner.log')
   const plistPath = `~/Library/LaunchAgents/${LaunchdLabel}.plist`
   const string = (value: string) => `<string>${xml(value)}</string>`
   return `<?xml version="1.0" encoding="UTF-8"?>
