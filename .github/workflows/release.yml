@@ -219,7 +219,7 @@ jobs:
             -e 's/^AICTIQ_IMAGE_TAG=.*/AICTIQ_IMAGE_TAG=${{ needs.validate.outputs.version }}/' \
             "$bundle/deploy/.env.example"
           zip -qr "$bundle.zip" "$bundle"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: compose-bundle
           path: aictiq-compose-v${{ needs.validate.outputs.version }}.zip
