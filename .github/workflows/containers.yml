@@ -65,6 +65,14 @@ jobs:
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
+      - name: Build the SPA once
+        # Every RID of the multi-architecture publish would otherwise rebuild it into the
+        # same dist/, racing each other (see Aictiq.Api.csproj, SpaPrebuilt).
+        working-directory: frontend-vue
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
       - name: Publish images
         run: |
           set -euo pipefail
@@ -74,6 +82,7 @@ jobs:
               -c Release \
               -t:PublishContainer \
               -p:ContainerRuntimeIdentifiers='"linux-x64;linux-arm64"' \
+              -p:SpaPrebuilt=true \
               -p:ContainerRegistry=ghcr.io \
               -p:ContainerRepository="${{ steps.meta.outputs.owner }}/$name" \
               -p:ContainerImageTags='"${{ steps.meta.outputs.tags }}"'

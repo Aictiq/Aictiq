@@ -35,16 +35,23 @@
 
        Skip it with -p:SkipWebBuild=true when you only want the backend image (CI does
        this for the test job, which never touches the SPA).
+
+       A multi-architecture image (ContainerRuntimeIdentifiers with several RIDs) publishes
+       once per RID, and every one of those would rebuild the SPA into the same dist/ - Vite
+       empties it first, so one RID's copy step races another's rebuild and finds files
+       missing. Build the SPA once beforehand and pass -p:SpaPrebuilt=true: the existing
+       dist/ is copied as it is.
        =========================================================================== -->
   <PropertyGroup>
     <SkipWebBuild Condition="'$(SkipWebBuild)' == ''">false</SkipWebBuild>
+    <SpaPrebuilt Condition="'$(SpaPrebuilt)' == ''">false</SpaPrebuilt>
     <WebProjectDir>$(MSBuildThisFileDirectory)..\..\..\frontend-vue\</WebProjectDir>
     <WebDistDir>$(WebProjectDir)dist\</WebDistDir>
   </PropertyGroup>
 
   <Target Name="BuildSpa"
           BeforeTargets="PrepareForPublish"
-          Condition="'$(SkipWebBuild)' != 'true'">
+          Condition="'$(SkipWebBuild)' != 'true' And '$(SpaPrebuilt)' != 'true'">
     <Message Importance="high" Text="Building the SPA in $(WebProjectDir)" />
     <Exec Command="pnpm install --frozen-lockfile" WorkingDirectory="$(WebProjectDir)" />
     <Exec Command="pnpm run build" WorkingDirectory="$(WebProjectDir)" />
@@ -56,6 +63,8 @@
           DependsOnTargets="BuildSpa"
           BeforeTargets="PrepareForPublish"
           Condition="'$(SkipWebBuild)' != 'true'">
+    <Error Condition="'$(SpaPrebuilt)' == 'true' And !Exists('$(WebDistDir)index.html')"
+           Text="SpaPrebuilt=true, but $(WebDistDir)index.html does not exist. Run pnpm run build in frontend-vue first." />
     <ItemGroup>
       <_SpaFiles Include="$(WebDistDir)**\*" />
       <ResolvedFileToPublish Include="@(_SpaFiles)">

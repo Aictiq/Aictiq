@@ -121,6 +121,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build the SPA once
+        # Every RID of the multi-architecture publish would otherwise rebuild it into the
+        # same dist/, racing each other (see Aictiq.Api.csproj, SpaPrebuilt).
+        working-directory: frontend-vue
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
       - name: Publish versioned multi-architecture images
         shell: bash
         run: |
@@ -135,6 +143,7 @@ jobs:
               -t:PublishContainer \
               -p:Version="$VERSION" \
               -p:ContainerRuntimeIdentifiers='"linux-x64;linux-arm64"' \
+              -p:SpaPrebuilt=true \
               -p:ContainerRegistry=ghcr.io \
               -p:ContainerRepository="$OWNER/$name" \
               -p:ContainerImageTags="\"$tags\""
