@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { RunFailure, type ClaimedRun, type RunAttachment } from './types.js'
 
 export const DefaultAttachmentMaxCount = 25
@@ -23,6 +23,11 @@ export interface WorkspaceOptions {
   root: string
   /** project key → local repository path, from runner.json `workspaces` */
   repositories: Record<string, string>
+  /**
+   * Directories, from runner.json `repoRoots`, under which the project's path hint is trusted
+   * when the project has no explicit mapping. Empty means the hint is never used.
+   */
+  repoRoots?: string[]
   keep: boolean
   mcpServer: { command: string; args: string[] }
   /** runner milestones, streamed as `event` log chunks */
@@ -234,6 +239,67 @@ function formatBytes(value: number): string {
   return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toFixed(1)} MiB` : `${value} bytes`
 }
 
+/**
+ * The clone a runner-local run works from: the explicit `workspaces` mapping, else the
+ * project's path hint when it lies inside one of the runner's `repoRoots`. The hint comes
+ * from the server, so it is only trusted inside directories this machine's operator named;
+ * symlinks and `..` are resolved before that check. `root` is null for an explicit mapping.
+ */
+function resolveLocalRepository(
+  run: ClaimedRun,
+  options: WorkspaceOptions,
+): { path: string; root: string | null } {
+  const mapped = options.repositories[run.projectKey]
+  if (mapped !== undefined) return { path: mapped, root: null }
+
+  const hint = run.repo.localPathHint?.trim()
+  const roots = options.repoRoots ?? []
+  if (hint) {
+    const expanded = expandHome(hint)
+    if (isAbsolute(expanded)) {
+      const real = realpathOrSelf(expanded)
+      for (const configured of roots) {
+        const expandedRoot = expandHome(configured)
+        if (!isAbsolute(expandedRoot)) continue
+        const root = realpathOrSelf(expandedRoot)
+        if (isWithin(real, root)) return { path: real, root }
+      }
+    }
+  }
+
+  const example = `("${run.projectKey}": "/path/to/repository")`
+  const detail = !hint
+    ? ` Add it to the \`workspaces\` map in runner.json ${example}, or set the project's path hint and list its parent directory in \`repoRoots\`.`
+    : roots.length === 0
+      ? ` The project suggests ${hint}. Add its parent directory to \`repoRoots\` in runner.json (\`aictiq runner root <path>\`), or map it in \`workspaces\` ${example}.`
+      : ` The project suggests ${hint}, which is not under any of this runner's repoRoots (${roots.join(', ')}). Add a root that contains it, or map it in \`workspaces\` ${example}.`
+  throw new RunFailure(
+    'no-local-repository',
+    `No local repository is mapped for project ${run.projectKey}.${detail}`,
+  )
+}
+
+function expandHome(path: string): string {
+  if (path === '~') return homedir()
+  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path
+}
+
+/** The canonical path; a path that does not exist yet is still normalised (`..`, `.`). */
+function realpathOrSelf(path: string): string {
+  const normalised = resolve(path)
+  try {
+    return realpathSync(normalised)
+  } catch {
+    return normalised
+  }
+}
+
+/** True when `path` is `root` itself or below it. Both should already be real paths. */
+function isWithin(path: string, root: string): boolean {
+  const rel = relative(root, path)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -244,14 +310,8 @@ async function provisionLocal(
   options: WorkspaceOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const mapped = options.repositories[run.projectKey]
-  if (mapped === undefined) {
-    const hint = run.repo.localPathHint ? ` The project suggests ${run.repo.localPathHint}.` : ''
-    throw new RunFailure(
-      'no-local-repository',
-      `No local repository is mapped for project ${run.projectKey}. Add it to the \`workspaces\` map in runner.json ("${run.projectKey}": "/path/to/repository").${hint}`,
-    )
-  }
+  const { path: mapped, root } = resolveLocalRepository(run, options)
+  const origin = root === null ? 'mapped for project' : 'the path hint for project'
 
   const toplevel = await git(['rev-parse', '--show-toplevel'], {
     cwd: mapped,
@@ -261,9 +321,17 @@ async function provisionLocal(
     if (isAbort(error)) throw error
     throw new RunFailure(
       'no-local-repository',
-      `${mapped}, mapped for project ${run.projectKey} in runner.json, is not a git repository.`,
+      `${mapped}, ${origin} ${run.projectKey}, is not a git repository.`,
     )
   })
+  // A hinted directory that is not a clone itself would otherwise resolve to whatever
+  // repository encloses it, e.g. a dotfiles repository in the home directory.
+  if (root !== null && !isWithin(realpathOrSelf(toplevel.trim()), root)) {
+    throw new RunFailure(
+      'no-local-repository',
+      `${mapped}, the path hint for project ${run.projectKey}, is not a git repository under ${root}.`,
+    )
+  }
   const repo = toplevel.trim()
   const call = (args: string[]) => gitStep(args, { cwd: repo, env, signal: options.signal })
 

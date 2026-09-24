@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { columnForState, destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
-import type { Board } from '@/api/boards'
+import { boardStateLabels, type Board } from '@/api/boards'
 import type { WorkItem } from '@/api/items'
 
 const card = (id: string, stateId: string): WorkItem => ({ id, key: `WEB-${id}`, type: 'bug', title: id, stateId, boardColumnId: stateId === 'todo' ? 'todo-column' : 'doing-column', descriptionMarkdown: '', descriptionHtml: '', stateCategory: 'active', priority: 'none', assigneeId: null, teamId: null, sprintId: null, parentId: null, points: null, estimateHours: null, remainingHours: null, completedHours: null, dueDate: null, claimedBy: null, claimedAt: null, claimHeartbeatAt: null, version: 1, labels: [], updatedAt: '', isWatching: false, watcherCount: 0, rollup: { totalCount: 0, completedCount: 0, pointsTotal: 0, pointsCompleted: 0, remainingHours: 0 } })
@@ -31,5 +31,31 @@ describe('board settings', () => {
   it('lists workflow states no column shows yet', () => {
     const states = [{ id: 'todo', name: 'Todo' }, { id: 'doing', name: 'Doing' }, { id: 'review', name: 'Review' }]
     expect(unmappedStates(board().columns, states).map((state) => state.name)).toEqual(['Review'])
+  })
+})
+
+describe('board state labels', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const states = [{ id: 'new', name: 'New' }, { id: 'active', name: 'Active' }, { id: 'review', name: 'In Review' }, { id: 'removed', name: 'Removed' }]
+  const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+
+  it('names states by the board columns that show them', async () => {
+    const columns = (name: string) => [{ id: 'c1', name, stateIds: ['new'] }, { id: 'c2', name: 'Doing', stateIds: ['active', 'review'] }]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/projects/WEB/teams')) return respond([{ id: 't1' }, { id: 't2' }])
+      expect(url).toContain('take=0')
+      return respond({ columns: columns(url.includes('/teams/t1/') ? 'Backlog' : 'Todo') })
+    }))
+    const labels = await boardStateLabels('acme', 'WEB', states)
+    expect(labels.get('new')).toBe('Backlog / Todo')
+    expect(labels.get('active')).toBe('Doing (Active)')
+    expect(labels.get('review')).toBe('Doing (In Review)')
+    expect(labels.get('removed')).toBe('Removed')
+  })
+
+  it('falls back to workflow state names when boards cannot be read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    expect((await boardStateLabels('acme', 'WEB', states)).get('review')).toBe('In Review')
   })
 })

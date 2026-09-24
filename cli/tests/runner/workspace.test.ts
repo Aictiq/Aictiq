@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -278,6 +279,73 @@ describe('local workspaces', () => {
     )
 
     expect(error.reason).toBe('no-local-repository')
+  })
+
+  describe('path hint under repoRoots', () => {
+    const hinted = (hint: string, repoRoots: string[]) =>
+      provisionWorkspace(
+        claimed({}, { localPathHint: hint }),
+        options({ repositories: {}, repoRoots }),
+      )
+
+    it('uses the hint when it lies inside a repository root', async () => {
+      const ws = await hinted(`${local}/`, [scratch])
+
+      expect(git(ws.checkout, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(
+        claimed().branchName,
+      )
+      await ws.cleanup()
+    })
+
+    it('prefers an explicit mapping over the hint', async () => {
+      const other = join(scratch, 'other')
+      git(scratch, 'clone', origin, other)
+      const ws = await provisionWorkspace(
+        claimed({}, { localPathHint: other }),
+        options({ repositories: { APP: local }, repoRoots: [scratch] }),
+      )
+
+      expect(git(local, 'branch', '--list', claimed().branchName)).toContain(claimed().branchName)
+      expect(git(other, 'branch', '--list', claimed().branchName)).toBe('')
+      await ws.cleanup()
+    })
+
+    it('ignores the hint when there are no repository roots', async () => {
+      const error = await failure(hinted(local, []))
+
+      expect(error.reason).toBe('no-local-repository')
+      expect(error.message).toContain('repoRoots')
+    })
+
+    it('refuses a hint outside every root, including through ..', async () => {
+      const elsewhere = join(scratch, 'elsewhere')
+      mkdirSync(elsewhere)
+
+      const outside = await failure(hinted(local, [elsewhere]))
+      expect(outside.reason).toBe('no-local-repository')
+      expect(outside.message).toContain(elsewhere)
+
+      const dotted = await failure(hinted(join(elsewhere, '..', 'local'), [elsewhere]))
+      expect(dotted.reason).toBe('no-local-repository')
+    })
+
+    it('refuses a symlink inside a root that points outside it', async () => {
+      const roots = join(scratch, 'roots')
+      mkdirSync(roots)
+      symlinkSync(local, join(roots, 'link'))
+
+      const error = await failure(hinted(join(roots, 'link'), [roots]))
+      expect(error.reason).toBe('no-local-repository')
+    })
+
+    it('refuses a directory whose enclosing repository is outside the root', async () => {
+      const sub = join(local, 'sub')
+      mkdirSync(sub)
+
+      const error = await failure(hinted(sub, [sub]))
+      expect(error.reason).toBe('no-local-repository')
+      expect(error.message).toContain('not a git repository under')
+    })
   })
 
   it('fails with workspace-failed and git output when the default branch does not exist', async () => {

@@ -335,7 +335,7 @@ function checkRepository(set: Write) {
         detail: !configured
           ? null
           : settings.repoSource === 1
-            ? `Runner-local checkout${settings.localPathHint ? ` (${settings.localPathHint})` : ''} - the runner needs a matching path on its own machine.`
+            ? `Runner-local checkout${settings.localPathHint ? ` (${settings.localPathHint})` : ''} - the runner needs this path under one of its repository roots, or its own mapping.`
             : settings.repoFullName,
         link: configured ? null : settingsLink,
       })

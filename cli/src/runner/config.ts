@@ -19,6 +19,11 @@ export interface RunnerConfig {
   name?: string
   /** Project key → path of a local clone, for projects whose repository source is `local`. */
   workspaces: Record<string, string>
+  /**
+   * Directories under which a project's path hint (set in the web UI) is used when the
+   * project has no `workspaces` entry. Absolute, or starting with `~/`.
+   */
+  repoRoots: string[]
   attachments: RunnerAttachmentConfig
 }
 
@@ -36,7 +41,7 @@ export function readRunnerConfig(path = runnerConfigPath()): RunnerConfig | null
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const { url, token, name, workspaces, attachments } = parsed as Record<string, unknown>
+  const { url, token, name, workspaces, repoRoots, attachments } = parsed as Record<string, unknown>
   if (typeof url !== 'string' || typeof token !== 'string') return null
 
   const mapped: Record<string, string> = {}
@@ -45,12 +50,16 @@ export function readRunnerConfig(path = runnerConfigPath()): RunnerConfig | null
       if (typeof value === 'string') mapped[key] = value
     }
   }
+  const roots = Array.isArray(repoRoots)
+    ? repoRoots.filter((root): root is string => typeof root === 'string' && root.trim() !== '')
+    : []
   const rawLimits = typeof attachments === 'object' && attachments !== null ? attachments as Record<string, unknown> : {}
   return {
     url,
     token,
     ...(typeof name === 'string' ? { name } : {}),
     workspaces: mapped,
+    repoRoots: roots,
     attachments: {
       maxCount: validLimit(rawLimits.maxCount, DefaultAttachmentMaxCount),
       maxBytes: validLimit(rawLimits.maxBytes, DefaultAttachmentMaxBytes),

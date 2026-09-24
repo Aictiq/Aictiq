@@ -14,6 +14,7 @@ describe('runner.json', () => {
     writeRunnerConfig(
       {
         url: 'https://j.example', token: 'jrn_x', workspaces: { ACME: '/src/aictiq' },
+        repoRoots: ['/src'],
         attachments: { maxCount: 10, maxBytes: 1024 },
       },
       path,
@@ -23,11 +24,16 @@ describe('runner.json', () => {
       url: 'https://j.example',
       token: 'jrn_x',
       workspaces: { ACME: '/src/aictiq' },
+      repoRoots: ['/src'],
       attachments: { maxCount: 10, maxBytes: 1024 },
     })
 
     writeFileSync(path, JSON.stringify({ url: 'u', token: 't', workspaces: { A: '/a', B: 3 } }))
     expect(readRunnerConfig(path)?.workspaces).toEqual({ A: '/a' })
+    expect(readRunnerConfig(path)?.repoRoots).toEqual([])
+
+    writeFileSync(path, JSON.stringify({ url: 'u', token: 't', repoRoots: ['/r', 3, ''] }))
+    expect(readRunnerConfig(path)?.repoRoots).toEqual(['/r'])
     expect(readRunnerConfig(path)?.attachments).toEqual({ maxCount: 25, maxBytes: 25 * 1024 * 1024 })
   })
 

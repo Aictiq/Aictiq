@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
+import { withBoardNames } from '@/api/boards'
 import { listLabels, type Label } from '@/api/labels'
 import {
   deleteRule,
@@ -72,7 +73,11 @@ watch(
       listWorkflows(slug.value, current.projectKey),
       listLabels(slug.value, current.projectKey),
     ])
-    states.value = workflows.find((workflow) => workflow.isDefault)?.states ?? []
+    states.value = await withBoardNames(
+      slug.value,
+      current.projectKey,
+      workflows.find((workflow) => workflow.isDefault)?.states ?? [],
+    )
     labels.value = projectLabels
   },
   { immediate: true },

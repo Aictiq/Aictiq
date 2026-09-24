@@ -41,6 +41,27 @@ describe('aictiq runner register', () => {
       url: instance.url,
       token: 'jrn_secret_0123456789',
       workspaces: {},
+      repoRoots: [],
     })
+  })
+
+  it('adds and removes a repository root, keeping the existing registration', async () => {
+    await createProgram().parseAsync(
+      ['runner', 'register', '--url', instance.url, '--token', 'jrn_secret_0123456789'],
+      { from: 'user' },
+    )
+    const read = () =>
+      JSON.parse(readFileSync(join(configHome, 'aictiq', 'runner.json'), 'utf8')) as {
+        token: string
+        repoRoots: string[]
+      }
+
+    await createProgram().parseAsync(['runner', 'root', configHome], { from: 'user' })
+    await createProgram().parseAsync(['runner', 'root', configHome], { from: 'user' })
+    expect(read().repoRoots).toEqual([configHome])
+    expect(read().token).toBe('jrn_secret_0123456789')
+
+    await createProgram().parseAsync(['runner', 'root', configHome, '--remove'], { from: 'user' })
+    expect(read().repoRoots).toEqual([])
   })
 })
