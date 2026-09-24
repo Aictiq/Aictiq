@@ -487,6 +487,13 @@
               "null",
               "string"
             ]
+          },
+          "parentCommentId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -709,6 +716,12 @@
       "CreatePlaybookRequest": {
         "properties": {
           "harness": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instructionsMarkdown": {
             "type": [
               "null",
               "string"
@@ -1530,7 +1543,8 @@
           "sprintStarted",
           "sprintCompleted",
           "wikiMentioned",
-          "inviteAccepted"
+          "inviteAccepted",
+          "replied"
         ]
       },
       "NotificationPreferenceView": {
@@ -1624,20 +1638,6 @@
         ],
         "type": "object"
       },
-      "RefreshRequest": {
-        "properties": {
-          "refreshToken": {
-            "type": [
-              "null",
-              "string"
-            ]
-          }
-        },
-        "required": [
-          "refreshToken"
-        ],
-        "type": "object"
-      },
       "RegisterRequest": {
         "properties": {
           "email": {
@@ -1652,7 +1652,19 @@
               "string"
             ]
           },
+          "invitationToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "lastName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
             "type": [
               "null",
               "string"
@@ -1795,6 +1807,20 @@
           "states",
           "transitions",
           "version"
+        ],
+        "type": "object"
+      },
+      "ResendConfirmationRequest": {
+        "properties": {
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "email"
         ],
         "type": "object"
       },
@@ -2425,6 +2451,36 @@
         ],
         "type": "object"
       },
+      "UpdateOnboardingRequest": {
+        "properties": {
+          "lastStepId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "format": "uint32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "lastStepId",
+          "version"
+        ],
+        "type": "object"
+      },
       "UpdateOrganizationRequest": {
         "properties": {
           "membersCanCreateProjects": {
@@ -2476,6 +2532,12 @@
       "UpdatePlaybookRequest": {
         "properties": {
           "harness": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instructionsMarkdown": {
             "type": [
               "null",
               "string"
@@ -3138,6 +3200,20 @@
           "dueDate",
           "labelIds",
           "version"
+        ],
+        "type": "object"
+      },
+      "VerifyEmailRequest": {
+        "properties": {
+          "token": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "token"
         ],
         "type": "object"
       },
@@ -3986,6 +4062,327 @@
         "summary": "POST api/v1/admin/users/{id}/deactivate",
         "tags": [
           "Users"
+        ]
+      }
+    },
+    "/api/v1/auth/challenge": {
+      "get": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "getAuthChallenge",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "GET api/v1/auth/challenge",
+        "tags": [
+          "Auth"
         ]
       }
     },
@@ -6026,22 +6423,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/RefreshRequest"
-                  }
-                ]
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK"
@@ -7015,22 +7396,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/RefreshRequest"
-                  }
-                ]
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK"
@@ -8336,6 +8701,668 @@
           }
         },
         "summary": "GET api/v1/auth/session",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "postAuthVerifyEmail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "POST api/v1/auth/verify-email",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email/resend": {
+      "post": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "postAuthVerifyEmailResend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendConfirmationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "POST api/v1/auth/verify-email/resend",
         "tags": [
           "Auth"
         ]
@@ -13577,6 +14604,656 @@
         "summary": "POST api/v1/me/notifications/read",
         "tags": [
           "Notifications"
+        ]
+      }
+    },
+    "/api/v1/me/onboarding": {
+      "get": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "getMeOnboarding",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "GET api/v1/me/onboarding",
+        "tags": [
+          "Profile"
+        ]
+      },
+      "patch": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "patchMeOnboarding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "PATCH api/v1/me/onboarding",
+        "tags": [
+          "Profile"
         ]
       }
     },
@@ -53231,6 +54908,339 @@
           }
         },
         "summary": "PUT api/v1/orgs/{orgSlug}/projects/{projectKey}/playbooks/{playbookId:guid}/default",
+        "tags": [
+          "Factory playbooks"
+        ]
+      }
+    },
+    "/api/v1/orgs/{orgSlug}/projects/{projectKey}/playbooks/{playbookId}/instructions": {
+      "get": {
+        "description": "Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.",
+        "operationId": "getOrgsByOrgSlugProjectsByProjectKeyPlaybooksByPlaybookId:guidInstructions",
+        "parameters": [
+          {
+            "example": "11111111-1111-1111-1111-111111111111",
+            "in": "path",
+            "name": "playbookId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 400,
+                  "title": "Invalid request",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/invalid-request"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request is invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 401,
+                  "title": "Unauthorized",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/unauthorized"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Authentication is required or expired."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 403,
+                  "title": "Forbidden",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/forbidden"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The credential lacks the required organization role or token scope."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 404,
+                  "title": "Not found",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/not-found"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The requested resource does not exist or is not visible to this caller."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 409,
+                  "title": "Conflict",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/conflict"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The resource changed since the supplied version, or a domain conflict exists."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "status": 429,
+                  "title": "Too many requests",
+                  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                  "type": "https://aictiq.com/problems/too-many-requests"
+                },
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "instance": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "status": {
+                      "format": "int32",
+                      "pattern": "^-?(?:0|[1-9]\\d*)$",
+                      "type": [
+                        "null",
+                        "integer",
+                        "string"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The rate limit was exceeded; retry after the current one-minute window."
+          }
+        },
+        "summary": "GET api/v1/orgs/{orgSlug}/projects/{projectKey}/playbooks/{playbookId:guid}/instructions",
         "tags": [
           "Factory playbooks"
         ]

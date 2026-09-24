@@ -31,6 +31,8 @@ public sealed class WikiDbContext(DbContextOptions<WikiDbContext> options,
             b.Property(x => x.Search).HasColumnType("tsvector").HasComputedColumnSql("setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('simple', coalesce(title, '')), 'A')", stored: true);
             b.HasIndex(x => new { x.ProjectId, x.ParentId, x.Position });
             b.HasIndex(x => new { x.ProjectId, x.UpdatedAt });
+            b.Property(x => x.IsFactorySection).HasDefaultValue(false);
+            b.HasIndex(x => x.ProjectId).IsUnique().HasFilter("is_factory_section").HasDatabaseName("ux_pages_project_id_factory_section");
             // A subpage cannot outlive its parent: deleting a page deletes everything below it.
             b.HasOne<WikiPage>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Cascade);
         });

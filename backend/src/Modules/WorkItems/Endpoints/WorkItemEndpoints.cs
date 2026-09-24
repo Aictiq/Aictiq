@@ -380,14 +380,17 @@ public static class WorkItemEndpoints
         var item = await FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         var rows = db.ItemHistory.AsNoTracking().Where(x => x.ItemId == item.Id)
+            .WithoutFactory(db, !await access.CanOperateFactoryAsync(user.UserId!, item.OrganizationId, ct))
             .Select(x => new HistoryRow(x.Id, x.EventId, x.ItemId, item.Key, x.ActorId, x.At, x.Field, x.OldValue, x.NewValue));
         return Results.Ok(await HistoryPageAsync(rows, directory, page, pageSize, ct));
     }
 
-    private static async Task<IResult> ProjectActivity(HttpContext http, WorkItemsDbContext db, IUserDirectory directory, string? actorId, Guid? teamId, int page = 1, int pageSize = 25, CancellationToken ct = default)
+    private static async Task<IResult> ProjectActivity(HttpContext http, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, Aictiq.SharedKernel.Tenancy.ICurrentTenant tenant,
+        IUserDirectory directory, string? actorId, Guid? teamId, int page = 1, int pageSize = 25, CancellationToken ct = default)
     {
         var projectId = http.ResolvedProjectId()!.Value;
-        var rows = db.ItemHistory.AsNoTracking().Join(db.Items.AsNoTracking(), history => history.ItemId, item => item.Id,
+        var hide = !await access.CanOperateFactoryAsync(user.UserId!, tenant.OrganizationId!.Value, ct);
+        var rows = db.ItemHistory.AsNoTracking().WithoutFactory(db, hide).Join(db.Items.AsNoTracking(), history => history.ItemId, item => item.Id,
             (history, item) => new HistoryRow(history.Id, history.EventId, item.Id, item.Key, history.ActorId, history.At, history.Field, history.OldValue, history.NewValue))
             .Where(x => db.Items.Any(item => item.Id == x.ItemId && item.ProjectId == projectId && (teamId == null || item.TeamId == teamId) && (actorId == null || x.ActorId == actorId)));
         return Results.Ok(await HistoryPageAsync(rows, directory, page, pageSize, ct));

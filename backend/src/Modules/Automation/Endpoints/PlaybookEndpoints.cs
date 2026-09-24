@@ -17,9 +17,19 @@ public sealed record PlaybookView(
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
     string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version);
 
+/// <param name="InstructionsMarkdown">
+/// What agents should follow. Aictiq files it as a page in the wiki's Factory section, named
+/// after the playbook. Give this or <paramref name="WikiPageId"/>, a page already in that section.
+/// </param>
 public sealed record CreatePlaybookRequest(
     string? Name, Guid? WikiPageId, string? Harness,
-    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60);
+    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null);
+
+/// <param name="InFactorySection">
+/// False for a playbook from before its page had to live in the Factory section: saving new
+/// instructions files them there.
+/// </param>
+public sealed record PlaybookInstructionsView(Guid? WikiPageId, string? PageTitle, string Markdown, bool InFactorySection);
 
 public sealed class UpdatePlaybookRequest
 {
@@ -40,6 +50,8 @@ public sealed class UpdatePlaybookRequest
         init { _onFailureStateId = value; HasOnFailureStateId = true; }
     }
     public int? MaxMinutes { get; init; }
+    /// <summary>New instructions: a new revision of the playbook's Factory page, or a new page there when it has none.</summary>
+    public string? InstructionsMarkdown { get; init; }
     public uint Version { get; init; }
 
     [JsonIgnore] public bool HasOnSuccessStateId { get; private set; }
@@ -58,6 +70,8 @@ public sealed record UpdateFactorySettingsRequest(
 public static class PlaybookEndpoints
 {
     private const string StarterName = "Implement";
+    /// <summary>The wiki's page limit, which the instructions become.</summary>
+    private const int MaxInstructionsLength = 1_048_576;
 
     private const string StarterMarkdown = """
         # Implement
@@ -83,6 +97,7 @@ public static class PlaybookEndpoints
         playbooks.MapPost("/", CreateAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapPost("/starter", StarterAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapGet("/{playbookId:guid}", GetAsync).RequireProjectRole(ProjectRole.Member).RequireScope(Scopes.Read);
+        playbooks.MapGet("/{playbookId:guid}/instructions", InstructionsAsync).RequireProjectRole(ProjectRole.Admin).RequireScope(Scopes.Read);
         playbooks.MapPatch("/{playbookId:guid}", UpdateAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapDelete("/{playbookId:guid}", DeleteAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapPut("/{playbookId:guid}/default", PromoteAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
@@ -111,19 +126,42 @@ public static class PlaybookEndpoints
         return row is null ? NotFound() : Results.Ok(ToView(row));
     }
 
+    private static async Task<IResult> InstructionsAsync(
+        Guid playbookId, HttpContext http, AutomationDbContext db, IWikiPageContent content,
+        IWikiPageCreator factoryPages, CancellationToken ct)
+    {
+        var projectId = http.ResolvedProjectId()!.Value;
+        var row = await db.Playbooks.AsNoTracking()
+            .SingleOrDefaultAsync(playbook => playbook.Id == playbookId && playbook.ProjectId == projectId, ct);
+        if (row is null) return NotFound();
+        var page = row.WikiPageId is { } pageId ? await content.GetMarkdownAsync(pageId, projectId, ct) : null;
+        return Results.Ok(new PlaybookInstructionsView(page is null ? null : row.WikiPageId, page?.Title, page?.Markdown ?? "",
+            page is not null && await factoryPages.IsInFactorySectionAsync(row.WikiPageId!.Value, projectId, ct)));
+    }
+
     private static async Task<IResult> CreateAsync(
         CreatePlaybookRequest request, HttpContext http, AutomationDbContext db,
-        ICurrentTenant tenant, ICurrentUser user, IWikiPageAccess pages,
+        ICurrentTenant tenant, ICurrentUser user, IWikiPageAccess pages, IWikiPageCreator factoryPages,
         IProjectWorkflowAccess workflows, TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
-        if (request.WikiPageId is { } requestedPage
+        if (request.InstructionsMarkdown is null && request.WikiPageId is { } requestedPage
             && !await pages.CanReadAsync(requestedPage, projectId, user.UserId!, ct))
             return NotFound();
-        var errors = await ValidateAsync(request.Name, request.WikiPageId, request.Harness,
+        var errors = await ValidateAsync(request.Name, request.Harness,
             request.OnSuccessStateId, request.OnFailureStateId, request.MaxMinutes,
-            projectId, user.UserId!, pages, workflows, ct);
+            projectId, workflows, ct);
+        await ValidateInstructionsAsync(errors, request.InstructionsMarkdown,
+            request.InstructionsMarkdown is null ? request.WikiPageId : null, required: true, projectId, factoryPages, ct);
         if (errors.Count > 0) return Validation(errors);
+        // ux_playbooks_project_name would refuse the row anyway, but only after its page was written.
+        if (await NameTakenAsync(db, projectId, request.Name!, null, ct))
+            return Conflict("A playbook with this name already exists in this project.");
+
+        var pageId = request.InstructionsMarkdown is { } markdown
+            ? await factoryPages.CreateFactoryPageAsync(tenant.OrganizationId!.Value, projectId, user.UserId!, request.Name!.Trim(), markdown, ct)
+            : request.WikiPageId;
+        if (pageId is null) return Conflict("The wiki is not available to hold the instructions.");
 
         var now = clock.GetUtcNow();
         var row = new Playbook
@@ -131,7 +169,7 @@ public static class PlaybookEndpoints
             OrganizationId = tenant.OrganizationId!.Value,
             ProjectId = projectId,
             Name = request.Name!.Trim(),
-            WikiPageId = request.WikiPageId,
+            WikiPageId = pageId,
             Harness = request.Harness!,
             OnSuccessStateId = request.OnSuccessStateId,
             OnFailureStateId = request.OnFailureStateId,
@@ -142,13 +180,15 @@ public static class PlaybookEndpoints
         };
         db.Playbooks.Add(row);
         await db.SaveChangesAsync(ct);
+        // Which pages are playbooks decides who may read them (IFactoryPages).
+        await pages.InvalidateAsync(projectId, ct);
         return Results.Created($"{http.Request.Path}/{row.Id}", ToView(row));
     }
 
     private static async Task<IResult> UpdateAsync(
         Guid playbookId, UpdatePlaybookRequest request, HttpContext http, AutomationDbContext db,
-        ICurrentUser user, IWikiPageAccess pages, IProjectWorkflowAccess workflows,
-        TimeProvider clock, CancellationToken ct)
+        ICurrentTenant tenant, ICurrentUser user, IWikiPageAccess pages, IWikiPageCreator factoryPages,
+        IProjectWorkflowAccess workflows, TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
         var row = await db.Playbooks.SingleOrDefaultAsync(
@@ -162,13 +202,28 @@ public static class PlaybookEndpoints
         var maxMinutes = request.MaxMinutes ?? row.MaxMinutes;
         var successStateId = request.HasOnSuccessStateId ? request.OnSuccessStateId : row.OnSuccessStateId;
         var failureStateId = request.HasOnFailureStateId ? request.OnFailureStateId : row.OnFailureStateId;
-        if (pageId is { } requestedPage
+        if (request.InstructionsMarkdown is null && request.WikiPageId is { } requestedPage
             && !await pages.CanReadAsync(requestedPage, projectId, user.UserId!, ct))
             return NotFound();
-        var errors = await ValidateAsync(name, pageId, harness,
+        var errors = await ValidateAsync(name, harness,
             successStateId, failureStateId, maxMinutes,
-            projectId, user.UserId!, pages, workflows, ct);
+            projectId, workflows, ct);
+        // A playbook whose page predates the Factory section keeps working until its
+        // instructions are next saved; only a page named in this request must be there.
+        await ValidateInstructionsAsync(errors, request.InstructionsMarkdown,
+            request.InstructionsMarkdown is null ? request.WikiPageId : null, required: pageId is null, projectId, factoryPages, ct);
         if (errors.Count > 0) return Validation(errors);
+        if (await NameTakenAsync(db, projectId, name, row.Id, ct))
+            return Conflict("A playbook with this name already exists in this project.");
+
+        if (request.InstructionsMarkdown is { } markdown)
+        {
+            // Written in place when the page is already the factory's; otherwise the
+            // instructions move into the section and the old page stays as it was.
+            if (pageId is not { } current || !await factoryPages.WriteFactoryPageAsync(current, projectId, user.UserId!, markdown, ct))
+                pageId = await factoryPages.CreateFactoryPageAsync(tenant.OrganizationId!.Value, projectId, user.UserId!, name.Trim(), markdown, ct);
+            if (pageId is null) return Conflict("The wiki is not available to hold the instructions.");
+        }
 
         row.Name = name.Trim();
         row.WikiPageId = pageId;
@@ -180,11 +235,12 @@ public static class PlaybookEndpoints
         db.Entry(row).Property(playbook => playbook.Version).OriginalValue = request.Version;
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
+        await pages.InvalidateAsync(projectId, ct);
         return Results.Ok(ToView(row));
     }
 
     private static async Task<IResult> DeleteAsync(
-        Guid playbookId, HttpContext http, AutomationDbContext db, CancellationToken ct)
+        Guid playbookId, HttpContext http, AutomationDbContext db, IWikiPageAccess pages, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
         var row = await db.Playbooks.SingleOrDefaultAsync(
@@ -213,6 +269,7 @@ public static class PlaybookEndpoints
                 type: ProblemTypes.PlaybookInUse,
                 statusCode: StatusCodes.Status409Conflict);
         }
+        await pages.InvalidateAsync(projectId, ct);
         return Results.NoContent();
     }
 
@@ -238,7 +295,7 @@ public static class PlaybookEndpoints
 
     private static async Task<IResult> StarterAsync(
         HttpContext http, AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
-        IWikiPageCreator pages, TimeProvider clock, CancellationToken ct)
+        IWikiPageCreator pages, IWikiPageAccess access, TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
         if (await db.Playbooks.AnyAsync(
@@ -269,6 +326,7 @@ public static class PlaybookEndpoints
         db.Playbooks.Add(row);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        await access.InvalidateAsync(projectId, ct);
         return Results.Created(
             $"/api/v1/orgs/{http.Request.RouteValues["orgSlug"]}/projects/{http.Request.RouteValues["projectKey"]}/playbooks/{row.Id}",
             ToView(row));
@@ -339,10 +397,39 @@ public static class PlaybookEndpoints
         return Results.Ok(ToView(row));
     }
 
+    private static Task<bool> NameTakenAsync(AutomationDbContext db, Guid projectId, string name, Guid? exceptId, CancellationToken ct)
+    {
+        var lowered = name.Trim().ToLower();
+        return db.Playbooks.AnyAsync(playbook => playbook.ProjectId == projectId && playbook.Id != exceptId
+            && playbook.Name.ToLower() == lowered, ct);
+    }
+
+    /// <summary>
+    /// A playbook's instructions are written here, or name a page already in the wiki's
+    /// Factory section: never a page people write for each other, such as Home.
+    /// </summary>
+    private static async Task ValidateInstructionsAsync(Dictionary<string, string[]> errors, string? markdown,
+        Guid? pageId, bool required, Guid projectId, IWikiPageCreator factoryPages, CancellationToken ct)
+    {
+        if (markdown is not null)
+        {
+            if (string.IsNullOrWhiteSpace(markdown))
+                errors["instructionsMarkdown"] = ["Write the instructions agents should follow."];
+            else if (markdown.Length > MaxInstructionsLength)
+                errors["instructionsMarkdown"] = ["Instructions may not exceed 1 MB."];
+        }
+        else if (pageId is { } page)
+        {
+            if (!await factoryPages.IsInFactorySectionAsync(page, projectId, ct))
+                errors["wikiPageId"] = ["A playbook's page must be in the wiki's Factory section. Write the instructions on the playbook instead."];
+        }
+        else if (required)
+            errors["instructionsMarkdown"] = ["Write the instructions agents should follow."];
+    }
+
     private static async Task<Dictionary<string, string[]>> ValidateAsync(
-        string? name, Guid? pageId, string? harness, Guid? successStateId, Guid? failureStateId,
-        int maxMinutes, Guid projectId, string userId, IWikiPageAccess pages,
-        IProjectWorkflowAccess workflows, CancellationToken ct)
+        string? name, string? harness, Guid? successStateId, Guid? failureStateId,
+        int maxMinutes, Guid projectId, IProjectWorkflowAccess workflows, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > Playbook.MaxNameLength)
@@ -351,8 +438,6 @@ public static class PlaybookEndpoints
             errors["harness"] = ["Choose claude, codex, or opencode."];
         if (maxMinutes is < 5 or > 720)
             errors["maxMinutes"] = ["Choose between 5 and 720 minutes."];
-        if (pageId is null)
-            errors["wikiPageId"] = ["A wiki page is required."];
         var states = new[] { successStateId, failureStateId }.Where(id => id.HasValue)
             .Select(id => id!.Value).Distinct().ToArray();
         if (!await workflows.StatesBelongToProjectAsync(projectId, states, ct))

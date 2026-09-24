@@ -36,11 +36,11 @@ public static class SearchEndpoints
         return api;
     }
 
-    private static Task<IResult> ProjectSearch(HttpContext http, WorkItemsDbContext db, IWikiSearch wiki, ICurrentUser user, string? q, string? types,
-        int limit = 20, CancellationToken ct = default) =>
-        SearchAsync(db, wiki, [http.ResolvedProjectId()!.Value], user.UserId!, q, types, limit, ct);
+    private static Task<IResult> ProjectSearch(HttpContext http, WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory,
+        ICurrentUser user, ICurrentTenant tenant, string? q, string? types, int limit = 20, CancellationToken ct = default) =>
+        SearchAsync(db, wiki, access, directory, tenant.OrganizationId!.Value, [http.ResolvedProjectId()!.Value], user.UserId!, q, types, limit, ct);
 
-    private static async Task<IResult> OrganizationSearch(WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, ICurrentUser user,
+    private static async Task<IResult> OrganizationSearch(WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory, ICurrentUser user,
         ICurrentTenant tenant, string? q, string? types, int limit = 20, CancellationToken ct = default)
     {
         // Project visibility belongs to Tenancy. We hand it candidate ids, rather than joining
@@ -53,11 +53,11 @@ public static class SearchEndpoints
         {
             if (await access.GetProjectRoleAsync(user.UserId!, id, ct) is not null) visible.Add(id);
         }
-        return await SearchAsync(db, wiki, visible, user.UserId!, q, types, limit, ct);
+        return await SearchAsync(db, wiki, access, directory, tenant.OrganizationId!.Value, visible, user.UserId!, q, types, limit, ct);
     }
 
-    private static async Task<IResult> SearchAsync(WorkItemsDbContext db, IWikiSearch wiki, IReadOnlyList<Guid> projectIds, string userId, string? rawQuery,
-        string? rawTypes, int limit, CancellationToken ct)
+    private static async Task<IResult> SearchAsync(WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory,
+        Guid organizationId, IReadOnlyList<Guid> projectIds, string userId, string? rawQuery, string? rawTypes, int limit, CancellationToken ct)
     {
         var query = SearchQuery.Normalize(rawQuery);
         if (query is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["A search query is required."] });
@@ -82,7 +82,11 @@ public static class SearchEndpoints
             var numbered = await NumberedItemsAsync(db, projectIds, number, take, ct);
             items = numbered.Concat(items.Where(x => numbered.All(n => n.Id != x.Id))).Take(take).ToList();
         }
-        var comments = includeComments ? await FullTextCommentsAsync(db, projectIds, query, take, ct) : [];
+        var comments = includeComments
+            ? await FullTextCommentsAsync(db, projectIds, query, take,
+                await FactoryVisibility.HiddenAuthorsAsync(access, directory, userId, organizationId,
+                    db.Comments.AsNoTracking().Where(x => db.Items.Any(i => i.Id == x.ItemId && projectIds.Contains(i.ProjectId))), ct) ?? [], ct)
+            : [];
         var pages = includePages ? (await wiki.SearchAsync(projectIds, query, take, userId, ct)).Select(x => new SearchPageResult(x.Id, x.ProjectId, x.Slug, x.Title, x.Snippet, x.Rank)).ToList() : [];
         // pg_trgm is deliberately a fallback. A correct lexical result must never lose to a
         // fuzzy one, and the index only exists on titles where a typo is most likely.
@@ -180,7 +184,9 @@ public static class SearchEndpoints
         return results;
     }
 
-    private static async Task<List<SearchCommentResult>> FullTextCommentsAsync(WorkItemsDbContext db, IReadOnlyList<Guid> projects, string query, int limit, CancellationToken ct)
+    /// <param name="hiddenAuthors">Agents whose comments, and threads, the caller may not see (<see cref="FactoryVisibility"/>).</param>
+    private static async Task<List<SearchCommentResult>> FullTextCommentsAsync(WorkItemsDbContext db, IReadOnlyList<Guid> projects, string query, int limit,
+        string[] hiddenAuthors, CancellationToken ct)
     {
         const string sql = """
             WITH search_query AS (SELECT websearch_to_tsquery('english', @query) || websearch_to_tsquery('simple', @query) AS value)
@@ -192,11 +198,14 @@ public static class SearchEndpoints
             JOIN work.items item ON item.id = comment.item_id
             CROSS JOIN search_query
             WHERE item.project_id = ANY(@projects) AND comment.deleted_at IS NULL AND comment.search @@ search_query.value
+              AND NOT comment.author_id = ANY(@hidden)
+              AND NOT EXISTS (SELECT 1 FROM work.comments root WHERE root.id = comment.parent_comment_id AND root.author_id = ANY(@hidden))
             ORDER BY rank DESC, comment.created_at DESC, comment.id
             LIMIT @limit
             """;
         await using var command = await CommandAsync(db, sql, projects, query, ct);
         command.Parameters.AddWithValue("limit", limit);
+        command.Parameters.AddWithValue("hidden", NpgsqlDbType.Array | NpgsqlDbType.Text, hiddenAuthors);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var results = new List<SearchCommentResult>();
         while (await reader.ReadAsync(ct)) results.Add(new SearchCommentResult(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetFloat(4)));

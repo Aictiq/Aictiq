@@ -96,8 +96,106 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
         Assert.Equal(HttpStatusCode.NotFound, wrongPage.StatusCode);
 
         var wrongState = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
-            new CreatePlaybookRequest("Wrong state", page.Id, "codex", otherState, null, 60), ApiTestContext.Json, Ct);
+            new CreatePlaybookRequest("Wrong state", null, "codex", otherState, null, 60, "Do it."), ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, wrongState.StatusCode);
+    }
+
+    [Fact]
+    public async Task instructions_written_on_the_playbook_live_in_the_factory_section_and_nowhere_else()
+    {
+        // Home is made by a Workers handler this test host does not run; any page outside the
+        // section is refused the same way.
+        var home = await CreatePageAsync(_project, "Home");
+        var onHome = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("On home", home.Id, "claude", null, null), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, onHome.StatusCode);
+        Assert.Contains("Factory section", await onHome.Content.ReadAsStringAsync(Ct));
+        var empty = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Empty", null, "claude", null, null), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+
+        var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Triage", null, "codex", null, null, 30, "# Triage\n\nLabel the bug."), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        var tree = await TreeAsync(_project);
+        var section = tree.Single(x => x.Slug == "factory");
+        var page = tree.Single(x => x.Id == playbook.WikiPageId);
+        Assert.Equal("Triage", page.Title);
+        Assert.Equal(section.Id, page.ParentId);
+
+        // A second playbook joins the same section; a taken name writes no page at all.
+        var taken = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("triage", null, "codex", null, null, 30, "Again."), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, taken.StatusCode);
+        var another = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Label", null, "codex", null, null, 30, "Label it."), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Created, another.StatusCode);
+        tree = await TreeAsync(_project);
+        Assert.Single(tree, x => x.Slug == "factory");
+        Assert.Equal(2, tree.Count(x => x.ParentId == section.Id));
+
+        var instructions = (await _owner.GetFromJsonAsync<PlaybookInstructionsView>(
+            $"{Base(_project)}/playbooks/{playbook.Id}/instructions", ApiTestContext.Json, Ct))!;
+        Assert.Equal("# Triage\n\nLabel the bug.", instructions.Markdown);
+        Assert.True(instructions.InFactorySection);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _member.GetAsync($"{Base(_project)}/playbooks/{playbook.Id}/instructions", Ct)).StatusCode);
+
+        // Editing them is a new revision of the same page.
+        var updated = await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { InstructionsMarkdown = "# Triage\n\nLabel and prioritise the bug.", Version = playbook.Version }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        Assert.Equal(playbook.WikiPageId, (await updated.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!.WikiPageId);
+        var revisions = (await _owner.GetFromJsonAsync<List<WikiRevisionView>>(
+            $"/api/v1/orgs/{Slug}/wiki/pages/{playbook.WikiPageId}/revisions", ApiTestContext.Json, Ct))!;
+        Assert.Equal(2, revisions.Count);
+
+        // The page cannot leave the section from the wiki either.
+        var wikiPage = (await _owner.GetFromJsonAsync<WikiPageView>($"/api/v1/orgs/{Slug}/wiki/pages/{playbook.WikiPageId}", ApiTestContext.Json, Ct))!;
+        var moved = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/wiki/pages/{wikiPage.Id}/move",
+            new MoveWikiPageRequest(null, 0, wikiPage.Version), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, moved.StatusCode);
+    }
+
+    [Fact]
+    public async Task a_playbook_on_home_from_before_the_rule_moves_into_the_factory_section_when_its_instructions_are_saved()
+    {
+        var created = await _owner.PostAsJsonAsync($"{Base(_otherProject)}/playbooks",
+            new CreatePlaybookRequest("Legacy", null, "claude", null, null, 60, "Placeholder."), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        var home = await CreatePageAsync(_otherProject, "Home");
+        await using (var connection = new NpgsqlConnection(_context.ConnectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = new NpgsqlCommand("UPDATE automation.playbooks SET wiki_page_id = @page WHERE id = @id", connection);
+            command.Parameters.AddWithValue("page", home.Id);
+            command.Parameters.AddWithValue("id", playbook.Id);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        playbook = (await _owner.GetFromJsonAsync<PlaybookView>($"{Base(_otherProject)}/playbooks/{playbook.Id}", ApiTestContext.Json, Ct))!;
+        Assert.False((await _owner.GetFromJsonAsync<PlaybookInstructionsView>(
+            $"{Base(_otherProject)}/playbooks/{playbook.Id}/instructions", ApiTestContext.Json, Ct))!.InFactorySection);
+
+        // Other edits leave it be.
+        var renamed = await _owner.PatchAsJsonAsync($"{Base(_otherProject)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { Name = "Legacy build", Version = playbook.Version }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        playbook = (await renamed.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(home.Id, playbook.WikiPageId);
+
+        var saved = await _owner.PatchAsJsonAsync($"{Base(_otherProject)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { InstructionsMarkdown = "Build it.", Version = playbook.Version }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var moved = (await saved.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.NotEqual(home.Id, moved.WikiPageId);
+        var instructions = (await _owner.GetFromJsonAsync<PlaybookInstructionsView>(
+            $"{Base(_otherProject)}/playbooks/{playbook.Id}/instructions", ApiTestContext.Json, Ct))!;
+        Assert.True(instructions.InFactorySection);
+        Assert.Equal("Build it.", instructions.Markdown);
+        Assert.Equal("Legacy build", instructions.PageTitle);
+        // Home keeps what it had.
+        Assert.Equal("Home", (await _owner.GetFromJsonAsync<WikiPageView>($"/api/v1/orgs/{Slug}/wiki/pages/{home.Id}", ApiTestContext.Json, Ct))!.Title);
     }
 
     [Fact]
@@ -106,9 +204,8 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
         var starterResponse = await _owner.PostAsync($"{Base(_project)}/playbooks/starter", null, Ct);
         starterResponse.EnsureSuccessStatusCode();
         var starter = (await starterResponse.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
-        var page = await CreatePageAsync(_project, "Review");
         var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
-            new CreatePlaybookRequest("Review", page.Id, "opencode", null, null, 90), ApiTestContext.Json, Ct);
+            new CreatePlaybookRequest("Review", null, "opencode", null, null, 90, "Review the change."), ApiTestContext.Json, Ct);
         created.EnsureSuccessStatusCode();
         var second = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
 
@@ -167,11 +264,11 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
     [Fact]
     public async Task deleting_a_wiki_page_nulls_the_pointer_without_deleting_the_playbook()
     {
-        var page = await CreatePageAsync(_project, "Disposable instructions");
         var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
-            new CreatePlaybookRequest("Disposable", page.Id, "claude", null, null, 60), ApiTestContext.Json, Ct);
+            new CreatePlaybookRequest("Disposable", null, "claude", null, null, 60, "Disposable instructions"), ApiTestContext.Json, Ct);
         created.EnsureSuccessStatusCode();
         var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        var page = new { Id = playbook.WikiPageId!.Value };
 
         await using var scope = _context.Factory.Services.CreateAsyncScope();
         var handler = new AutomationWikiPagesDeletedHandler(
@@ -187,10 +284,9 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
     [Fact]
     public async Task members_read_admins_write_and_non_members_see_404()
     {
-        var page = await CreatePageAsync(_project, "Permissions");
         Assert.Equal(HttpStatusCode.OK, (await _member.GetAsync($"{Base(_project)}/playbooks", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await _member.PostAsJsonAsync($"{Base(_project)}/playbooks",
-            new CreatePlaybookRequest("No", page.Id, "claude", null, null, 60), ApiTestContext.Json, Ct)).StatusCode);
+            new CreatePlaybookRequest("No", null, "claude", null, null, 60, "No."), ApiTestContext.Json, Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _stranger.GetAsync($"{Base(_project)}/playbooks", Ct)).StatusCode);
     }
 
@@ -233,6 +329,9 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<WikiPageView>(ApiTestContext.Json, Ct))!;
     }
+
+    private async Task<List<WikiTreePageView>> TreeAsync(ProjectView project) =>
+        (await _owner.GetFromJsonAsync<List<WikiTreePageView>>($"{Base(project)}/wiki/tree", ApiTestContext.Json, Ct))!;
 
     private async Task<List<WorkflowView>> WorkflowsAsync(ProjectView project) =>
         (await _owner.GetFromJsonAsync<List<WorkflowView>>(

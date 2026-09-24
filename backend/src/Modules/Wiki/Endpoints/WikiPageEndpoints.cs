@@ -155,7 +155,7 @@ public static partial class WikiPageEndpoints
     }
 
     private static async Task<IResult> Move(Guid pageId, MoveWikiPageRequest request, WikiDbContext db,
-        ICurrentUser user, IWikiPageAccess access, TimeProvider clock, TenancyDbContext tenancy, HttpContext http, CancellationToken ct)
+        ICurrentUser user, IWikiPageAccess access, IFactoryPages factory, TimeProvider clock, TenancyDbContext tenancy, HttpContext http, CancellationToken ct)
     {
         var page = await FindWritableAsync(db, access, user.UserId!, pageId, ct);
         if (page is null) return Results.NotFound();
@@ -170,6 +170,12 @@ public static partial class WikiPageEndpoints
             if (await IsDescendantAsync(db, page.Id, parentId, ct)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentId"] = ["A page cannot be moved below one of its descendants."] });
             if (await DepthAsync(db, parentId, ct) >= MaxDepth || await SubtreeDepthAsync(db, page.Id, ct) + await DepthAsync(db, parentId, ct) > MaxDepth)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentId"] = [$"Pages can be nested at most {MaxDepth} levels."] });
+        }
+        if (!page.IsFactorySection && !await InFactorySectionAsync(db, page.ProjectId, request.ParentId, ct))
+        {
+            var playbookPages = await factory.ListPlaybookPageIdsAsync(page.ProjectId, ct);
+            if (playbookPages.Count > 0 && (await SubtreeIdsAsync(db, page.Id, ct)).Any(playbookPages.Contains))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentId"] = ["A playbook's page stays in the Factory section."] });
         }
         var siblings = await db.Pages.Where(x => x.ProjectId == page.ProjectId && x.ParentId == request.ParentId && x.Id != page.Id)
             .OrderBy(x => x.Position).ThenBy(x => x.Id).ToListAsync(ct);
@@ -362,7 +368,18 @@ public static partial class WikiPageEndpoints
         return page is not null && await access.CanWriteAsync(page.Id, page.ProjectId, userId, ct) ? page : null;
     }
 
-    private static WikiPageRevision NewRevision(WikiPage page, int number, string markdown, string authorId, DateTimeOffset at, string? summary) => new()
+    /// <summary>Whether a page placed under <paramref name="parentId"/> would be in the Factory section.</summary>
+    private static async Task<bool> InFactorySectionAsync(WikiDbContext db, Guid projectId, Guid? parentId, CancellationToken ct)
+    {
+        if (parentId is null) return false;
+        var pages = await db.Pages.AsNoTracking().Where(x => x.ProjectId == projectId)
+            .Select(x => new { x.Id, x.ParentId, x.IsFactorySection }).ToDictionaryAsync(x => x.Id, ct);
+        for (Guid? current = parentId; current is { } id && pages.TryGetValue(id, out var row); current = row.ParentId)
+            if (row.IsFactorySection) return true;
+        return false;
+    }
+
+    internal static WikiPageRevision NewRevision(WikiPage page, int number, string markdown, string authorId, DateTimeOffset at, string? summary) => new()
     {
         OrganizationId = page.OrganizationId, PageId = page.Id, Number = number, ContentMarkdown = markdown,
         ContentHtml = Render(markdown), AuthorId = authorId, At = at, Summary = summary
@@ -415,7 +432,7 @@ public static partial class WikiPageEndpoints
         page.LinkedItems(revision.Id, found.Select(x => x.Id).ToArray());
     }
 
-    private static async Task<string> UniqueSlugAsync(WikiDbContext db, Guid projectId, Guid? parentId, string title, Guid? exceptId, CancellationToken ct)
+    internal static async Task<string> UniqueSlugAsync(WikiDbContext db, Guid projectId, Guid? parentId, string title, Guid? exceptId, CancellationToken ct)
     {
         var stem = Slugify(title); var used = await db.Pages.Where(x => x.ProjectId == projectId && x.ParentId == parentId && x.Id != exceptId)
             .Select(x => x.Slug).ToListAsync(ct); var set = used.ToHashSet(StringComparer.OrdinalIgnoreCase);

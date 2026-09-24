@@ -6,6 +6,7 @@ import {
   deletePlaybook,
   getFactorySettings,
   getPlaybook,
+  getPlaybookInstructions,
   listPlaybooks,
   promotePlaybook,
   updateFactorySettings,
@@ -38,6 +39,7 @@ describe('the playbook endpoints', () => {
     await createStarterPlaybook('acme', 'ACME')
     await promotePlaybook('acme', 'ACME', 'p1')
     await deletePlaybook('acme', 'ACME', 'p1')
+    await getPlaybookInstructions('acme', 'ACME', 'p1')
 
     expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/v1/orgs/acme/projects/ACME/playbooks')
     expect(String(fetchMock.mock.calls[1]![0])).toBe('/api/v1/orgs/acme/projects/ACME/playbooks/p1')
@@ -50,13 +52,16 @@ describe('the playbook endpoints', () => {
     )
     expect(fetchMock.mock.calls[3]![1]!.method).toBe('PUT')
     expect(fetchMock.mock.calls[4]![1]!.method).toBe('DELETE')
+    expect(String(fetchMock.mock.calls[5]![0])).toBe(
+      '/api/v1/orgs/acme/projects/ACME/playbooks/p1/instructions',
+    )
   })
 
-  it('creates and patches with the wiki page, run outcomes and concurrency version', async () => {
+  it('creates and patches with the instructions, run outcomes and concurrency version', async () => {
     const fetchMock = stubFetch({ id: 'p1' })
     const body = {
       name: 'Implement',
-      wikiPageId: 'w1',
+      instructionsMarkdown: '# Implement\n\nShip it.',
       harness: 'claude' as const,
       onSuccessStateId: 'done',
       onFailureStateId: null,

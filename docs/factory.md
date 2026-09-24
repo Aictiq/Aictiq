@@ -11,7 +11,7 @@ There are five parts:
 | **Agent** | The bot identity that claims the item, comments, commits, and opens the pull request. A person owns every agent. |
 | **Runner** | The `aictiq runner` process on a VPS, laptop, or CI host. It starts a supported coding harness. |
 | **Run** | One attempt to complete one item as one agent with one playbook. |
-| **Playbook** | Reusable project instructions stored on a versioned wiki page, plus a harness, time limit, and success/failure states. |
+| **Playbook** | Reusable project instructions, kept as a versioned page in the wiki's Factory section, plus a harness, time limit, and success/failure states. |
 | **Rule** | An optional trigger that starts a playbook when an item enters a workflow state, optionally only when it has a label. |
 
 The examples below use a Linux VPS and a runner-local checkout. Owners and organization
@@ -203,11 +203,19 @@ One process supports 1–16 concurrent runs, but the whole process is still one 
 ## 4. Write the first playbook
 
 Open **Factory → Playbooks**, find the project, and choose **Create starter**. Aictiq creates
-an **Implement** playbook and its editable wiki page. The starter covers reading the full
+an **Implement** playbook. The starter covers reading the full
 item, branch and commit naming, claim heartbeats, one editable progress comment, tests, the
-pull request, and clean release on an incomplete attempt.
+pull request, and clean release on an incomplete attempt. **New playbook** starts from a blank
+page: write the instructions in the playbook dialog.
 
-Edit the wiki page for the repository rather than repeating instructions in tickets. A good
+Aictiq keeps every playbook's instructions as a page in the project wiki's **Factory**
+section, named after the playbook, so their revision history is reviewable there. A playbook
+cannot use a page outside that section, such as **Home**, and the wiki refuses to move a
+playbook's page out of it. A playbook created before this rule keeps working. The next time
+its instructions are saved, they move to a new page in the section and the old page is left
+as it was.
+
+Edit the instructions for the repository rather than repeating them in tickets. A good
 playbook states:
 
 - a concrete definition of done, including the expected pull request;
@@ -231,8 +239,8 @@ For example:
 
 Choose the harness installed on the runner, a time limit, and the states to use on success
 and failure. Make the playbook the project default if CLI/MCP callers should be able to omit
-its name. The wiki page is the prompt text, and its wiki permissions are the prompt's access
-control: a person who cannot read the page cannot manually start a run from it. Keep secrets
+its name. The instructions are the prompt text, and their wiki page's permissions are the
+prompt's access control: a person who cannot read the page cannot manually start a run from it. Keep secrets
 out of playbooks and review their revision history like code.
 
 ## 5. Start a run and read its result
@@ -280,7 +288,11 @@ Member access and factory operation disabled.
 
 A stakeholder can see the project board, create items, comment, and follow a run's visible
 status and pull request. They cannot open the Factory area, start or cancel runs, or read a
-run's prompt, failure reason, or log. Use the **Team** invitation instead when a colleague
+run's prompt, failure reason, or log. Anything that shows how the factory works is hidden from
+them as well: comments written by agents, every reply in a thread an agent started, run
+outcome comments and the run's own history entries, and the wiki's **Factory** section with
+every page in it, as well as any older playbook page that is still outside it. These stay out of their search
+results, notifications, the MCP tools and the agent activity feed too. Use the **Team** invitation instead when a colleague
 should operate the factory; only a Member's **Can start AI work** flag is optional-Owners and
 Admins always can, and Guests never can.
 

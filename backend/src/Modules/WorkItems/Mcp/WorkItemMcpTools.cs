@@ -86,11 +86,12 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         var chain = new List<string>();
         for (var parent = item.ParentId; parent is { } id && chain.Count < 10;)
         { var row = await db.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken); if (row is null) break; chain.Add(row.Key); parent = row.ParentId; }
-        var comments = await db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id && x.DeletedAt == null).OrderBy(x => x.CreatedAt).Take(200).Select(x => new { x.AuthorId, x.BodyMarkdown, x.CreatedAt }).ToListAsync(cancellationToken);
+        var visibleComments = await VisibleCommentsAsync(item, cancellationToken);
+        var comments = await visibleComments.Where(x => x.DeletedAt == null).OrderBy(x => x.CreatedAt).Take(200).Select(x => new { x.AuthorId, x.BodyMarkdown, x.CreatedAt }).ToListAsync(cancellationToken);
         var links = await db.ItemLinks.AsNoTracking().Where(x => x.ItemId == item.Id).Take(200).Select(x => new { x.Kind, x.Url, x.Title }).ToListAsync(cancellationToken);
         var attachments = await db.Attachments.AsNoTracking()
             .Where(x => x.Status == AttachmentStatus.Committed &&
-                (x.ItemId == item.Id || x.CommentId != null && db.Comments.Any(comment => comment.Id == x.CommentId && comment.ItemId == item.Id && comment.DeletedAt == null)))
+                (x.ItemId == item.Id || x.CommentId != null && visibleComments.Any(comment => comment.Id == x.CommentId && comment.DeletedAt == null)))
             .OrderBy(x => x.CreatedAt)
             .Select(x => new { x.Id, x.FileName, x.ContentType, x.SizeBytes, x.CommentId })
             .ToListAsync(cancellationToken);
@@ -171,7 +172,14 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
 
     [McpServerTool(Name = "list_comments", ReadOnly = true)]
     public async Task<IReadOnlyList<object>> ListComments(string key, int limit = 100, CancellationToken cancellationToken = default)
-    { if (limit is < 1 or > 200) throw new McpException("limit must be between 1 and 200."); var item = await Visible(key, cancellationToken); if (item is null) return []; return await db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id && x.DeletedAt == null).OrderBy(x => x.CreatedAt).Take(limit).Select(x => (object)new { contentStart = McpContentBoundary.Begin, x.Id, x.AuthorId, x.BodyMarkdown, x.CreatedAt, contentEnd = McpContentBoundary.End }).ToListAsync(cancellationToken); }
+    { if (limit is < 1 or > 200) throw new McpException("limit must be between 1 and 200."); var item = await Visible(key, cancellationToken); if (item is null) return []; return await (await VisibleCommentsAsync(item, cancellationToken)).Where(x => x.DeletedAt == null).OrderBy(x => x.CreatedAt).Take(limit).Select(x => (object)new { contentStart = McpContentBoundary.Begin, x.Id, x.AuthorId, x.BodyMarkdown, x.CreatedAt, contentEnd = McpContentBoundary.End }).ToListAsync(cancellationToken); }
+
+    /// <summary>The item's comments, less the factory's when the caller may not operate it (<see cref="FactoryVisibility"/>).</summary>
+    private async Task<IQueryable<Comment>> VisibleCommentsAsync(WorkItem item, CancellationToken cancellationToken)
+    {
+        var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
+        return onItem.WithoutFactory(db, await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, cancellationToken));
+    }
 
     /// <summary>
     /// Editing a comment is what makes an agent's progress reporting idempotent: it finds

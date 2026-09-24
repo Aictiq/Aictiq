@@ -24,7 +24,11 @@ export interface Playbook {
 
 export interface SavePlaybookBody {
   name: string
-  wikiPageId: string
+  /**
+   * What agents follow. Aictiq keeps it as a page in the wiki's Factory section, named after
+   * the playbook, so its history is reviewable there.
+   */
+  instructionsMarkdown: string
   harness: PlaybookHarness
   onSuccessStateId: string | null
   onFailureStateId: string | null
@@ -33,6 +37,14 @@ export interface SavePlaybookBody {
 
 export interface UpdatePlaybookBody extends Partial<SavePlaybookBody> {
   version: number
+}
+
+export interface PlaybookInstructions {
+  wikiPageId: string | null
+  pageTitle: string | null
+  markdown: string
+  /** False for a playbook whose page predates the Factory section; saving moves it there. */
+  inFactorySection: boolean
 }
 
 export type RepositorySource = 0 | 1
@@ -71,6 +83,9 @@ export const getPlaybook = (slug: string, projectKey: string, id: string) =>
 
 export const createPlaybook = (slug: string, projectKey: string, body: SavePlaybookBody) =>
   apiFetch<Playbook>(playbooksBase(slug, projectKey), { method: 'POST', body })
+
+export const getPlaybookInstructions = (slug: string, projectKey: string, id: string) =>
+  apiFetch<PlaybookInstructions>(`${playbooksBase(slug, projectKey)}/${id}/instructions`)
 
 export const updatePlaybook = (
   slug: string,

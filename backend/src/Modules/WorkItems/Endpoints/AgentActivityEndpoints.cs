@@ -61,10 +61,17 @@ public static class AgentActivityEndpoints
         if (projectIds.Count == 0) return Results.Ok(Array.Empty<AgentActivityEntry>());
         var take = Math.Clamp(limit, 1, 200);
 
+        var operates = await access.CanOperateFactoryAsync(user.UserId!, tenant.OrganizationId!.Value, ct);
         var history = db.ItemHistory.AsNoTracking()
             .Join(db.Items.AsNoTracking(), h => h.ItemId, i => i.Id, (h, i) => new { h.EventId, h.ActorId, h.At, h.Field, i.Key, i.Title, i.ProjectId })
-            .Where(x => projectIds.Contains(x.ProjectId));
-        var comments = db.Comments.AsNoTracking()
+            .Where(x => projectIds.Contains(x.ProjectId))
+            // A run's own record of itself is the factory's log; see FactoryVisibility.
+            .Where(x => operates || x.Field != "run-finished");
+        var visibleComments = db.Comments.AsNoTracking().Where(c => db.Items.Any(i => i.Id == c.ItemId && projectIds.Contains(i.ProjectId)));
+        visibleComments = visibleComments.WithoutFactory(db, operates
+            ? null
+            : await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, tenant.OrganizationId!.Value, visibleComments, ct));
+        var comments = visibleComments
             .Join(db.Items.AsNoTracking(), c => c.ItemId, i => i.Id, (c, i) => new { c.AuthorId, c.CreatedAt, c.BodyMarkdown, c.DeletedAt, i.Key, i.Title, i.ProjectId })
             .Where(x => x.DeletedAt == null && projectIds.Contains(x.ProjectId));
 

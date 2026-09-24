@@ -12,6 +12,12 @@ public sealed class WikiPage : TenantEntity, IAudited
     public required string Title { get; set; }
     public int Position { get; set; }
     public Guid? CurrentRevisionId { get; set; }
+    /// <summary>
+    /// The root of the project's Factory section, where every playbook's page lives. A flag
+    /// rather than a slug, so renaming or moving the section cannot turn it into an
+    /// ordinary page; at most one per project.
+    /// </summary>
+    public bool IsFactorySection { get; init; }
     public required string CreatedBy { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; set; }

@@ -7,6 +7,7 @@ import {
   createPlaybook,
   createStarterPlaybook,
   deletePlaybook,
+  getPlaybookInstructions,
   listPlaybooks,
   playbookHarnesses,
   promotePlaybook,
@@ -17,13 +18,12 @@ import {
 } from '@/api/playbooks'
 import { withBoardNames } from '@/api/boards'
 import { listProjects, type Project } from '@/api/projects'
-import { wikiTree, type WikiTreePage } from '@/api/wiki'
 import { listWorkflows, type WorkflowState } from '@/api/workflows'
 import EmptyState from '@/components/common/EmptyState.vue'
+import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
-import WikiPageTree from '@/components/wiki/WikiPageTree.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -61,14 +61,15 @@ const failed = ref(false)
 const busyId = ref<string | null>(null)
 
 const editing = ref<{ group: ProjectPlaybooks; playbook: Playbook | null } | null>(null)
-const pages = ref<WikiTreePage[]>([])
-const pagesLoading = ref(false)
+const instructionsLoading = ref(false)
+/** The playbook's page is outside the Factory section, from before that was required. */
+const legacyPage = ref<string | null>(null)
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
 const confirmingDelete = ref<{ group: ProjectPlaybooks; playbook: Playbook } | null>(null)
 
 const name = ref('')
-const wikiPageId = ref('')
+const instructions = ref('')
 const harness = ref<PlaybookHarness>('claude')
 const onSuccessStateId = ref('')
 const onFailureStateId = ref('')
@@ -77,12 +78,12 @@ const maxMinutes = ref(60)
 const mayEditCurrent = computed(
   () => editing.value?.group.project.role === 'admin' && !editing.value.group.project.isArchived,
 )
-const selectedPage = computed(() => pages.value.find((page) => page.id === wikiPageId.value))
 const canSubmit = computed(
   () =>
     mayEditCurrent.value &&
+    !instructionsLoading.value &&
     name.value.trim().length > 0 &&
-    wikiPageId.value.length > 0 &&
+    instructions.value.trim().length > 0 &&
     maxMinutes.value >= 5 &&
     maxMinutes.value <= 720,
 )
@@ -133,20 +134,25 @@ function replace(group: ProjectPlaybooks, saved: Playbook) {
 async function openEditor(group: ProjectPlaybooks, playbook: Playbook | null = null) {
   editing.value = { group, playbook }
   name.value = playbook?.name ?? ''
-  wikiPageId.value = playbook?.wikiPageId ?? ''
+  instructions.value = ''
+  legacyPage.value = null
   harness.value = playbook?.harness ?? 'claude'
   onSuccessStateId.value = playbook?.onSuccessStateId ?? ''
   onFailureStateId.value = playbook?.onFailureStateId ?? ''
   maxMinutes.value = playbook?.maxMinutes ?? 60
   fieldErrors.value = {}
-  pages.value = []
-  pagesLoading.value = true
+  if (!playbook) return
+  instructionsLoading.value = true
   try {
-    pages.value = await wikiTree(org.slug.value, group.project.key)
+    const current = await getPlaybookInstructions(org.slug.value, group.project.key, playbook.id)
+    // The dialog may have been closed or reopened on another playbook meanwhile.
+    if (editing.value?.playbook?.id !== playbook.id) return
+    instructions.value = current.markdown
+    legacyPage.value = current.wikiPageId && !current.inFactorySection ? current.pageTitle : null
   } catch (error) {
     toast.error(error)
   } finally {
-    pagesLoading.value = false
+    instructionsLoading.value = false
   }
 }
 
@@ -160,7 +166,7 @@ async function save() {
 
   const body: SavePlaybookBody = {
     name: name.value.trim(),
-    wikiPageId: wikiPageId.value,
+    instructionsMarkdown: instructions.value,
     harness: harness.value,
     onSuccessStateId: onSuccessStateId.value || null,
     onFailureStateId: onFailureStateId.value || null,
@@ -261,8 +267,8 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
     <header class="pb-3">
       <h2 class="text-sm font-medium">Playbooks</h2>
       <p class="text-muted-foreground mt-0.5 text-xs">
-        Reusable instructions for an agent run. The instructions themselves stay in the wiki, where
-        the team can review their history.
+        Reusable instructions for an agent run. Aictiq keeps them in the wiki's Factory section,
+        where operators can review their history. Stakeholders never see them.
       </p>
     </header>
 
@@ -349,7 +355,7 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                 class="text-primary mt-1 inline-flex items-center gap-1 text-xs hover:underline"
                 :to="wikiPath(org.slug.value, group.project.key, playbook.wikiPageId)"
               >
-                Open wiki page <ExternalLink class="size-3" aria-hidden="true" />
+                Open in wiki <ExternalLink class="size-3" aria-hidden="true" />
               </RouterLink>
               <p v-else class="text-destructive mt-1 text-xs">Backing page missing</p>
             </div>
@@ -388,7 +394,7 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
         <DialogHeader>
           <DialogTitle>{{ editing?.playbook ? 'Edit playbook' : 'New playbook' }}</DialogTitle>
           <DialogDescription>
-            Choose a wiki page for the instructions, then set how an agent should run them.
+            Write the instructions an agent follows, then set how it runs them.
           </DialogDescription>
         </DialogHeader>
 
@@ -407,35 +413,35 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
             </p>
           </div>
 
-          <fieldset class="space-y-1.5">
-            <legend class="text-sm font-medium">Wiki page</legend>
-            <div class="border-border max-h-44 overflow-y-auto rounded-md border p-1">
-              <p v-if="pagesLoading" class="text-muted-foreground p-2 text-xs">Loading pages…</p>
-              <p v-else-if="pages.length === 0" class="text-muted-foreground p-2 text-xs">
-                This project has no visible wiki pages. Create one in the wiki first.
-              </p>
-              <WikiPageTree
-                v-else
-                :pages="pages"
-                :selected-id="wikiPageId"
-                @select="wikiPageId = $event.id"
+          <div class="space-y-1.5">
+            <span id="playbook-instructions-label" class="text-sm font-medium">Instructions</span>
+            <p v-if="instructionsLoading" class="text-muted-foreground text-xs">
+              Loading instructions…
+            </p>
+            <div v-else aria-labelledby="playbook-instructions-label">
+              <MarkdownEditor
+                v-model="instructions"
+                placeholder="What should the agent do with the item it is given?"
               />
             </div>
-            <p class="text-muted-foreground text-xs">
-              {{
-                selectedPage
-                  ? `Selected: ${selectedPage.title}`
-                  : 'Select the page agents should follow.'
-              }}
+            <p v-if="legacyPage" class="text-muted-foreground text-xs">
+              These are on the wiki page “{{ legacyPage }}”, outside the Factory section. Saving
+              moves them to a new page there and leaves “{{ legacyPage }}” as it is.
+            </p>
+            <p v-else class="text-muted-foreground text-xs">
+              Kept as a page in the wiki's Factory section, with its revision history.
             </p>
             <p
-              v-for="message in fieldErrors.wikiPageId"
+              v-for="message in [
+                ...(fieldErrors.instructionsMarkdown ?? []),
+                ...(fieldErrors.wikiPageId ?? []),
+              ]"
               :key="message"
               class="text-destructive text-xs"
             >
               {{ message }}
             </p>
-          </fieldset>
+          </div>
 
           <div class="grid gap-4 sm:grid-cols-2">
             <div class="space-y-1.5">

@@ -49,7 +49,9 @@ public static class CommentEndpoints
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         var take = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 100);
-        var query = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
+        var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
+        var hidden = await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct);
+        var query = onItem.WithoutFactory(db, hidden).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
         var total = await query.CountAsync(ct);
         var comments = await query.Skip(Math.Max(0, page - 1) * take).Take(take).ToListAsync(ct);
         return Results.Ok(new PagedResult<CommentView>(await ViewsAsync(db, directory, user.UserId!, comments, ct), Math.Max(page, 1), take, total));
@@ -66,7 +68,7 @@ public static class CommentEndpoints
         if (request.ParentCommentId is { } parentId)
         {
             var parent = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == parentId && x.ItemId == item.Id, ct);
-            if (parent is null)
+            if (parent is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, parent, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentCommentId"] = ["The comment being replied to is not on this item."] });
             thread = parent.ParentCommentId is { } rootId
                 ? await db.Comments.AsNoTracking().FirstAsync(x => x.Id == rootId, ct)
@@ -94,7 +96,7 @@ public static class CommentEndpoints
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         var comment = await db.Comments.FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
-        if (comment is null) return Results.NotFound();
+        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
         var role = await access.GetProjectRoleAsync(user.UserId!, item.ProjectId, ct);
         if (comment.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
         if (comment.DeletedAt is not null) return Results.Problem("A deleted comment cannot be edited.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
@@ -117,13 +119,13 @@ public static class CommentEndpoints
     }
 
     private static async Task<IResult> Delete(string itemKey, Guid commentId, WorkItemsDbContext db, IProjectAccess access,
-        ICurrentUser user, TimeProvider clock, CancellationToken ct)
+        ICurrentUser user, IUserDirectory directory, TimeProvider clock, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         var comment = await db.Comments.FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
-        if (comment is null) return Results.NotFound();
+        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
         var role = await access.GetProjectRoleAsync(user.UserId!, item.ProjectId, ct);
         if (comment.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
         if (comment.DeletedAt is null) { comment.DeletedAt = clock.GetUtcNow(); await db.SaveChangesAsync(ct); }
@@ -131,23 +133,26 @@ public static class CommentEndpoints
     }
 
     private static async Task<IResult> React(string itemKey, Guid commentId, ReactToCommentRequest request, WorkItemsDbContext db,
-        IProjectAccess access, ICurrentUser user, ICurrentTenant tenant, TimeProvider clock, CancellationToken ct)
+        IProjectAccess access, ICurrentUser user, IUserDirectory directory, ICurrentTenant tenant, TimeProvider clock, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         if (string.IsNullOrWhiteSpace(request.Emoji) || request.Emoji.Trim().Length > 32) return Results.ValidationProblem(new Dictionary<string, string[]> { ["emoji"] = ["An emoji of 1-32 characters is required."] });
-        if (!await db.Comments.AnyAsync(x => x.Id == commentId && x.ItemId == item.Id, ct)) return Results.NotFound();
+        var comment = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
+        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
         db.CommentReactions.Add(new CommentReaction { OrganizationId = tenant.OrganizationId!.Value, CommentId = commentId, UserId = user.UserId!, Emoji = request.Emoji.Trim(), CreatedAt = clock.GetUtcNow() });
         try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { db.ChangeTracker.Clear(); }
         return Results.NoContent();
     }
 
     private static async Task<IResult> Unreact(string itemKey, Guid commentId, string emoji, WorkItemsDbContext db,
-        IProjectAccess access, ICurrentUser user, CancellationToken ct)
+        IProjectAccess access, ICurrentUser user, IUserDirectory directory, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
-        if (item is null || !await db.Comments.AnyAsync(x => x.Id == commentId && x.ItemId == item.Id, ct)) return Results.NotFound();
+        if (item is null) return Results.NotFound();
+        var comment = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
+        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
         var reaction = await db.CommentReactions.FirstOrDefaultAsync(x => x.CommentId == commentId && x.UserId == user.UserId && x.Emoji == emoji, ct);
         if (reaction is not null) { db.CommentReactions.Remove(reaction); await db.SaveChangesAsync(ct); }
         return Results.NoContent();
