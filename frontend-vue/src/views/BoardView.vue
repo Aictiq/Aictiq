@@ -42,7 +42,7 @@ import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useToast } from '@/composables/useToast'
 import { vNearEnd } from '@/lib/nearEnd'
 import { destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
-import { typeLabels } from '@/lib/hierarchy'
+import { opensOnCreate, typeLabels } from '@/lib/hierarchy'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -535,6 +535,7 @@ async function submitDraft(column: { name: string; stateIds: string[] }) {
     await client.invalidateQueries({
       queryKey: ['board', slug.value, projectKey.value, teamId.value],
     })
+    if (opensOnCreate(created.type)) itemModal.open(created.key)
   } catch (error) {
     toast.error(error, 'The item could not be created.')
   } finally {

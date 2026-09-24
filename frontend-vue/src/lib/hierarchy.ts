@@ -27,3 +27,9 @@ export function childTypes(parent: WorkItemType): WorkItemType[] {
   const order: WorkItemType[] = ['story', 'bug', 'feature', 'task']
   return order.filter((child) => allowsParent(parent, child))
 }
+
+/** Stories and Bugs carry the detail (description, acceptance criteria, estimate), so a quick
+ * add opens them for editing; the other types stay quick. */
+export function opensOnCreate(type: WorkItemType): boolean {
+  return type === 'story' || type === 'bug'
+}
