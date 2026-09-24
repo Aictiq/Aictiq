@@ -180,7 +180,7 @@ export async function executeRun(
       mcpServer: options.workspace.mcpServer,
     })
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...inheritedEnv(process.env),
       ...invocation.env,
       ...workspace.env,
       // The agent reaches the instance as itself, never as the runner: `aictiq mcp` and the
@@ -378,6 +378,15 @@ export function findPullRequest(
 function truncate(value: string | null | undefined, max: number): string | null {
   if (!value) return null
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`
+}
+
+/**
+ * The runner's own environment minus every `AICTIQ_` variable: a person's token, a runner
+ * secret passed as `AICTIQ_RUNNER_TOKEN` or another organization's settings must not reach an
+ * agent. The run's own `AICTIQ_*` values are added back on top.
+ */
+export function inheritedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AICTIQ_')))
 }
 
 function message(error: unknown): string {

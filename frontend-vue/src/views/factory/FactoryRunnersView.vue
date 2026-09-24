@@ -5,12 +5,15 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { hasOrgRole } from '@/api/organizations'
 import {
   deleteRunner,
+  listRunnerMachinesElsewhere,
   listRunners,
   registerRunner,
+  registerRunnerOnMachine,
   rotateRunner,
   updateRunner,
   type Runner,
   type RunnerIssued,
+  type RunnerMachine,
 } from '@/api/runners'
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
@@ -63,8 +66,19 @@ const name = ref('')
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
 
+/** "Use a runner I already have": the caller's machines in their other organizations. */
+const usingExisting = ref(false)
+const machines = ref<RunnerMachine[]>([])
+const machinesLoading = ref(false)
+const selectedMachine = ref<RunnerMachine | null>(null)
+const machineName = ref('')
+const connecting = ref(false)
+const connectErrors = ref<Record<string, string[]>>({})
+
 /** The secret just minted, and which runner it belongs to. Cleared when the dialog closes. */
 const issued = ref<RunnerIssued | null>(null)
+/** Minted for a machine that already runs for another organization: it gets a new profile. */
+const issuedForExisting = ref(false)
 const issuedOpen = ref(false)
 const copied = ref<'secret' | 'command' | null>(null)
 
@@ -104,8 +118,9 @@ function replace(updated: Runner) {
   runners.value = runners.value.map((r) => (r.id === updated.id ? updated : r))
 }
 
-function showSecret(value: RunnerIssued) {
+function showSecret(value: RunnerIssued, forExisting = false) {
   issued.value = value
+  issuedForExisting.value = forExisting
   copied.value = null
   issuedOpen.value = true
 }
@@ -135,6 +150,72 @@ async function submit() {
   } finally {
     submitting.value = false
   }
+}
+
+async function openExisting() {
+  usingExisting.value = true
+  selectedMachine.value = null
+  machineName.value = ''
+  connectErrors.value = {}
+  machinesLoading.value = true
+  try {
+    machines.value = await listRunnerMachinesElsewhere(slug.value)
+  } catch (error) {
+    machines.value = []
+    toast.error(error)
+  } finally {
+    machinesLoading.value = false
+  }
+}
+
+function selectMachine(machine: RunnerMachine) {
+  if (machine.isConnectedHere) return
+  selectedMachine.value = machine
+  machineName.value = machine.name
+  connectErrors.value = {}
+}
+
+function registerInstead() {
+  usingExisting.value = false
+  registering.value = true
+}
+
+async function connect() {
+  const machine = selectedMachine.value
+  if (!machine) return
+  connecting.value = true
+  connectErrors.value = {}
+  try {
+    const name = machineName.value.trim()
+    const created = await registerRunnerOnMachine(
+      slug.value,
+      machine.runnerId,
+      name && name !== machine.name ? name : undefined,
+    )
+    runners.value = [...runners.value, created.runner].sort((a, b) => a.name.localeCompare(b.name))
+    usingExisting.value = false
+    showSecret(created, true)
+  } catch (error) {
+    if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
+      connectErrors.value = error.fieldErrors
+    } else if (error instanceof ApiError && error.status === 409) {
+      connectErrors.value = {
+        name: ['Another runner in this organization already has that name. Pick another.'],
+      }
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    connecting.value = false
+  }
+}
+
+function machineStatus(machine: RunnerMachine) {
+  return runnerStatus({
+    isDisabled: false,
+    isOnline: machine.isOnline,
+    lastSeenAt: machine.lastSeenAt,
+  })
 }
 
 async function rename(runner: Runner, value: string) {
@@ -223,7 +304,10 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
           runs and reports back. Its secret is shown once, when it is registered.
         </p>
       </div>
-      <Button v-if="mayManage" size="sm" @click="registering = true">Register runner</Button>
+      <div v-if="mayManage" class="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" @click="openExisting">Use existing runner</Button>
+        <Button size="sm" @click="registering = true">Register runner</Button>
+      </div>
     </header>
 
     <EmptyState
@@ -240,11 +324,12 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
     <EmptyState
       v-else-if="runners.length === 0"
       title="No runners yet"
-      description="Register one, then run the command it gives you on the machine. It turns green here when it says hello."
+      description="Register one, then run the command it gives you on the machine. It turns green here when it says hello. A machine that already runs for another of your organizations can run for this one too."
       icon="◇"
     >
       <div class="flex flex-wrap justify-center gap-2">
-        <Button @click="registering = true">Register runner</Button>
+        <Button @click="registering = true">Register new runner</Button>
+        <Button variant="outline" @click="openExisting">Use a runner I already have</Button>
         <FactoryDocsLink />
       </div>
     </EmptyState>
@@ -335,8 +420,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
         >
           <li>
             <span class="text-foreground font-medium">Prepare the machine.</span>
-            Install Node.js and <code class="font-mono">@aictiq/cli</code> on a machine dedicated to
-            this organization.
+            Install Node.js and <code class="font-mono">@aictiq/cli</code> on the machine. One
+            machine can run for several of your organizations; each gets its own secret,
+            repositories and roots, and their runs never execute at the same time.
           </li>
           <li>
             <span class="text-foreground font-medium">Sign in and clone.</span>
@@ -377,18 +463,159 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="usingExisting">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Use a runner you already have</DialogTitle>
+          <DialogDescription>
+            Your own runners in other organizations you administer. This organization gets its own
+            secret, repositories and roots on the machine, and runs from different organizations
+            never execute at the same time. Every organization's agents still run as the same user
+            there, so connect only organizations you trust alike.
+          </DialogDescription>
+        </DialogHeader>
+
+        <UiPageState v-if="machinesLoading" state="loading" />
+
+        <div
+          v-else-if="machines.length === 0"
+          data-testid="runner-machines-empty"
+          class="text-muted-foreground space-y-3 text-xs"
+        >
+          <p>
+            None of your runners can be used here. A runner is offered when you registered it
+            yourself, in another organization where you are an Owner or Admin.
+          </p>
+          <Button size="sm" @click="registerInstead">Register a new runner</Button>
+        </div>
+
+        <div v-else class="space-y-4">
+          <div
+            role="radiogroup"
+            aria-label="Your runners"
+            class="border-border divide-border divide-y rounded-lg border"
+          >
+            <button
+              v-for="machine in machines"
+              :key="machine.runnerId"
+              type="button"
+              role="radio"
+              :aria-checked="selectedMachine?.runnerId === machine.runnerId"
+              :disabled="machine.isConnectedHere"
+              data-testid="runner-machine"
+              class="hover:bg-muted/50 flex w-full items-start gap-2.5 px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
+              :class="{ 'bg-muted': selectedMachine?.runnerId === machine.runnerId }"
+              @click="selectMachine(machine)"
+            >
+              <span
+                class="mt-1.5 size-2 flex-none rounded-full"
+                :class="statusDot[machineStatus(machine)]"
+                aria-hidden="true"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium">{{ machine.name }}</span>
+                <span class="text-muted-foreground block truncate text-[11px]">
+                  {{ runnerStatusLabel[machineStatus(machine)] }}
+                  <template v-if="machine.lastSeenAt">
+                    · seen {{ since(machine.lastSeenAt) }}</template
+                  >
+                  <template v-if="machine.capabilities?.os">
+                    · {{ machine.capabilities.os }}/{{ machine.capabilities.arch }}</template
+                  >
+                </span>
+                <span class="text-muted-foreground block text-[11px]">
+                  <template v-if="machine.isConnectedHere"
+                    >Already runs for this organization ·
+                  </template>
+                  Runs for {{ machine.organizations.map((o) => o.name).join(', ') }}
+                </span>
+                <span
+                  v-if="machine.capabilities && machine.capabilities.harnesses.length"
+                  class="mt-1 flex flex-wrap gap-1"
+                >
+                  <Badge
+                    v-for="harness in machine.capabilities.harnesses"
+                    :key="harness.name"
+                    variant="secondary"
+                    class="font-mono text-[10px]"
+                  >
+                    {{ harness.name }}
+                  </Badge>
+                </span>
+              </span>
+            </button>
+          </div>
+
+          <form
+            v-if="selectedMachine"
+            id="connect-runner"
+            class="space-y-1.5"
+            novalidate
+            @submit.prevent="connect"
+          >
+            <label for="machine-name" class="text-sm font-medium">Name in this organization</label>
+            <Input
+              id="machine-name"
+              v-model="machineName"
+              required
+              :aria-invalid="Boolean(connectErrors.name)"
+            />
+            <p
+              v-for="message in [
+                ...(connectErrors.name ?? []),
+                ...(connectErrors.sameMachineAs ?? []),
+              ]"
+              :key="message"
+              class="text-destructive text-xs"
+            >
+              {{ message }}
+            </p>
+          </form>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            :disabled="connecting"
+            @click="usingExisting = false"
+          >
+            Cancel
+          </Button>
+          <Button
+            v-if="machines.length > 0"
+            type="submit"
+            form="connect-runner"
+            :disabled="connecting || !selectedMachine || !machineName.trim()"
+          >
+            <Loader2 v-if="connecting" class="animate-spin" aria-hidden="true" />
+            Connect
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <Dialog v-model:open="issuedOpen">
       <DialogContent class="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{{ issued?.runner.name }} is registered</DialogTitle>
-          <DialogDescription>
+          <DialogDescription v-if="issuedForExisting">
+            Copy it now - this is the only time the secret is shown. On
+            {{ issued?.runner.name }}, this organization becomes one more profile beside the ones it
+            already runs for:
+          </DialogDescription>
+          <DialogDescription v-else>
             Copy it now - this is the only time the secret is shown. On the machine, with the
             harnesses you want it to offer already signed in:
           </DialogDescription>
         </DialogHeader>
 
         <ol v-if="issued" class="text-muted-foreground list-decimal space-y-3 pl-4 text-xs">
-          <li>Install the CLI: <code class="font-mono">npm install -g @aictiq/cli</code></li>
+          <li v-if="issuedForExisting">
+            Update the CLI if it is older than this feature:
+            <code class="font-mono">npm install -g @aictiq/cli@latest</code>
+          </li>
+          <li v-else>Install the CLI: <code class="font-mono">npm install -g @aictiq/cli</code></li>
           <li>
             Register this machine:
             <div class="mt-1.5 flex items-start gap-2">
@@ -409,7 +636,12 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               </Button>
             </div>
           </li>
-          <li>Start it: <code class="font-mono">aictiq runner start</code></li>
+          <li v-if="issuedForExisting">
+            A running <code class="font-mono">aictiq runner start</code> connects within a few
+            seconds; otherwise start it. Then say where this organization's clones live:
+            <code class="font-mono">aictiq runner root &lt;path&gt; --org {{ slug }}</code>
+          </li>
+          <li v-else>Start it: <code class="font-mono">aictiq runner start</code></li>
         </ol>
 
         <div v-if="issued" class="border-border mt-1 flex items-center gap-2 rounded border p-2">

@@ -39,8 +39,8 @@ public sealed record RunnerFinishRequest(string? Outcome, int? ExitCode, string?
     decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason);
 
 /// <summary>
-/// The half of the runner protocol that concerns runs: claim, started, log, heartbeat,
-/// finish, repo-token. Same group prefix and policy as the hello/heartbeat pair - nothing
+/// The half of the runner protocol that concerns runs: claim, release, started, log,
+/// heartbeat, finish, repo-token. Same group prefix and policy as the hello/heartbeat pair - nothing
 /// but a runner principal answers here, and a runner principal answers nowhere else.
 /// </summary>
 /// <remarks>
@@ -59,6 +59,7 @@ public static partial class RunProtocolEndpoints
             .RequireAuthorization(RunnerDefaults.Policy);
 
         protocol.MapPost("/runs/claim", ClaimAsync);
+        protocol.MapPost("/runs/{runId:guid}/release", ReleaseAsync);
         protocol.MapPost("/runs/{runId:guid}/started", StartedAsync);
         protocol.MapPost("/runs/{runId:guid}/log", LogAsync);
         protocol.MapPost("/runs/{runId:guid}/heartbeat", HeartbeatAsync);
@@ -248,6 +249,56 @@ public static partial class RunProtocolEndpoints
                 aictiqUrl, issued.Secret, issued.Token.Display,
                 options.Value.HeartbeatIntervalSeconds), false);
         }
+    }
+
+    /// <summary>
+    /// Hands a claimed run back before it starts. A machine that serves several
+    /// organizations never executes two of them at once, and its long polls for each run
+    /// side by side while it is idle, so two claims can land together; the one it cannot
+    /// take now goes back to the head of the queue for the next poll, its token revoked.
+    /// </summary>
+    private static async Task<IResult> ReleaseAsync(
+        Guid runId, HttpContext http, AutomationDbContext db, IAgentIdentities agents,
+        IRealtimePublisher realtime, ILoggerFactory loggers, CancellationToken ct)
+    {
+        var runnerId = RunnerId(http);
+        var run = await db.Runs.AsNoTracking().SingleOrDefaultAsync(r => r.Id == runId, ct);
+        if (run is null || run.RunnerId != runnerId)
+        {
+            return NotFound();
+        }
+
+        // The predicate is the guard: only this runner's run, only while nothing has started.
+        // A run that started, finished or was swept in between is a 409, never a requeue.
+        var released = await db.Database.ExecuteSqlAsync($"""
+            UPDATE automation.runs
+            SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL
+            WHERE id = {runId} AND status = {(short)RunStatus.Assigned} AND runner_id = {runnerId}
+            """, ct);
+        if (released == 0)
+        {
+            return Conflict("This run is not waiting to be started.");
+        }
+
+        if (run.AgentTokenId is { } tokenId)
+        {
+            try
+            {
+                await agents.RevokeTokenAsync(run.AgentUserId, tokenId, ct);
+            }
+            catch (Exception ex)
+            {
+                // The run is back in the queue either way; the token dies at its own expiry.
+                loggers.CreateLogger(typeof(RunProtocolEndpoints))
+                    .LogWarning(ex, "Could not revoke the per-run token of released run {RunId}", run.Id);
+            }
+        }
+
+        await realtime.PublishAsync(run.ProjectId, "run.changed", new
+        {
+            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued",
+        }, ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> StartedAsync(

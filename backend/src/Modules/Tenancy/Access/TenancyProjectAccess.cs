@@ -102,6 +102,28 @@ public sealed class TenancyProjectAccess(TenancyDbContext db, HybridCache cache,
 
     private sealed record FactoryFacts(OrgRole Role, bool CanOperateFactory);
 
+    public async Task<IReadOnlyList<OrganizationMembershipRef>> ListOrganizationsAsync(
+        string userId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(userId))
+        {
+            return [];
+        }
+
+        // The same cross-tenant read as GET /orgs: the user-id predicate bounds it, and RLS
+        // admits only the session user's own memberships, so asking about anyone else reads
+        // nothing.
+        var rows = await (
+            from membership in db.Members.IgnoreQueryFilters().AsNoTracking()
+            join organization in db.Organizations on membership.OrganizationId equals organization.Id
+            where membership.UserId == userId
+            orderby organization.Name
+            select new { organization.Id, organization.Slug, organization.Name, membership.Role })
+            .ToListAsync(cancellationToken);
+
+        return [.. rows.Select(row => new OrganizationMembershipRef(new OrganizationRef(row.Id, row.Slug, row.Name), row.Role))];
+    }
+
     public async Task<ProjectRef?> FindProjectAsync(
         Guid organizationId, string projectKey, CancellationToken cancellationToken = default)
     {

@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   deleteRunner,
+  listRunnerMachinesElsewhere,
   listRunners,
   registerRunner,
+  registerRunnerOnMachine,
   rotateRunner,
   updateRunner,
   type Runner,
@@ -73,6 +75,21 @@ describe('the runner endpoints', () => {
     expect(new Headers(init!.headers).get('X-Aictiq-Request')).toBe('1')
   })
 
+  it('lists the caller’s machines elsewhere and registers one of them here', async () => {
+    const fetchMock = stubFetch({ runner: runner(), secret: 'jrn_x' })
+
+    await listRunnerMachinesElsewhere('acme')
+    await registerRunnerOnMachine('acme', 'r9')
+    await registerRunnerOnMachine('acme', 'r9', 'laptop-acme')
+
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/v1/orgs/acme/runners/elsewhere')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toEqual({ sameMachineAs: 'r9' })
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]!.body))).toEqual({
+      name: 'laptop-acme',
+      sameMachineAs: 'r9',
+    })
+  })
+
   it('patches without a version: the runner rewrites its own row every heartbeat', async () => {
     const fetchMock = stubFetch(runner())
 
@@ -89,7 +106,9 @@ describe('runnerStatus', () => {
   it('tells a machine that went quiet from one that never spoke', () => {
     expect(runnerStatus(runner())).toBe('never')
     expect(runnerStatus(runner({ lastSeenAt: '2026-09-17T10:00:00Z' }))).toBe('offline')
-    expect(runnerStatus(runner({ lastSeenAt: '2026-09-17T10:00:00Z', isOnline: true }))).toBe('online')
+    expect(runnerStatus(runner({ lastSeenAt: '2026-09-17T10:00:00Z', isOnline: true }))).toBe(
+      'online',
+    )
   })
 
   it('says disabled before anything else', () => {

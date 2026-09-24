@@ -437,6 +437,41 @@ public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : R
     }
 
     [Fact]
+    public async Task a_released_run_goes_back_to_the_queue_with_its_token_revoked()
+    {
+        var run = await DispatchAsync(ItemKey);
+        using var holder = RunnerClient(Runner.Secret);
+        var claimed = await ClaimAsync(holder);
+        var otherRunner = await RegisterRunnerAsync("box-2");
+        using var other = RunnerClient(otherRunner.Secret);
+
+        // Only the runner holding it can give it back.
+        Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/api/v1/runner/runs/{run.Id}/release", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await holder.PostAsync($"/api/v1/runner/runs/{run.Id}/release", null, Ct)).StatusCode);
+
+        var queued = await RunAsync(run.Id);
+        Assert.Equal("queued", queued.Status);
+        Assert.Null(queued.RunnerName);
+        using var agent = TokenClient(claimed.AgentToken);
+        var session = await agent.GetAsync("/api/v1/auth/session", Ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
+        Assert.Equal(ProblemTypes.TokenRevoked, await ProblemTypeAsync(session));
+
+        // The run is no longer the releasing runner's to start or release.
+        Assert.Equal(HttpStatusCode.NotFound, (await StartedAsync(holder, run.Id)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await holder.PostAsync($"/api/v1/runner/runs/{run.Id}/release", null, Ct)).StatusCode);
+
+        // The next poll hands it out again, with a token of its own.
+        var again = await ClaimAsync(other);
+        Assert.Equal(run.Id, again.RunId);
+        Assert.NotEqual(claimed.AgentToken, again.AgentToken);
+
+        // Once started it is not a runner's to hand back.
+        Assert.Equal(HttpStatusCode.NoContent, (await StartedAsync(other, run.Id)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await other.PostAsync($"/api/v1/runner/runs/{run.Id}/release", null, Ct)).StatusCode);
+    }
+
+    [Fact]
     public async Task finish_after_cancel_is_a_no_op()
     {
         var run = await DispatchAsync(ItemKey);

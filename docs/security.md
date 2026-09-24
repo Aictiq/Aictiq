@@ -39,12 +39,21 @@ as authorization.
 
 ## Factory runners and prompts
 
-One runner is one trust domain. Aictiq intentionally starts Claude Code, Codex,
-or OpenCode as the runner's operating-system user without an additional sandbox
-or approval boundary. The harness can reach that user's repositories, network,
-harness sign-in, git credentials, and other readable files. Run it on a machine
-or VM dedicated to one organization, under an unprivileged account, and do not
-mix mutually untrusted organizations on the same runner.
+One operating-system user is one trust domain. Aictiq intentionally starts Claude
+Code, Codex, or OpenCode as the runner's operating-system user without an
+additional sandbox or approval boundary. The harness can reach that user's
+repositories, network, harness sign-in, git credentials, and other readable
+files. Run it under an unprivileged account on a machine or VM you control.
+
+One runner process may serve several organizations, each as a profile with its
+own secret, repository map and roots. It never executes runs of two
+organizations at the same time and strips its own `AICTIQ_*` variables from the
+harness environment, so a run cannot read a live run's token of another
+organization from the process table. This does not isolate the organizations
+from each other's agents: every profile's agent runs as the same user and can
+read `runner.json`, the other profiles' clones and the shared sign-ins. Put
+organizations on one user only when you trust them equally, and give mutually
+untrusted organizations a separate OS user or VM each.
 
 The two factory credentials have deliberately different reach:
 
