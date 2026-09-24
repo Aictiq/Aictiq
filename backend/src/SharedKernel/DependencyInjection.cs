@@ -8,6 +8,7 @@ using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Persistence;
 using Aictiq.SharedKernel.Storage;
 using Aictiq.SharedKernel.Tenancy;
+using Aictiq.SharedKernel.Turnstile;
 using Aictiq.SharedKernel.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,7 @@ public static class DependencyInjection
         services.TryAddScoped<IProjectAccess, NullProjectAccess>();
         services.TryAddScoped<IUserDirectory, NullUserDirectory>();
         services.TryAddScoped<IExternalLoginLookup, NullExternalLoginLookup>();
+        services.TryAddScoped<IInvitationLookup, NullInvitationLookup>();
         services.TryAddScoped<IAgentIdentities, NullAgentIdentities>();
         services.TryAddSingleton<IRealtimePublisher, NullRealtimePublisher>();
         services.TryAddSingleton<IUserRealtimePublisher, NullRealtimePublisher>();
@@ -129,6 +131,26 @@ public static class DependencyInjection
             // readiness body so an operator can see why no invitations arrive. Spelled
             // out because SharedKernel does not reference the hosting project.
             tags: ["ready", "email", "public"]);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Cloudflare Turnstile for the anonymous credential endpoints. API-only - nothing in
+    /// Workers faces a browser. Validated on start: half a key pair is a misconfiguration
+    /// that would either wave every bot through or refuse every person.
+    /// </summary>
+    public static IServiceCollection AddTurnstile(
+        this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<TurnstileOptions>()
+            .Bind(configuration.GetSection(TurnstileOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<TurnstileOptions>, TurnstileOptionsValidator>();
+
+        services.AddHttpClient<ITurnstileVerifier, TurnstileVerifier>(TurnstileVerifier.HttpClientName)
+            .ConfigureHttpClient((sp, client) => client.Timeout = TimeSpan.FromSeconds(
+                sp.GetRequiredService<IOptions<TurnstileOptions>>().Value.TimeoutSeconds));
 
         return services;
     }

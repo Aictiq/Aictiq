@@ -159,6 +159,18 @@ services:
       Auth__GitHub__ClientId: ${AUTH_GITHUB_CLIENT_ID:-}
       Auth__GitHub__ClientSecret: ${AUTH_GITHUB_CLIENT_SECRET:-}
 
+      # New password accounts confirm their address by mail before they can sign in.
+      # Only in force when email is configured above; an invitation accepted from the
+      # address it was sent to is already confirmed.
+      Features__EmailConfirmation: ${EMAIL_CONFIRMATION_ENABLED:-true}
+
+      # Optional Cloudflare Turnstile on sign-in, sign-up, password reset and the
+      # confirmation resend. Both keys or neither; the API verifies every token with
+      # Cloudflare, so the widget cannot be skipped by posting the form directly.
+      Turnstile__SiteKey: ${TURNSTILE_SITE_KEY:-}
+      Turnstile__SecretKey: ${TURNSTILE_SECRET_KEY:-}
+      Turnstile__AllowedHostnames__0: ${TURNSTILE_ALLOWED_HOSTNAME:-}
+
       Seed__AdminEmail: ${SEED_ADMIN_EMAIL:?set SEED_ADMIN_EMAIL in .env}
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
       Seed__OrganizationName: ${SEED_ORG_NAME:-}

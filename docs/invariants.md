@@ -101,7 +101,14 @@ and `MigrationRunner`, and mirror the integration tests under `tests/Integration
   `UPDATE ... WHERE used_at IS NULL AND expires_at > now()`, so two clicks produce one change
   and one refusal. Resending mints a new token and retires the old one, because there is no
   old one to send.
-- **`/auth/forgot` answers the same either way,** and a test asserts exactly that.
+- **`/auth/forgot` answers the same either way,** and a test asserts exactly that. So does
+  `/auth/verify-email/resend`.
+- **An unconfirmed account cannot sign in** on an instance that can send mail, and says so
+  only after the password is right. The invitation link mailed to an address, followed with
+  that same address, counts as confirmation; so does a completed password reset.
+- **A Turnstile token is verified by the API, not trusted from the browser.** With Turnstile
+  configured the anonymous credential endpoints refuse before doing any work unless
+  Cloudflare vouches for the token and its action, and they fail closed when it cannot be asked.
 - **An unverified provider email proves nothing.** OAuth sign-in never uses an address the
   provider will not vouch for, and never links a verified address to a local account that
   never confirmed its own.

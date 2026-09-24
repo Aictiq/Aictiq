@@ -55,14 +55,39 @@ public static class SecurityHeadersMiddleware
         [.. BaseDirectives, "script-src 'self' 'unsafe-inline' 'unsafe-eval'", "connect-src 'self' ws: wss:"]);
 
     /// <summary>
+    /// Cloudflare Turnstile loads its script from this origin and renders the challenge in
+    /// an iframe from it. Allowed only on an instance that has Turnstile configured, so a
+    /// deployment that does not use it keeps a policy with no third party in it at all.
+    /// </summary>
+    public const string TurnstileOrigin = "https://challenges.cloudflare.com";
+
+    /// <summary>
+    /// The policy with Turnstile's origin let in: appended to <c>script-src</c>, and a
+    /// <c>frame-src</c> added, which otherwise falls back to <c>default-src 'self'</c>.
+    /// </summary>
+    public static string WithTurnstile(string policy) =>
+        string.Join("; ", policy.Split("; ")
+            .Select(directive => directive.StartsWith("script-src ", StringComparison.Ordinal)
+                ? $"{directive} {TurnstileOrigin}"
+                : directive)
+            .Append($"frame-src 'self' {TurnstileOrigin}"));
+
+    /// <summary>
     /// Adds the baseline headers to every response and CSP to HTML responses only -
     /// a CSP on a JSON body is dead weight, and API clients are not browsers.
     /// <c>Cache-Control: no-store</c> is likewise for API routes: the SPA's hashed
     /// assets must stay cacheable. An endpoint escapes it only by declaring
     /// <see cref="CacheableResponseAttribute"/>.
     /// </summary>
-    public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app, bool isDevelopment) =>
-        app.Use(async (context, next) =>
+    public static IApplicationBuilder UseSecurityHeaders(
+        this IApplicationBuilder app, bool isDevelopment, bool turnstileEnabled = false)
+    {
+        // Built once: the configuration that decides them cannot change while running.
+        var development = turnstileEnabled ? WithTurnstile(DevelopmentCsp) : DevelopmentCsp;
+        var https = turnstileEnabled ? WithTurnstile(ProductionCsp) : ProductionCsp;
+        var plain = turnstileEnabled ? WithTurnstile(ProductionCspWithoutUpgrade) : ProductionCspWithoutUpgrade;
+
+        return app.Use(async (context, next) =>
         {
             context.Response.OnStarting(state =>
             {
@@ -88,8 +113,8 @@ public static class SecurityHeadersMiddleware
                     // Read after UseForwardedHeaders has run, so X-Forwarded-Proto from
                     // the reverse proxy decides this and not the plain hop to Kestrel.
                     headers["Content-Security-Policy"] = isDevelopment
-                        ? DevelopmentCsp
-                        : ctx.Request.IsHttps ? ProductionCsp : ProductionCspWithoutUpgrade;
+                        ? development
+                        : ctx.Request.IsHttps ? https : plain;
                     // index.html names this deploy's hashed assets, so it must be
                     // revalidated; the assets themselves stay cacheable forever.
                     headers["Cache-Control"] = "no-cache";
@@ -100,6 +125,7 @@ public static class SecurityHeadersMiddleware
 
             await next();
         });
+    }
 
     /// <summary>
     /// The prefixes the API owns. Everything else is the SPA, and falls back to

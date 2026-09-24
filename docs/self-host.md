@@ -221,6 +221,122 @@ link to copy instead.
 | `Email:FromName` | `EMAIL_FROM_NAME` | Display name on the From header. |
 | `Email:BaseUrl` | `AICTIQ_URL` | Where links in email point. Must be the address a **recipient's browser** can reach. It is required whenever SMTP is configured; without it link-bearing mail is parked rather than built from a request host. |
 
+### Confirming new accounts
+
+When email is configured, a person who signs up with a password must confirm their
+address before they can sign in. Registration answers `202` with no session and mails a
+link to `/verify-email/<token>`; the link works for two days, only the newest one works,
+and following it confirms the address without signing anyone in. Trying to sign in first
+gets a clear "confirm your email" answer (only after the password is right, so it reveals
+nothing to a stranger) with a button to send the link again - at most one mail a minute
+per account.
+
+Some accounts arrive already confirmed and are never asked:
+
+- **Invitations.** Registering from an invitation link with the address the invitation
+  was mailed to proves the mailbox, so the account is signed in straight away. A
+  forwarded invitation registered under a different address confirms by mail like any
+  other sign-up, and the confirmation link leads back to the invitation.
+- Sign-ins through Google or GitHub, whose providers already verified the address.
+- The seeded administrator and agents.
+- Anyone who completes a password reset: the reset link proves the same thing.
+
+| Setting | Environment variable (compose) | Default | Meaning |
+| --- | --- | --- | --- |
+| `Features:EmailConfirmation` | `EMAIL_CONFIRMATION_ENABLED` | `true` | Require confirmation for new password accounts. Has no effect while email is unconfigured - without a relay there is no way to deliver the link, so sign-ups are signed in directly. |
+
+Accounts created before confirmation was switched on (or while the instance had no
+relay) are unconfirmed, and are asked to confirm the next time they sign in. To exempt
+people you already trust, mark them confirmed directly:
+
+```sql
+UPDATE identity."AspNetUsers" SET email_confirmed = true WHERE email_confirmed = false;
+```
+
+## Bot protection (Cloudflare Turnstile)
+
+An instance reachable from the internet should put its anonymous forms behind
+[Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/). With it on, sign-in,
+sign-up, forgot-password and resend-confirmation each render a Turnstile widget, and the
+API refuses the request unless it carries a token that **the API itself** has verified
+with Cloudflare's `siteverify` endpoint. The widget alone would stop nothing - a bot
+simply posts the form - so the check happens server-side, before the password hasher,
+the user table or the mail outbox are touched:
+
+- The token travels in the `X-Turnstile-Token` header and is single-use; the SPA resets
+  the widget after every attempt.
+- The action it was solved for must match the form (`login`, `register`, `forgot`,
+  `resend-confirmation`), so a token from one form cannot open another.
+- When `TURNSTILE_ALLOWED_HOSTNAME` is set, the host Cloudflare reports must match it.
+- If Cloudflare cannot be reached the API **fails closed** with `503`: nothing is
+  submitted, and the visitor tries again in a moment.
+- The content security policy admits `https://challenges.cloudflare.com` (script and
+  frame) only when Turnstile is configured.
+
+Turnstile does not apply to personal access tokens, the CLI, MCP or runners - none of
+those use the password endpoints. Leave both keys empty in development and on private
+networks; that is the default.
+
+| Setting | Environment variable (compose) | Meaning |
+| --- | --- | --- |
+| `Turnstile:SiteKey` | `TURNSTILE_SITE_KEY` | The widget's public key, served to the browser by `GET /api/v1/auth/challenge`. |
+| `Turnstile:SecretKey` | `TURNSTILE_SECRET_KEY` | The private key, sent only to Cloudflare. Set both keys or neither - half a pair stops the API at start-up. |
+| `Turnstile:AllowedHostnames:0` | `TURNSTILE_ALLOWED_HOSTNAME` | Optional. The host name a solved challenge must come from, such as `aictiq.example.com`. |
+
+### Setting it up in Cloudflare
+
+Your domain does not have to be proxied through Cloudflare, though that is how most
+public instances run.
+
+1. Sign in at [dash.cloudflare.com](https://dash.cloudflare.com), open **Turnstile** in the
+   account sidebar (under *Application security* in newer layouts), and choose
+   **Add widget**.
+2. Name it after the deployment (for example `Aictiq production`).
+3. Under **Hostnames**, add the host the app is served from, exactly as it appears in
+   `AICTIQ_URL` (for example `app.aictiq.com`). Add staging hosts as separate widgets, so
+   a key leaked from staging is useless in production.
+4. **Widget mode: Managed.** Cloudflare decides per visitor whether an interactive check
+   is needed; most people never see one. Leave **pre-clearance** off - Aictiq verifies
+   every token itself.
+5. Create the widget and copy the **Site Key** and the **Secret Key**.
+6. On the server, add them to `deploy/.env`:
+
+   ```dotenv
+   TURNSTILE_SITE_KEY=0x4AAAAAAA...
+   TURNSTILE_SECRET_KEY=0x4AAAAAAA...
+   TURNSTILE_ALLOWED_HOSTNAME=app.aictiq.com
+   ```
+
+   and recreate the API: `docker compose up -d api`. The secret is a credential - keep it
+   out of git, and rotate it in the dashboard (**Rotate secret key**) if it leaks.
+7. Check it:
+
+   ```bash
+   curl -s https://app.aictiq.com/api/v1/auth/challenge
+   # {"turnstileSiteKey":"0x4AAAAAAA..."}
+
+   curl -sI https://app.aictiq.com/login | grep -i content-security-policy
+   # ... script-src 'self' https://challenges.cloudflare.com ... frame-src 'self' https://challenges.cloudflare.com
+
+   curl -s -X POST https://app.aictiq.com/api/v1/auth/login \
+     -H 'Content-Type: application/json' -d '{"email":"x@example.com","password":"x"}'
+   # {"type":"https://aictiq.com/problems/challenge-failed", "status":400, ...}
+   ```
+
+   Then sign in from a browser: the widget appears above the button, and the Turnstile
+   analytics page in the dashboard starts counting solves and siteverify calls.
+
+If the widget shows an error in the browser, the host name is usually missing from the
+widget's list (error `110200`). A `503` from the API with "The verification check is
+unavailable" means the API could not reach Cloudflare, or that Cloudflare rejected the
+secret key - the API logs `Turnstile rejected the configured secret key` in that case.
+
+To try the whole path without a live challenge, use Cloudflare's
+[test keys](https://developers.cloudflare.com/turnstile/troubleshooting/testing/): site key
+`1x00000000000000000000AA` with secret `1x0000000000000000000000000000000AA` always
+passes, and secret `2x0000000000000000000000000000000AA` always fails. The test keys report
+the host `example.com`, so leave `TURNSTILE_ALLOWED_HOSTNAME` empty while using them.
+
 ## Backup, restore, and upgrades
 
 Back up both Postgres and Garage: the database only records attachment metadata, while

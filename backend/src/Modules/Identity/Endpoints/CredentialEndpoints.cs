@@ -13,6 +13,7 @@ using Aictiq.Modules.Identity.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Email;
+using Aictiq.SharedKernel.Turnstile;
 
 namespace Aictiq.Modules.Identity.Endpoints;
 
@@ -30,6 +31,13 @@ public sealed record ForgotPasswordRequest(string? Email);
 public sealed record ResetPasswordRequest(string? Token, string? NewPassword);
 
 public sealed record ConfirmEmailChangeRequest(string? Token);
+
+public sealed record VerifyEmailRequest(string? Token);
+
+public sealed record ResendConfirmationRequest(string? Email);
+
+/// <summary>The address a confirmation link just confirmed, so the sign-in form can prefill it.</summary>
+public sealed record EmailVerified(string Email);
 
 /// <param name="EmailConfigured">
 /// Whether this instance can send at all. Not a leak - it is a property of the deployment,
@@ -300,7 +308,8 @@ public static class CredentialEndpoints
             // the answer is the one every other path returns.
             await CommitAsync(db, cancellationToken);
             return accepted;
-        });
+        })
+        .RequireTurnstile("forgot");
 
         group.MapPost("/reset", async Task<IResult> (
             ResetPasswordRequest request,
@@ -346,6 +355,10 @@ public static class CredentialEndpoints
             // window in which the account has no password at all, and a failure inside it
             // would lock somebody out of their own account permanently.
             user.PasswordHash = userManager.PasswordHasher.HashPassword(user, request.NewPassword);
+            // The reset link was delivered to this address and followed, which is all a
+            // confirmation link would have proved. Someone who lost the confirmation mail
+            // gets in this way too.
+            user.EmailConfirmed = true;
             // Rotating the stamp is what invalidates anything else Identity ever issued
             // for this account, and it saves the new hash in the same update.
             var written = await userManager.UpdateSecurityStampAsync(user);
@@ -427,7 +440,139 @@ public static class CredentialEndpoints
 
             return Results.Ok(new EmailChanged(user.Id, user.Email!));
         });
+
+        group.MapPost("/verify-email", async Task<IResult> (
+            VerifyEmailRequest request,
+            UserManager<ApplicationUser> userManager,
+            IdentityDbContext db,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken) =>
+        {
+            var now = timeProvider.GetUtcNow();
+            var token = await FindAsync(db, request.Token, SecurityTokenPurpose.EmailConfirmation, cancellationToken);
+            var user = token is null ? null : await userManager.FindByIdAsync(token.UserId);
+            if (token is null || user is null || !user.IsActive || user.IsAgent)
+            {
+                return LinkNoLongerValid();
+            }
+
+            if (!await ConsumeAsync(db, token, now, cancellationToken))
+            {
+                // A second click on a link that already did its job - or a mail scanner
+                // that followed it first - is not a failure worth reporting: the address
+                // is confirmed, which is all the person wanted to hear. Only the holder of
+                // the link learns this, and they already know whose account it is.
+                return token.UsedAt is not null && user.EmailConfirmed
+                    ? Results.Ok(new EmailVerified(user.Email!))
+                    : LinkNoLongerValid();
+            }
+
+            if (!user.EmailConfirmed)
+            {
+                user.EmailConfirmed = true;
+                var result = await userManager.UpdateAsync(user);
+                if (!result.Succeeded)
+                {
+                    return Results.Problem(
+                        title: "The address could not be confirmed.",
+                        detail: "Ask for a new link and try again.",
+                        statusCode: StatusCodes.Status500InternalServerError);
+                }
+            }
+
+            return Results.Ok(new EmailVerified(user.Email!));
+        });
+
+        group.MapPost("/verify-email/resend", async Task<IResult> (
+            ResendConfirmationRequest request,
+            HttpContext http,
+            UserManager<ApplicationUser> userManager,
+            IdentityDbContext db,
+            EmailConfirmationPolicy confirmation,
+            IEmailCapabilities email,
+            IOptions<EmailOptions> emailOptions,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken) =>
+        {
+            var accepted = Results.Accepted(value: new RecoveryAccepted(email.IsConfigured));
+
+            var address = request.Email?.Trim() ?? "";
+            if (address.Length == 0)
+            {
+                return Invalid("email", "Enter your email address.");
+            }
+
+            // The same 202 whatever is behind the address, for the reason /auth/forgot
+            // gives: a distinct answer would let anyone ask who has an account here.
+            var user = await userManager.FindByEmailAsync(address);
+            if (user is null || !user.IsActive || user.IsAgent || user.EmailConfirmed || !confirmation.Required)
+            {
+                return accepted;
+            }
+
+            // One mail a minute per account. The limiter already holds an IP to ten
+            // requests a minute, but spread over addresses that is still a way to fill
+            // one person's inbox; this caps it at the account.
+            var now = timeProvider.GetUtcNow();
+            var recent = await db.UserSecurityTokens.AsNoTracking()
+                .AnyAsync(t => t.UserId == user.Id
+                    && t.Purpose == SecurityTokenPurpose.EmailConfirmation
+                    && t.CreatedAt > now - ConfirmationResendInterval, cancellationToken);
+            if (recent)
+            {
+                return accepted;
+            }
+
+            await RequestConfirmationAsync(db, http, emailOptions.Value, user, next: null, now, cancellationToken);
+            return accepted;
+        })
+        .RequireTurnstile("resend-confirmation");
     }
+
+    private static readonly TimeSpan ConfirmationResendInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Mints an account-confirmation link and queues the mail carrying it, retiring any
+    /// link sent before. Shared by registration and the resend form.
+    /// </summary>
+    /// <param name="next">
+    /// Where the page behind the link continues to - usually an invitation still waiting to
+    /// be accepted. Only a path on this origin is carried; anything else is dropped rather
+    /// than refused, because it is a convenience and not part of the request.
+    /// </param>
+    internal static async Task RequestConfirmationAsync(
+        IdentityDbContext db, HttpContext http, EmailOptions emailOptions, ApplicationUser user,
+        string? next, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var token = await IssueAsync(db, user.Id, SecurityTokenPurpose.EmailConfirmation, now, cancellationToken);
+
+        var link = Link(http, emailOptions, "verify-email", token.Secret);
+        if (IsLocalPath(next))
+        {
+            link += "?next=" + Uri.EscapeDataString(next!);
+        }
+
+        token.Entity.RequestEmail(user.Email!, UserSecurityToken.EmailConfirmationTemplate,
+            new Dictionary<string, string>
+            {
+                ["recipientName"] = user.FirstName,
+                ["confirmUrl"] = link,
+                ["expiresOn"] = Expiry(token.Entity.ExpiresAt),
+            });
+
+        await CommitAsync(db, cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>/invite/abc</c> yes; <c>//evil.example</c>, <c>/\evil.example</c> and anything
+    /// absolute no - the SPA would follow them off-site.
+    /// </summary>
+    private static bool IsLocalPath(string? path) =>
+        !string.IsNullOrEmpty(path)
+        && path.Length <= 512
+        && path[0] == '/'
+        && (path.Length == 1 || (path[1] != '/' && path[1] != '\\'))
+        && !path.Any(char.IsControl);
 
     /// <summary>
     /// Mints a link, retiring whatever was outstanding for the same purpose.

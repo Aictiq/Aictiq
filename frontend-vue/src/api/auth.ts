@@ -1,4 +1,5 @@
 import { apiFetch } from '@/utils/api'
+import { turnstileHeaders } from '@/utils/turnstile'
 
 /**
  * Sign-in methods other than a password.
@@ -67,3 +68,22 @@ function query(options: { next?: string; invite?: string }): string {
   const rendered = parameters.toString()
   return rendered ? `?${rendered}` : ''
 }
+
+/** The `type` the API puts on a sign-in refused only because the address is unconfirmed. */
+export const EMAIL_UNCONFIRMED = 'https://aictiq.com/problems/email-unconfirmed'
+
+/**
+ * Follows the link mailed at registration. Anonymous: it is usually opened on whatever
+ * device the mail was read on. A second click on a link that already worked still
+ * succeeds, so a mail scanner that got there first does not turn it into an error.
+ */
+export const verifyEmail = (token: string) =>
+  apiFetch<{ email: string }>('/auth/verify-email', { method: 'POST', body: { token } })
+
+/** Answers the same whether or not the address has an account waiting to be confirmed. */
+export const resendConfirmation = (email: string, turnstileToken?: string | null) =>
+  apiFetch<{ emailConfigured: boolean }>('/auth/verify-email/resend', {
+    method: 'POST',
+    body: { email },
+    headers: turnstileHeaders(turnstileToken),
+  })

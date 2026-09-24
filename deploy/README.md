@@ -138,7 +138,17 @@ EMAIL_FROM_ADDRESS=aictiq@localhost
 Email is optional everywhere. With `EMAIL_SMTP_HOST` empty the stack starts normally,
 `/health/ready` reports `{"checks":{"email":"unconfigured"}}`, and every queued message is
 parked as `skipped` in `notify.email_outbox` rather than retried forever - invitations are
-shared as links instead.
+shared as links instead. Once email is configured, new password accounts must confirm
+their address before signing in (`EMAIL_CONFIRMATION_ENABLED`, on by default).
+
+## Bot protection
+
+For a public instance, set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (and optionally
+`TURNSTILE_ALLOWED_HOSTNAME`) from a Cloudflare Turnstile widget, then
+`docker compose up -d api`. The sign-in, sign-up, forgot-password and resend-confirmation
+forms then require a challenge the API verifies with Cloudflare. Leave both empty for
+local and private installs. Step-by-step setup is in
+[docs/self-host.md](../docs/self-host.md#bot-protection-cloudflare-turnstile).
 
 ## Upgrading
 

@@ -107,3 +107,10 @@ public sealed class NullProjectWorkflowAccess : IProjectWorkflowAccess
         Guid projectId, IReadOnlyCollection<Guid> stateIds,
         CancellationToken cancellationToken = default) => Task.FromResult(stateIds.Count == 0);
 }
+
+/// <summary>No Tenancy module means no invitations, so no registration is confirmed by one.</summary>
+public sealed class NullInvitationLookup : IInvitationLookup
+{
+    public Task<string?> FindPendingInviteeAsync(string? token, CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
+}

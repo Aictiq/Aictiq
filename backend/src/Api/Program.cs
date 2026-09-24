@@ -33,6 +33,8 @@ using Aictiq.SharedKernel.Mcp;
 using Aictiq.SharedKernel.Realtime;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Tenancy;
+using Aictiq.SharedKernel.Turnstile;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -54,6 +56,9 @@ builder.Services.AddBlobStorage(builder.Configuration);
 // Optional: with no Email:Smtp:Host the API still starts and reports the fact on
 // /health/ready, so invitations can offer a copyable link instead.
 builder.Services.AddEmail(builder.Configuration);
+// Optional: with no Turnstile keys the anonymous forms are not challenged, which is what
+// development and a private self-hosted instance want. A public deployment sets both.
+builder.Services.AddTurnstile(builder.Configuration);
 builder.Services.AddHybridCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
@@ -408,7 +413,9 @@ app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
-app.UseSecurityHeaders(app.Environment.IsDevelopment());
+app.UseSecurityHeaders(
+    app.Environment.IsDevelopment(),
+    app.Services.GetRequiredService<IOptions<TurnstileOptions>>().Value.IsEnabled);
 
 // In production the SPA is published into wwwroot by Aictiq.Api.csproj and served from
 // this origin, so its auth cookies are first-party and there is no CORS. In development

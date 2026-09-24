@@ -142,6 +142,14 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    // Anonymous for the same reason: the account that registered cannot sign in until
+    // this link has been followed, so there is no session to require.
+    path: '/verify-email/:token',
+    name: 'verify-email',
+    component: () => import('@/views/VerifyEmailView.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/projects',
     name: 'projects',
     component: () => import('@/views/ProjectsView.vue'),
