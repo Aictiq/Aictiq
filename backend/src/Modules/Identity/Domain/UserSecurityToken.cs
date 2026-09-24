@@ -11,6 +11,7 @@ public enum SecurityTokenPurpose
 {
     PasswordReset = 0,
     EmailChange = 1,
+    EmailConfirmation = 2,
 }
 
 /// <summary>
@@ -45,8 +46,16 @@ public sealed class UserSecurityToken : EntityBase
     /// </summary>
     public static readonly TimeSpan EmailChangeLifetime = TimeSpan.FromHours(24);
 
+    /// <summary>
+    /// Two days. The mail that confirms a new account may sit in a spam folder over a
+    /// weekend evening, and all the link can do is mark an address that its own owner
+    /// typed in as confirmed - there is no password or address change riding on it.
+    /// </summary>
+    public static readonly TimeSpan EmailConfirmationLifetime = TimeSpan.FromHours(48);
+
     public const string PasswordResetTemplate = "password-reset";
     public const string EmailChangeTemplate = "email-change";
+    public const string EmailConfirmationTemplate = "email-confirmation";
 
     public required string UserId { get; init; }
 
@@ -68,8 +77,12 @@ public sealed class UserSecurityToken : EntityBase
 
     public DateTimeOffset? UsedAt { get; set; }
 
-    public static TimeSpan LifetimeFor(SecurityTokenPurpose purpose) =>
-        purpose == SecurityTokenPurpose.EmailChange ? EmailChangeLifetime : PasswordResetLifetime;
+    public static TimeSpan LifetimeFor(SecurityTokenPurpose purpose) => purpose switch
+    {
+        SecurityTokenPurpose.EmailChange => EmailChangeLifetime,
+        SecurityTokenPurpose.EmailConfirmation => EmailConfirmationLifetime,
+        _ => PasswordResetLifetime,
+    };
 
     /// <param name="token">The plaintext, returned to the caller. Never stored, never recoverable.</param>
     public static UserSecurityToken Create(

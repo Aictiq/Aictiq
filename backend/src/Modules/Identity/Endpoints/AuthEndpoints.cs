@@ -10,10 +10,33 @@ using Aictiq.Modules.Identity.Auth;
 using Aictiq.Modules.Identity.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Contracts;
+using Aictiq.SharedKernel.Email;
+using Aictiq.SharedKernel.Turnstile;
 
 namespace Aictiq.Modules.Identity.Endpoints;
 
-public sealed record RegisterRequest(string? Email, string? Password, string? FirstName, string? LastName);
+/// <param name="InvitationToken">
+/// The invitation link the person arrived with, when they did. Registering from it with the
+/// very address it was mailed to is proof enough of the mailbox, so the account starts
+/// confirmed and signed in. Any other address - a forwarded link - confirms by mail as usual.
+/// </param>
+/// <param name="Next">
+/// Where the confirmation link should send them once the address is confirmed: a path on
+/// this origin, typically the invitation they have not accepted yet. Anything else is dropped.
+/// </param>
+public sealed record RegisterRequest(
+    string? Email, string? Password, string? FirstName, string? LastName,
+    string? InvitationToken = null, string? Next = null);
+
+/// <summary>
+/// The 202 from registration when the address still has to be confirmed. No session: the
+/// account exists but cannot be used until the link in the mail is followed.
+/// </summary>
+public sealed record RegistrationPending(string Email, bool EmailConfirmationRequired = true);
+
+/// <summary>What the sign-in and sign-up pages need to know before they render.</summary>
+/// <param name="TurnstileSiteKey">Null when this instance does not challenge anonymous forms.</param>
+public sealed record AuthChallengeInfo(string? TurnstileSiteKey);
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record RefreshRequest(string? RefreshToken);
 public sealed record UserInfo(string Id, string Email, string FirstName, string LastName, IReadOnlyList<string> Roles);
@@ -92,6 +115,10 @@ public static class AuthEndpoints
             ITokenService tokenService,
             IOptions<JwtOptions> jwtOptions,
             IConfiguration configuration,
+            EmailConfirmationPolicy confirmation,
+            IInvitationLookup invitations,
+            IdentityDbContext db,
+            IOptions<EmailOptions> emailOptions,
             TimeProvider timeProvider,
             CancellationToken cancellationToken) =>
         {
@@ -112,13 +139,23 @@ public static class AuthEndpoints
                 return Results.ValidationProblem(errors);
             }
 
+            // The invitation was mailed to one address. Registering from its link with that
+            // same address proves the mailbox exactly as a confirmation link would.
+            // Trimmed: a trailing space from autofill is not part of anybody's address.
+            var email = request.Email!.Trim();
+            var invitee = await invitations.FindPendingInviteeAsync(request.InvitationToken, cancellationToken);
+            var confirmedByInvitation = invitee is not null
+                && string.Equals(invitee, email, StringComparison.OrdinalIgnoreCase);
+
+            var now = timeProvider.GetUtcNow();
             var user = new ApplicationUser
             {
-                UserName = request.Email,
-                Email = request.Email,
+                UserName = email,
+                Email = email,
+                EmailConfirmed = confirmedByInvitation,
                 FirstName = request.FirstName!.Trim(),
                 LastName = request.LastName!.Trim(),
-                CreatedAt = timeProvider.GetUtcNow()
+                CreatedAt = now
             };
 
             var result = await userManager.CreateAsync(user, request.Password!);
@@ -129,10 +166,22 @@ public static class AuthEndpoints
 
             await userManager.AddToRoleAsync(user, Roles.User);
 
+            if (!confirmedByInvitation && confirmation.Required)
+            {
+                // No session until the address is proven. A failure to queue the mail
+                // leaves an account that the resend form can still reach, so it is not
+                // worth unwinding the registration over.
+                await CredentialEndpoints.RequestConfirmationAsync(
+                    db, http, emailOptions.Value, user, request.Next, now, cancellationToken);
+
+                return Results.Accepted(value: new RegistrationPending(user.Email!));
+            }
+
             var tokens = await tokenService.IssueAsync(user, cancellationToken);
             return Results.Created("/api/v1/auth/session",
                 Respond(http, mode, tokens, ToSession(user, [Roles.User]), jwtOptions.Value));
-        });
+        })
+        .RequireTurnstile("register");
 
         group.MapPost("/login", async (
             LoginRequest request,
@@ -142,6 +191,7 @@ public static class AuthEndpoints
             SignInManager<ApplicationUser> signInManager,
             ITokenService tokenService,
             IOptions<JwtOptions> jwtOptions,
+            EmailConfirmationPolicy confirmation,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
@@ -176,10 +226,22 @@ public static class AuthEndpoints
                 return Results.Problem(title: "Invalid email or password.", statusCode: StatusCodes.Status401Unauthorized);
             }
 
+            // After the password, never before: only the account's owner learns that the
+            // address is unconfirmed, so this is not a way to probe who has signed up.
+            if (!user.EmailConfirmed && confirmation.Required)
+            {
+                return Results.Problem(
+                    title: "Confirm your email address to sign in.",
+                    detail: "Follow the link we sent when you registered, or ask for a new one.",
+                    type: ProblemTypes.EmailUnconfirmed,
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var tokens = await tokenService.IssueAsync(user, cancellationToken);
             var roles = await userManager.GetRolesAsync(user);
             return Results.Ok(Respond(http, mode, tokens, ToSession(user, [.. roles]), jwtOptions.Value));
-        });
+        })
+        .RequireTurnstile("login");
 
         group.MapPost("/refresh", async (
             HttpContext http,
@@ -258,6 +320,13 @@ public static class AuthEndpoints
 
             return Results.NoContent();
         });
+
+        // Anonymous and cheap: the sign-in pages ask before rendering whether to show the
+        // challenge widget, and with which public key.
+        session.MapGet("/challenge", (IOptions<TurnstileOptions> turnstile) =>
+            Results.Ok(new AuthChallengeInfo(
+                turnstile.Value.IsEnabled ? turnstile.Value.SiteKey : null)))
+            .AllowAnonymous();
 
         session.MapGet("/session", async (
             ClaimsPrincipal principal,

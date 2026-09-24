@@ -1,0 +1,12 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+Thanks for signing up for {{ productName }}. Confirm that this is your email address to
+finish creating your account:
+
+{{ confirmUrl }}
+{%- if expiresOn != blank %}
+
+The link stops working on {{ expiresOn }}. You can ask for a new one from the sign-in page.
+{%- endif %}
+
+If you did not sign up, ignore this message and the account will never be usable.

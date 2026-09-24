@@ -110,4 +110,18 @@ public static class ProblemTypes
     /// for the violation GlobalExceptionHandler would otherwise turn into a generic conflict.
     /// </summary>
     public const string PlaybookInUse = Base + "playbook-in-use";
+
+    /// <summary>
+    /// 400 (or 503 when Cloudflare cannot be reached) - the anonymous endpoint needs a
+    /// solved Turnstile challenge in <c>X-Turnstile-Token</c> and did not get a good one.
+    /// The client resets the widget and asks the visitor to solve it again.
+    /// </summary>
+    public const string ChallengeFailed = Base + "challenge-failed";
+
+    /// <summary>
+    /// 403 - the password was right, but the account's email address has not been
+    /// confirmed yet. Only said after the password checks out, so it reveals nothing
+    /// about an address to someone who does not already hold the account's password.
+    /// </summary>
+    public const string EmailUnconfirmed = Base + "email-unconfirmed";
 }

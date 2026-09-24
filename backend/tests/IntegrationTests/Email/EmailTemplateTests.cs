@@ -18,6 +18,7 @@ public sealed class EmailTemplateTests
     [InlineData("digest")]
     [InlineData("password-reset")]
     [InlineData("email-change")]
+    [InlineData("email-confirmation")]
     public void every_shipped_template_renders_a_subject_and_both_bodies(string template)
     {
         var rendered = _renderer.Render(template, new Dictionary<string, string>

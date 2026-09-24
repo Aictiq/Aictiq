@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { apiFetch } from '@/utils/api'
+import { turnstileHeaders } from '@/utils/turnstile'
 
 /**
  * Everything the client knows about who is signed in.
@@ -36,7 +37,20 @@ interface Credentials {
 interface Registration extends Credentials {
   firstName: string
   lastName: string
+  /** The invitation link they arrived with; from its own address it confirms the account. */
+  invitationToken?: string
+  /** Where the confirmation link should lead once the address is confirmed. */
+  next?: string
 }
+
+/**
+ * What registering did. `signed-in` when the account needs no confirmation - an invitation
+ * accepted from its own address, or an instance that cannot send mail. Otherwise the
+ * account exists but waits for the link mailed to `email`, and there is no session yet.
+ */
+export type RegistrationOutcome =
+  | { status: 'signed-in' }
+  | { status: 'confirmation-sent'; email: string }
 
 export const useSessionStore = defineStore('session', () => {
   const user = ref<SessionUser | null>(null)
@@ -86,21 +100,31 @@ export const useSessionStore = defineStore('session', () => {
     await load()
   }
 
-  async function login(credentials: Credentials): Promise<void> {
+  async function login(credentials: Credentials, turnstileToken?: string | null): Promise<void> {
     // The API replies with Set-Cookie and a user; no token reaches this code.
     const { user: signedIn } = await apiFetch<{ user: SessionUser }>('/auth/login', {
       method: 'POST',
       body: credentials,
+      headers: turnstileHeaders(turnstileToken),
     })
     set(signedIn)
   }
 
-  async function register(registration: Registration): Promise<void> {
-    const { user: created } = await apiFetch<{ user: SessionUser }>('/auth/register', {
+  async function register(
+    registration: Registration,
+    turnstileToken?: string | null,
+  ): Promise<RegistrationOutcome> {
+    const response = await apiFetch<{ user?: SessionUser; email?: string }>('/auth/register', {
       method: 'POST',
       body: registration,
+      headers: turnstileHeaders(turnstileToken),
     })
-    set(created)
+    // 201 carries the signed-in user; 202 only the address the confirmation went to.
+    if (response.user) {
+      set(response.user)
+      return { status: 'signed-in' }
+    }
+    return { status: 'confirmation-sent', email: response.email ?? registration.email }
   }
 
   async function logout(): Promise<void> {

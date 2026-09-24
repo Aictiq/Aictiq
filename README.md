@@ -65,7 +65,10 @@ domain at the host and use `AICTIQ_URL=https://aictiq.example.com` instead - Cad
 obtains and renews a certificate on its own. See [Self-hosting](docs/self-host.md).
 
 `.env.example` lists every Compose setting, including optional SMTP, OAuth, telemetry,
-realtime, and rate-limit settings. Leave optional values at their defaults for a local
+realtime, rate-limit and Cloudflare Turnstile settings. For an instance on the public
+internet, configure email (new accounts then confirm their address before signing in) and
+Turnstile (bot protection on the sign-in and sign-up forms) - see
+[Self-hosting](docs/self-host.md#bot-protection-cloudflare-turnstile). Leave optional values at their defaults for a local
 installation. `docker compose config --quiet` checks the file before Docker builds the
 images. Compose stops when a required secret still has no value.
 

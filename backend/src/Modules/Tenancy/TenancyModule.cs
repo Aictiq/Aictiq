@@ -23,6 +23,8 @@ public static class TenancyModule
         // one interface is a coin toss for anything that resolves them as a collection.
         services.RemoveAll<IOrganizationLookup>();
         services.AddScoped<IOrganizationLookup, OrganizationLookup>();
+        services.RemoveAll<IInvitationLookup>();
+        services.AddScoped<IInvitationLookup, InvitationLookup>();
 
         services.RemoveAll<IProjectAccess>();
         services.AddScoped<IProjectAccess, TenancyProjectAccess>();

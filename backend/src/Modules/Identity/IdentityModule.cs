@@ -47,6 +47,7 @@ public static class IdentityModule
         services.AddAuthentication();
 
         services.AddScoped<ITokenService, TokenService>();
+        services.AddSingleton<EmailConfirmationPolicy>();
 
         // Identity owns the people, so it answers "who is this id" for every other
         // module. Replaces SharedKernel's empty stub rather than stacking on top of it.

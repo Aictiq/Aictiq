@@ -1,24 +1,35 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-import { describeExternalError } from '@/api/auth'
+import { describeExternalError, EMAIL_UNCONFIRMED } from '@/api/auth'
 import AuthCard from '@/components/AuthCard.vue'
 import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
+import ResendConfirmation from '@/components/ResendConfirmation.vue'
+import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
+import { turnstileReady } from '@/utils/turnstile'
 
 const session = useSessionStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
 
-const email = ref('')
+// Prefilled when they arrive from a confirmation link, which knows whose address it was.
+const email = ref(typeof route.query.email === 'string' ? route.query.email : '')
 const password = ref('')
+const captcha = ref<string | null>(null)
+const widget = useTemplateRef<InstanceType<typeof TurnstileWidget>>('widget')
+/**
+ * The address whose password was right but which has not been confirmed yet. Only the
+ * password's holder ever gets this answer, so offering to resend reveals nothing.
+ */
+const unconfirmed = ref<string | null>(null)
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
 /**
@@ -34,14 +45,17 @@ async function submit() {
   submitting.value = true
   fieldErrors.value = {}
   formError.value = null
+  unconfirmed.value = null
 
   try {
-    await session.login({ email: email.value, password: password.value })
+    await session.login({ email: email.value.trim(), password: password.value }, captcha.value)
     // `next` is where the guard bounced them from; default to the app root.
     const next = typeof route.query.next === 'string' ? route.query.next : '/'
     await router.replace(next)
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (error instanceof ApiError && error.problem?.type === EMAIL_UNCONFIRMED) {
+      unconfirmed.value = email.value.trim()
+    } else if (error instanceof ApiError) {
       fieldErrors.value = error.fieldErrors
       // 401 carries no field errors - the API refuses to say which half was wrong.
       formError.value = Object.keys(error.fieldErrors).length === 0 ? error.title : null
@@ -50,6 +64,8 @@ async function submit() {
     }
   } finally {
     submitting.value = false
+    // A token is spent by the attempt, whatever its outcome.
+    widget.value?.reset()
   }
 }
 </script>
@@ -95,9 +111,19 @@ async function submit() {
         </p>
       </div>
 
+      <TurnstileWidget ref="widget" v-model:token="captcha" action="login" />
+
       <p v-if="formError" role="alert" class="text-destructive text-sm">{{ formError }}</p>
 
-      <Button type="submit" class="w-full" :disabled="submitting">
+      <div v-if="unconfirmed" role="alert" class="bg-muted space-y-3 rounded-md p-3">
+        <p class="text-sm">
+          Confirm your email address first. Follow the link we sent to
+          <span class="font-medium">{{ unconfirmed }}</span> when you registered, then sign in.
+        </p>
+        <ResendConfirmation :key="unconfirmed" :email="unconfirmed" />
+      </div>
+
+      <Button type="submit" class="w-full" :disabled="submitting || !turnstileReady(captcha)">
         <Loader2 v-if="submitting" class="size-4 animate-spin" />
         Sign in
       </Button>

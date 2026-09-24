@@ -70,12 +70,17 @@ public sealed class ApiTestContext : IAsyncDisposable
     /// background sweeps, whose own polls would otherwise bleed into a request's
     /// measurement.
     /// </param>
+    /// <param name="signInAdmin">
+    /// Off for a host whose sign-in the test wants to exercise from the first request -
+    /// one that challenges logins, say - and which therefore leaves <see cref="Admin"/> unset.
+    /// </param>
     public static async Task<ApiTestContext> CreateAsync(
         PostgresFixture postgres, GarageFixture garage, string dbPrefix,
         Action<IDictionary<string, string?>>? configure = null,
         Action<IServiceCollection>? configureServices = null,
         bool countQueries = false,
-        bool appRole = false)
+        bool appRole = false,
+        bool signInAdmin = true)
     {
         var connectionString = await postgres.CreateDatabaseAsync(dbPrefix);
         string? appLogin = null;
@@ -163,7 +168,10 @@ public sealed class ApiTestContext : IAsyncDisposable
         });
 
         var context = new ApiTestContext(factory) { ConnectionString = connectionString, QueryCount = counter, _appLogin = appLogin };
-        context.Admin = await context.ClientForAsync(AdminEmail, AdminPassword);
+        if (signInAdmin)
+        {
+            context.Admin = await context.ClientForAsync(AdminEmail, AdminPassword);
+        }
         return context;
     }
 
@@ -223,7 +231,7 @@ public sealed class ApiTestContext : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        Admin.Dispose();
+        Admin?.Dispose();
         await Factory.DisposeAsync();
         if (_appLogin is not null)
         {

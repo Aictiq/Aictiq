@@ -1,4 +1,5 @@
 import { apiFetch } from '@/utils/api'
+import { turnstileHeaders } from '@/utils/turnstile'
 
 /**
  * A person's own account: profile, picture, password, address, sessions.
@@ -80,8 +81,12 @@ export const revokeSession = (id: string) =>
 /** Everywhere except this browser - the one you are pressing the button in stays. */
 export const revokeOtherSessions = () => apiFetch<void>('/me/sessions', { method: 'DELETE' })
 
-export const forgotPassword = (email: string) =>
-  apiFetch<RecoveryAccepted>('/auth/forgot', { method: 'POST', body: { email } })
+export const forgotPassword = (email: string, turnstileToken?: string | null) =>
+  apiFetch<RecoveryAccepted>('/auth/forgot', {
+    method: 'POST',
+    body: { email },
+    headers: turnstileHeaders(turnstileToken),
+  })
 
 export const resetPassword = (token: string, newPassword: string) =>
   apiFetch<void>('/auth/reset', { method: 'POST', body: { token, newPassword } })

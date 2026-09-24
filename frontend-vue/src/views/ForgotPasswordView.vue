@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue'
-import { ref } from 'vue'
+import { ref, useTemplateRef } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import AuthCard from '@/components/AuthCard.vue'
+import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { forgotPassword } from '@/api/profile'
 import { ApiError } from '@/utils/api'
+import { turnstileReady } from '@/utils/turnstile'
 
 /**
  * Asks for a reset link.
@@ -24,6 +26,8 @@ const sent = ref(false)
 const configured = ref(true)
 const fieldErrors = ref<Record<string, string[]>>({})
 const failed = ref<string | null>(null)
+const captcha = ref<string | null>(null)
+const widget = useTemplateRef<InstanceType<typeof TurnstileWidget>>('widget')
 
 async function submit() {
   sending.value = true
@@ -31,7 +35,7 @@ async function submit() {
   failed.value = null
 
   try {
-    const result = await forgotPassword(email.value.trim())
+    const result = await forgotPassword(email.value.trim(), captcha.value)
     configured.value = result.emailConfigured
     sent.value = true
   } catch (error) {
@@ -42,6 +46,7 @@ async function submit() {
     }
   } finally {
     sending.value = false
+    widget.value?.reset()
   }
 }
 </script>
@@ -92,9 +97,15 @@ async function submit() {
         </p>
       </div>
 
+      <TurnstileWidget ref="widget" v-model:token="captcha" action="forgot" />
+
       <p v-if="failed" class="text-destructive text-xs">{{ failed }}</p>
 
-      <Button type="submit" class="w-full" :disabled="sending || email.trim().length === 0">
+      <Button
+        type="submit"
+        class="w-full"
+        :disabled="sending || email.trim().length === 0 || !turnstileReady(captcha)"
+      >
         <Loader2 v-if="sending" class="animate-spin" aria-hidden="true" />
         Send the link
       </Button>
