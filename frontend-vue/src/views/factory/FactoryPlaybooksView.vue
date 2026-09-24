@@ -15,6 +15,7 @@ import {
   type PlaybookHarness,
   type SavePlaybookBody,
 } from '@/api/playbooks'
+import { withBoardNames } from '@/api/boards'
 import { listProjects, type Project } from '@/api/projects'
 import { wikiTree, type WikiTreePage } from '@/api/wiki'
 import { listWorkflows, type WorkflowState } from '@/api/workflows'
@@ -48,6 +49,7 @@ import { ApiError, ConflictError } from '@/utils/api'
 interface ProjectPlaybooks {
   project: Project
   playbooks: Playbook[]
+  /** Named the way the project's boards show them, not by their workflow names. */
   states: WorkflowState[]
 }
 
@@ -103,7 +105,11 @@ async function load() {
         return {
           project,
           playbooks,
-          states: workflows.find((workflow) => workflow.isDefault)?.states ?? [],
+          states: await withBoardNames(
+            org.slug.value,
+            project.key,
+            workflows.find((workflow) => workflow.isDefault)?.states ?? [],
+          ),
         }
       }),
     )

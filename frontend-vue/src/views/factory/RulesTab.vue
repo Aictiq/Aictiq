@@ -3,6 +3,7 @@ import { Loader2, MoreHorizontal } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import { withBoardNames } from '@/api/boards'
 import { deleteRule, listRules, ruleSkipReasonText, updateRule, type Rule } from '@/api/rules'
 import { listLabels, type Label } from '@/api/labels'
 import { listProjects, type Project } from '@/api/projects'
@@ -75,7 +76,11 @@ async function load() {
         return {
           project,
           rules: [...rules].sort((left, right) => left.name.localeCompare(right.name)),
-          states: workflows.find((workflow) => workflow.isDefault)?.states ?? [],
+          states: await withBoardNames(
+            org.slug.value,
+            project.key,
+            workflows.find((workflow) => workflow.isDefault)?.states ?? [],
+          ),
           labels,
         }
       }),
