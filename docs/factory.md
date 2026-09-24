@@ -145,8 +145,12 @@ Test interactively first:
 aictiq runner start
 ```
 
-Then stop it and install it as a systemd user service. `install-service` prints a unit; it
-does not write or enable it:
+Then stop it and install it as a service. `install-service` prints the definition for the
+machine it runs on (pass `--platform linux|macos|windows` for another); it does not write or
+enable anything. Every variant runs as the user who generated it, with that user's harness
+sign-ins and git credentials, and stops for good when the runner secret is revoked.
+
+### Linux (systemd)
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -161,7 +165,39 @@ Generate the unit from a shell whose `PATH` finds Node.js, `aictiq`, and every h
 path is embedded in the unit. Use `journalctl --user -u aictiq-runner -f` for its local log.
 The service finishes runs in flight on its first stop signal; a second signal cancels them.
 
-For more concurrency, generate the unit with `aictiq runner install-service --parallel 2`.
+### macOS (launchd)
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+aictiq runner install-service > ~/Library/LaunchAgents/com.aictiq.runner.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aictiq.runner.plist
+launchctl print gui/$(id -u)/com.aictiq.runner
+tail -f ~/Library/Logs/aictiq-runner.log
+```
+
+The agent starts at login and runs while you are logged in. launchd restarts it after a
+crash, and a stop (`launchctl bootout gui/$(id -u)/com.aictiq.runner`) lets runs in flight
+finish for up to 15 minutes. As on Linux, generate it from a shell whose `PATH` finds Node.js
+and every harness.
+
+### Windows (Task Scheduler)
+
+In PowerShell:
+
+```powershell
+aictiq runner install-service > install-runner.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File install-runner.ps1
+Get-Content -Wait "$env:LOCALAPPDATA\aictiq\runner.log"
+```
+
+The installer writes `%LOCALAPPDATA%\aictiq\runner-service.ps1` and registers an
+**Aictiq runner** task that starts it at logon and runs while you are logged in. That script
+restarts the runner 10 seconds after it exits and writes the log. Stopping the task ends the
+runner at once, so runs in flight are cancelled rather than finished. Remove it with
+`Unregister-ScheduledTask -TaskName 'Aictiq runner' -Confirm:$false`. The runner's git
+credential scripts need Git for Windows, which runs them through its bundled `sh`.
+
+For more concurrency, generate the definition with `aictiq runner install-service --parallel 2`.
 One process supports 1–16 concurrent runs, but the whole process is still one trust domain.
 
 ## 4. Write the first playbook

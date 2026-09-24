@@ -48,3 +48,75 @@ jobs:
       # diff means the committed TypeScript contract no longer matches the document.
       - run: pnpm run gen:api -- --offline
       - run: git diff --exit-code -- openapi/v1.json src/api/schema.d.ts
+
+  # `runner install-service` prints a launchd agent on macOS and a Task Scheduler installer on
+  # Windows. Install each for real and read its log: an unregistered runner exits with "not
+  # registered", so two such lines prove the service manager started the CLI with the right
+  # arguments and restarted it. The platform test checks git can run the runner's credential
+  # scripts on that OS.
+  platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: cli/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cli/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - run: pnpm exec vitest run tests/runner/service.test.ts tests/runner/git-credentials.platform.test.ts
+        env:
+          AICTIQ_PLATFORM_TESTS: '1'
+
+      - name: Install and start the launchd agent
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          plist="$HOME/Library/LaunchAgents/com.aictiq.runner.plist"
+          log="$HOME/Library/Logs/aictiq-runner.log"
+          mkdir -p "$(dirname "$plist")"
+          node dist/index.js runner install-service > "$plist"
+          plutil -lint "$plist"
+          launchctl bootstrap "gui/$(id -u)" "$plist"
+          for _ in $(seq 1 30); do
+            [ "$(grep -c 'not registered' "$log" 2>/dev/null || echo 0)" -ge 2 ] && break
+            sleep 2
+          done
+          launchctl print "gui/$(id -u)/com.aictiq.runner" | head -20
+          cat "$log"
+          launchctl bootout "gui/$(id -u)/com.aictiq.runner"
+          [ "$(grep -c 'not registered' "$log")" -ge 2 ]
+
+      - name: Install and start the scheduled task
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node dist/index.js runner install-service | Out-File -Encoding utf8 install-runner.ps1
+          powershell -NoProfile -ExecutionPolicy Bypass -File install-runner.ps1
+          if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
+          $log = Join-Path $env:LOCALAPPDATA 'aictiq\runner.log'
+          $count = 0
+          foreach ($i in 1..30) {
+            if (Test-Path $log) { $count = @(Select-String -Path $log -Pattern 'not registered').Count }
+            if ($count -ge 2) { break }
+            Start-Sleep -Seconds 2
+          }
+          Get-ScheduledTask -TaskName 'Aictiq runner' | Get-ScheduledTaskInfo | Format-List
+          if (Test-Path $log) { Get-Content $log }
+          Unregister-ScheduledTask -TaskName 'Aictiq runner' -Confirm:$false
+          if ($count -lt 2) { throw "expected two 'not registered' lines, found $count" }
