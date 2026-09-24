@@ -48,3 +48,102 @@ jobs:
       # diff means the committed TypeScript contract no longer matches the document.
       - run: pnpm run gen:api -- --offline
       - run: git diff --exit-code -- openapi/v1.json src/api/schema.d.ts
+
+  # `runner install-service` prints a launchd agent on macOS and a Task Scheduler installer on
+  # Windows. Install each for real and read its log, twice:
+  #   - unregistered, the runner exits 5 (auth): one line and no restart, as for a revoked secret;
+  #   - registered with --parallel 99, it exits 2 (validation): the service must restart it.
+  # The platform test checks git can run the runner's credential scripts on that OS.
+  platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The credential test must see only the runner's own git credential scripts.
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: cli/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cli/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - run: pnpm exec vitest run tests/runner/service.test.ts tests/runner/git-credentials.platform.test.ts
+        env:
+          AICTIQ_PLATFORM_TESTS: '1'
+
+      - name: Install the launchd agent (exit 5 stops, other exits restart)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          plist="$HOME/Library/LaunchAgents/com.aictiq.runner.plist"
+          log="$HOME/Library/Logs/aictiq-runner.log"
+          domain="gui/$(id -u)"
+          count() { grep -c "$1" "$log" 2>/dev/null || true; }
+          install() {
+            node dist/index.js runner install-service "$@" > "$plist"
+            plutil -lint "$plist"
+            rm -f "$log"
+            launchctl bootstrap "$domain" "$plist"
+          }
+          mkdir -p "$(dirname "$plist")"
+
+          install
+          sleep 30
+          launchctl print "$domain/com.aictiq.runner" | grep -E 'state|runs|last exit' || true
+          cat "$log"
+          launchctl bootout "$domain/com.aictiq.runner"
+          [ "$(count 'not registered')" -eq 1 ]
+
+          mkdir -p ~/.config/aictiq
+          echo '{"url":"http://127.0.0.1:9","token":"jrn_ci"}' > ~/.config/aictiq/runner.json
+          install --parallel 99
+          for _ in $(seq 1 30); do [ "$(count 'between 1 and 16')" -ge 2 ] && break; sleep 2; done
+          cat "$log"
+          launchctl bootout "$domain/com.aictiq.runner"
+          [ "$(count 'between 1 and 16')" -ge 2 ]
+
+      - name: Install the scheduled task (exit 5 stops, other exits restart)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'aictiq\runner.log'
+          function Count($pattern) { if (Test-Path $log) { @(Select-String -Path $log -Pattern $pattern -SimpleMatch).Count } else { 0 } }
+          function Install([string[]] $extra) {
+            node dist/index.js runner install-service @extra | Out-File -Encoding utf8 install-runner.ps1
+            if (Test-Path $log) { Remove-Item $log }
+            powershell -NoProfile -ExecutionPolicy Bypass -File install-runner.ps1
+            if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
+          }
+          function Remove { Unregister-ScheduledTask -TaskName 'Aictiq runner' -Confirm:$false }
+
+          Install @()
+          Start-Sleep -Seconds 30
+          Get-ScheduledTask -TaskName 'Aictiq runner' | Get-ScheduledTaskInfo | Format-List
+          if (Test-Path $log) { Get-Content $log }
+          Remove
+          $stopped = Count 'not registered'
+          if ($stopped -ne 1) { throw "exit 5: expected one 'not registered' line, found $stopped" }
+
+          New-Item -ItemType Directory -Force (Join-Path $HOME '.config\aictiq') | Out-Null
+          '{"url":"http://127.0.0.1:9","token":"jrn_ci"}' | Set-Content (Join-Path $HOME '.config\aictiq\runner.json')
+          Install @('--parallel', '99')
+          foreach ($i in 1..30) { if ((Count 'between 1 and 16') -ge 2) { break }; Start-Sleep -Seconds 2 }
+          Get-Content $log
+          Remove
+          $restarts = Count 'between 1 and 16'
+          if ($restarts -lt 2) { throw "exit 2: expected the task to restart the runner, found $restarts start(s)" }

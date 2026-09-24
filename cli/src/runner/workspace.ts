@@ -65,13 +65,13 @@ export function defaultWorkspaceRoot(env: NodeJS.ProcessEnv = process.env): stri
   return join(base, 'aictiq', 'runner')
 }
 
-const TOKEN_ENV = 'AICTIQ_GIT_TOKEN'
+export const TOKEN_ENV = 'AICTIQ_GIT_TOKEN'
 
 // Answers only `get`: git also calls helpers with `store` after a successful push, and the
 // token must not end up anywhere but this process's environment.
-const CREDENTIAL_HELPER = `!f() { test "$1" = get || return 0; echo username=x-access-token; echo "password=$${TOKEN_ENV}"; }; f`
+export const CREDENTIAL_HELPER = `!f() { test "$1" = get || return 0; echo username=x-access-token; echo "password=$${TOKEN_ENV}"; }; f`
 
-const ASKPASS_SCRIPT = `#!/bin/sh
+export const ASKPASS_SCRIPT = `#!/bin/sh
 case "$1" in
   *[Uu]sername*) echo x-access-token ;;
   *) echo "$${TOKEN_ENV}" ;;

@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { existsSync } from 'node:fs'
-import { arch, platform } from 'node:os'
+import { arch, homedir, platform } from 'node:os'
 import { resolve } from 'node:path'
 import type { GlobalOptions } from '../context.js'
 import { CliError, ExitCode } from '../errors.js'
@@ -12,6 +12,7 @@ import { readRunnerConfig, runnerConfigPath, writeRunnerConfig } from '../runner
 import type { RunnerConfig } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
 import { harnesses, probeHarnesses } from '../runner/harness/index.js'
+import { serviceDefinition, servicePlatform, type ServicePlatform } from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import type { RunnerCapabilities } from '../runner/types.js'
 import { DefaultAttachmentMaxBytes, DefaultAttachmentMaxCount, defaultWorkspaceRoot } from '../runner/workspace.js'
@@ -277,43 +278,31 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
 
   runner
     .command('install-service')
-    .description('Print a systemd user unit that keeps `aictiq runner start` running')
+    .description(
+      'Print a service definition that keeps `aictiq runner start` running: a systemd user unit (Linux), a launchd agent (macOS) or a Task Scheduler installer (Windows)',
+    )
     .option('--parallel <n>', 'Runs executed at the same time', '1')
-    .action((options: { parallel: string }) => {
-      print(systemdUnit(process.execPath, cliEntry(), options.parallel))
+    .option('--platform <platform>', 'linux, macos or windows (default: this machine)')
+    .action((options: { parallel: string; platform?: string }) => {
+      const platform = options.platform ?? servicePlatform()
+      if (!isServicePlatform(platform)) {
+        throw new CliError(
+          `Unknown platform "${platform}". Use linux, macos or windows.`,
+          ExitCode.Validation,
+        )
+      }
+      print(
+        serviceDefinition(platform, {
+          node: process.execPath,
+          entry: cliEntry(),
+          parallel: options.parallel,
+          path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          home: homedir(),
+        }),
+      )
     })
 
   return runner
-}
-
-export function systemdUnit(node: string, entry: string, parallel: string): string {
-  return `# Save as ~/.config/systemd/user/aictiq-runner.service, then:
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now aictiq-runner
-#   loginctl enable-linger "$USER"   # keep it running after you log out
-#
-# The runner executes agents as this user, with this user's harness sign-ins and git
-# credentials: one runner is one trust domain. SIGTERM lets runs in flight finish;
-# TimeoutStopSec bounds how long systemd waits before it cancels them.
-[Unit]
-Description=Aictiq runner
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=${node} ${entry} runner start --parallel ${parallel}
-Restart=on-failure
-RestartSec=10
-# Exit 5 means the secret was revoked; restarting cannot fix that.
-RestartPreventExitStatus=5
-KillMode=mixed
-TimeoutStopSec=15min
-Environment=PATH=${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}
-
-[Install]
-WantedBy=default.target
-`
 }
 
 async function probe(maxParallel: number): Promise<RunnerCapabilities> {
@@ -362,4 +351,8 @@ function asCliError(error: unknown): unknown {
     )
   }
   return error
+}
+
+function isServicePlatform(value: string): value is ServicePlatform {
+  return value === 'linux' || value === 'macos' || value === 'windows'
 }

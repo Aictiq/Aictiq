@@ -93,7 +93,7 @@ identity you own:
 npm install -g @aictiq/cli
 aictiq runner register --url https://aictiq.example.com --token jrn_…
 aictiq runner root ~/src      # clones under ~/src follow each project's path hint
-aictiq runner start          # or: aictiq runner install-service (systemd)
+aictiq runner start          # or: aictiq runner install-service (systemd, launchd, Task Scheduler)
 ```
 
 Move an item into a trigger state and the run starts itself. Your code, your machine, your

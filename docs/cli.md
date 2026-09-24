@@ -182,7 +182,7 @@ aictiq runner map ACME ~/src/aictiq    # project key → local clone; wins over 
 aictiq runner map ACME --remove
 aictiq runner status                  # registration, detected harnesses, mapped repositories and roots
 aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>]
-aictiq runner install-service [--parallel 2] # prints a systemd user unit
+aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
 
 `start` detects `claude`, `codex` and `opencode` on `PATH` and reports them, so the instance
