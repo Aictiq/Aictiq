@@ -631,7 +631,7 @@ public sealed class RunLogLimitTests(PostgresFixture postgres, GarageFixture gar
     }
 }
 
-public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId);
+public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId, Guid? RunnerId = null);
 
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid? PlaybookId,
@@ -642,7 +642,8 @@ public sealed record RunView(
     string? OutcomeSummary, string? PullRequestUrl, int? ExitCode, decimal? CostUsd,
     long? InputTokens, long? OutputTokens, string? FailureReason, string? PromptSnapshot,
     uint Version, string? PlaybookName = null, string? RunnerName = null,
-    Guid? RuleId = null, string? RuleName = null);
+    Guid? RuleId = null, string? RuleName = null,
+    Guid? RequestedRunnerId = null, string? RequestedRunnerName = null);
 
 public sealed record RunLogPage(IReadOnlyList<RunLogEntry> Items, bool Truncated);
 

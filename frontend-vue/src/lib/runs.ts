@@ -200,15 +200,21 @@ const RUN_CHOICE_PREFIX = 'aictiq.run.'
 export interface RunChoice {
   playbookId: string | null
   agentId: string | null
+  /** Null is "any free runner". */
+  runnerId?: string | null
 }
 
-/** The last playbook and agent used on this project. Storage is a convenience, never a permission. */
+/** The last playbook, agent and runner used on this project. Storage is a convenience, never a permission. */
 export function readRunChoice(projectKey: string): RunChoice | null {
   try {
     const raw = localStorage.getItem(RUN_CHOICE_PREFIX + projectKey)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<RunChoice>
-    return { playbookId: parsed.playbookId ?? null, agentId: parsed.agentId ?? null }
+    return {
+      playbookId: parsed.playbookId ?? null,
+      agentId: parsed.agentId ?? null,
+      runnerId: parsed.runnerId ?? null,
+    }
   } catch {
     return null
   }

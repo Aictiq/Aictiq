@@ -22,6 +22,12 @@ public sealed record RunnerView(
     RunnerCapabilities? Capabilities, DateTimeOffset? LastSeenAt, bool IsOnline, bool IsDisabled,
     DateTimeOffset CreatedAt);
 
+/// <summary>
+/// A runner as someone starting a run sees it: enough to pick one, nothing about who
+/// registered it or its secret. Disabled runners are left out; they cannot take a run.
+/// </summary>
+public sealed record RunnerChoiceView(Guid Id, string Name, IReadOnlyList<string> Harnesses, bool IsOnline);
+
 /// <param name="Secret">Returned exactly once. Aictiq keeps only its hash.</param>
 public sealed record RunnerIssuedView(RunnerView Runner, string Secret);
 
@@ -80,6 +86,9 @@ public static partial class RunnerEndpoints
             .RequireAuthorization();
 
         roster.MapGet("/", ListAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
+        // Whoever may start a run may choose the runner for it, so this narrow list is open to
+        // factory operators, not only to the Admins who manage the roster.
+        roster.MapGet("/choices", ChoicesAsync).RequireOrgRole(OrgRole.Member).RequireFactoryOperator().RequireScope(Scopes.Read);
         roster.MapGet("/elsewhere", ElsewhereAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
         // Registering or rotating mints a credential, so it takes the admin scope exactly as
         // creating a token does: a leaked read-write token must not be a way to a machine
@@ -112,6 +121,20 @@ public static partial class RunnerEndpoints
         var people = await directory.GetAsync([.. runners.Select(r => r.RegisteredBy).Distinct()], cancellationToken);
         var now = clock.GetUtcNow();
         return Results.Ok(runners.Select(r => ToView(r, people, options.Value, now)).ToList());
+    }
+
+    private static async Task<IResult> ChoicesAsync(
+        AutomationDbContext db, IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken cancellationToken)
+    {
+        var runners = await db.Runners.AsNoTracking()
+            .Where(r => r.DeletedAt == null && r.DisabledAt == null)
+            .OrderBy(r => r.Name)
+            .ToListAsync(cancellationToken);
+        var now = clock.GetUtcNow();
+        return Results.Ok(runners.Select(r => new RunnerChoiceView(
+            r.Id, r.Name,
+            [.. (r.Capabilities?.Harnesses ?? []).Select(h => h.Name)],
+            IsOnline(r, options.Value, now))).ToList());
     }
 
     /// <summary>

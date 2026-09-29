@@ -6,6 +6,7 @@ import type { Run } from '@/api/runs'
 import { dispatchRun } from '@/api/runs'
 import { listAgents, type Agent } from '@/api/agents'
 import { getFactorySettings, listPlaybooks, type Playbook } from '@/api/playbooks'
+import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
 import { listProjectMembers } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
 import UiPageState from '@/components/UiPageState.vue'
@@ -26,7 +27,8 @@ import { ApiError } from '@/utils/api'
 /**
  * "Hand to agent" in two clicks: a playbook and an agent, both preselected from what this
  * project used last (remembered per project, because a team runs the same recipe on item
- * after item). Dispatching claims the item for the agent in the same transaction, so a
+ * after item). With more than one runner, a third choice sends the run to one machine;
+ * the default, any free runner, is what every run did before there was a choice. Dispatching claims the item for the agent in the same transaction, so a
  * claim that got there first is the server's 409, shown here rather than guessed at.
  */
 const props = defineProps<{
@@ -49,6 +51,9 @@ const playbooks = ref<Playbook[]>([])
 const agents = ref<Agent[]>([])
 const playbookId = ref<string | null>(null)
 const agentId = ref<string | null>(null)
+const runners = ref<RunnerChoice[]>([])
+/** Null is "any free runner". */
+const runnerId = ref<string | null>(null)
 const submitting = ref(false)
 const error = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
@@ -56,6 +61,24 @@ const fieldErrors = ref<Record<string, string[]>>({})
 const assignable = computed(() =>
   agents.value.filter((agent) => agent.isActive).sort((a, b) => a.displayName.localeCompare(b.displayName)),
 )
+
+const playbookHarness = computed(() => playbooks.value.find((p) => p.id === playbookId.value)?.harness ?? null)
+
+/** A runner that has not reported yet may still have the harness; the API decides once it has. */
+const canRun = (runner: RunnerChoice, harness: string | null) =>
+  !harness || runner.harnesses.length === 0 || runner.harnesses.includes(harness)
+
+const compatibleRunners = computed(() => runners.value.filter((runner) => canRun(runner, playbookHarness.value)))
+
+/** One runner is no choice: every run goes to it anyway. */
+const showRunners = computed(() => runners.value.length > 1)
+
+const chosenRunner = computed(() => runners.value.find((runner) => runner.id === runnerId.value) ?? null)
+
+// A playbook with another harness may rule the chosen runner out.
+watch(playbookHarness, (harness) => {
+  if (chosenRunner.value && !canRun(chosenRunner.value, harness)) runnerId.value = null
+})
 
 watch(
   () => props.open,
@@ -66,13 +89,16 @@ watch(
     loadFailed.value = false
     loading.value = true
     try {
-      const [projectPlaybooks, projectAgents, settings, members] = await Promise.all([
+      const [projectPlaybooks, projectAgents, settings, members, runnerChoices] = await Promise.all([
         listPlaybooks(props.slug, props.projectKey),
         listAgents(props.slug),
         getFactorySettings(props.slug, props.projectKey).catch(() => null),
         listProjectMembers(props.slug, props.projectKey),
+        // Without the list the run still goes to any free runner, as it always could.
+        listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
       ])
       playbooks.value = projectPlaybooks
+      runners.value = runnerChoices
       const memberIds = new Set(members.map((member) => member.userId))
       agents.value = projectAgents.filter((agent) => memberIds.has(agent.userId))
 
@@ -90,6 +116,8 @@ watch(
         remembered?.agentId && assignable.value.some((a) => a.userId === remembered.agentId)
           ? remembered.agentId
           : (defaultAgent ?? assignable.value[0]?.userId ?? null)
+      const rememberedRunner = runnerChoices.find((runner) => runner.id === remembered?.runnerId)
+      runnerId.value = rememberedRunner && canRun(rememberedRunner, playbookHarness.value) ? rememberedRunner.id : null
     } catch {
       loadFailed.value = true
     } finally {
@@ -108,8 +136,13 @@ async function submit() {
     const run = await dispatchRun(props.slug, props.itemKey, {
       playbookId: playbookId.value,
       agentId: agentId.value,
+      runnerId: showRunners.value ? runnerId.value : null,
     })
-    writeRunChoice(props.projectKey, { playbookId: playbookId.value, agentId: agentId.value })
+    writeRunChoice(props.projectKey, {
+      playbookId: playbookId.value,
+      agentId: agentId.value,
+      runnerId: runnerId.value,
+    })
     toast.success(
       'Run queued',
       `It starts when a runner picks it up - follow it from the item's Runs section.`,
@@ -202,6 +235,26 @@ async function submit() {
             </option>
           </select>
           <p v-for="message in fieldErrors.agentId" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </div>
+        <div v-if="showRunners" class="space-y-1.5">
+          <label for="start-run-runner" class="text-sm font-medium">Runner</label>
+          <select
+            id="start-run-runner"
+            v-model="runnerId"
+            data-testid="start-run-runner"
+            class="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
+          >
+            <option :value="null">Any free runner</option>
+            <option v-for="runner in compatibleRunners" :key="runner.id" :value="runner.id">
+              {{ runner.name }} · {{ runner.isOnline ? 'online' : 'offline' }}
+            </option>
+          </select>
+          <p v-if="chosenRunner && !chosenRunner.isOnline" class="text-muted-foreground text-xs">
+            {{ chosenRunner.name }} is offline. The run waits in the queue until it comes back.
+          </p>
+          <p v-for="message in fieldErrors.runnerId" :key="message" class="text-destructive text-xs">
             {{ message }}
           </p>
         </div>

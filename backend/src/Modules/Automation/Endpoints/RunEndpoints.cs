@@ -15,6 +15,8 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="AgentName">The agent's display name, for the board. Null when nobody could say it.</param>
 /// <param name="PlaybookName">The playbook's display name, resolved for the run screens. Null when the playbook is gone.</param>
 /// <param name="RunnerName">The machine's name, for the run header and the item's claim banner. Null until a runner takes the run.</param>
+/// <param name="RequestedRunnerId">The runner the run was sent to, or null when any free runner may take it.</param>
+/// <param name="RequestedRunnerName">That runner's name, while it still exists.</param>
 /// <param name="CancelRequested">A cancel has been asked for; the runner acknowledges it on finish.</param>
 /// <param name="RequestedBy">Who dispatched the run, or null when <paramref name="RuleId"/> did instead.</param>
 /// <param name="RuleId">The automation rule that dispatched the run, or null for a person.</param>
@@ -22,13 +24,15 @@ namespace Aictiq.Modules.Automation.Endpoints;
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
-    Guid? RunnerId, string? RunnerName, RunStatus Status, string Harness,
+    Guid? RunnerId, string? RunnerName, Guid? RequestedRunnerId, string? RequestedRunnerName,
+    RunStatus Status, string Harness,
     Guid? PlaybookRevisionId, int MaxMinutes, DateTimeOffset QueuedAt, DateTimeOffset? AssignedAt,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, DateTimeOffset? LastHeartbeatAt, bool CancelRequested,
     string? OutcomeSummary, string? PullRequestUrl, int? ExitCode, decimal? CostUsd, long? InputTokens,
     long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version);
 
-public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId);
+/// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
+public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId, Guid? RunnerId = null);
 
 /// <summary>
 /// A person's window on the factory: dispatch, watch, cancel.
@@ -73,7 +77,7 @@ public static class RunEndpoints
     {
         var project = http.ResolvedProject()!;
         var result = await dispatcher.DispatchAsync(
-            project, itemKey, request.PlaybookId, request.AgentId, DispatchActor.User(user.UserId!), ct);
+            project, itemKey, request.PlaybookId, request.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct);
         switch (result.Outcome)
         {
             case DispatchOutcome.ItemNotFound:
@@ -355,7 +359,8 @@ public static class RunEndpoints
         AutomationDbContext db, IReadOnlyCollection<Run> runs, CancellationToken ct)
     {
         var playbookIds = runs.Where(run => run.PlaybookId != Guid.Empty).Select(run => run.PlaybookId).Distinct().ToList();
-        var runnerIds = runs.Select(run => run.RunnerId).Where(runner => runner is not null).Select(runner => runner!.Value).Distinct().ToList();
+        var runnerIds = runs.SelectMany(run => new[] { run.RunnerId, run.RequestedRunnerId })
+            .Where(runner => runner is not null).Select(runner => runner!.Value).Distinct().ToList();
         var ruleIds = runs.Select(run => run.RuleId).Where(rule => rule is not null).Select(rule => rule!.Value).Distinct().ToList();
 
         var playbooks = playbookIds.Count == 0
@@ -393,6 +398,8 @@ public static class RunEndpoints
             run.RuleId is { } rule ? names?.Rules.GetValueOrDefault(rule) : null,
             run.RunnerId,
             run.RunnerId is { } runner ? names?.Runners.GetValueOrDefault(runner) : null,
+            run.RequestedRunnerId,
+            run.RequestedRunnerId is { } requested ? names?.Runners.GetValueOrDefault(requested) : null,
             run.Status, run.Harness,
             run.PlaybookRevisionId, run.MaxMinutes, run.QueuedAt, run.AssignedAt,
             run.StartedAt, run.FinishedAt, run.LastHeartbeatAt,
