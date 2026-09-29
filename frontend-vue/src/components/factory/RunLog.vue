@@ -68,6 +68,13 @@ const widestRow = computed(() =>
   rows.value.reduce((widest, row) => Math.max(widest, row.text.length), 0),
 )
 
+/*
+ * The container opts out of scroll anchoring (`overflow-anchor: none`). Every scroll
+ * swaps which rows are rendered, and the browser, trying to keep the row it anchored on
+ * in place, nudges scrollTop by a fraction of a pixel. On a fractional display scale
+ * that nudge can cross a row boundary, which swaps the rows back and nudges again: the
+ * log flips between two rows every frame anywhere above the bottom.
+ */
 const { list: virtualList, containerProps, wrapperProps } = useVirtualList(rows, {
   itemHeight: ROW_HEIGHT,
   overscan: 12,
@@ -254,7 +261,7 @@ defineExpose({
     <div
       v-else
       v-bind="{ ...containerProps, onScroll }"
-      class="bg-background border-border overflow-x-auto rounded border font-mono text-xs leading-5"
+      class="bg-background border-border overflow-x-auto rounded border font-mono text-xs leading-5 [overflow-anchor:none]"
       :style="{ height: '60vh', minHeight: '18rem' }"
       data-testid="run-log"
     >
