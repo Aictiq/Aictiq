@@ -58,6 +58,16 @@ const rows = computed<LogRow[]>(() =>
   ),
 )
 
+/**
+ * Only the rendered rows give the log its width, so a long line scrolling in and out of
+ * the window would add and drop the horizontal scrollbar - the viewport jumping by the
+ * scrollbar's height on every append is the flicker. The widest line of the whole log
+ * sets the width instead: the scrollbar appears once and stays.
+ */
+const widestRow = computed(() =>
+  rows.value.reduce((widest, row) => Math.max(widest, row.text.length), 0),
+)
+
 const { list: virtualList, containerProps, wrapperProps } = useVirtualList(rows, {
   itemHeight: ROW_HEIGHT,
   overscan: 12,
@@ -248,7 +258,7 @@ defineExpose({
       :style="{ height: '60vh', minHeight: '18rem' }"
       data-testid="run-log"
     >
-      <div v-bind="wrapperProps">
+      <div v-bind="wrapperProps" :style="{ minWidth: `calc(${widestRow}ch + 1.25rem)` }">
         <div
           v-for="row in virtualList"
           :key="row.data.key"

@@ -122,3 +122,21 @@ describe('RunLog across refetches', () => {
     expect(wrapper.text()).toContain('2 lines')
   })
 })
+
+describe('RunLog width', () => {
+  it('takes its width from the widest line, not from the rows on screen', async () => {
+    vi.useFakeTimers()
+    // One long line among many short ones: most windows onto this log never render it.
+    const long = { ...line(0), text: 'x'.repeat(900) }
+    const short = Array.from({ length: 200 }, (_, index) => line(index + 1))
+    stubLog([[long, ...short]])
+    const wrapper = mountLog()
+    await vi.runOnlyPendingTimersAsync()
+    await flushPromises()
+
+    // Otherwise the horizontal scrollbar comes and goes as the long line enters and leaves
+    // the rendered rows, and the viewport jumps by its height.
+    const inner = wrapper.get('[data-testid="run-log"] > div').element as HTMLElement
+    expect(inner.style.minWidth).toBe('calc(900ch + 1.25rem)')
+  })
+})
