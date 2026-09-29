@@ -9,7 +9,7 @@ import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
 import ResendConfirmation from '@/components/ResendConfirmation.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, PasswordInput } from '@/components/ui/input'
 import { useToast } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
@@ -155,10 +155,9 @@ async function submit() {
 
       <div class="space-y-1.5">
         <label for="password" class="text-sm font-medium">Password</label>
-        <Input
+        <PasswordInput
           id="password"
           v-model="password"
-          type="password"
           autocomplete="new-password"
           required
           :aria-invalid="Boolean(fieldErrors.password)"

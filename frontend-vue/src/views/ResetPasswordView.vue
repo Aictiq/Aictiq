@@ -5,7 +5,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AuthCard from '@/components/AuthCard.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/input'
 import { resetPassword } from '@/api/profile'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
@@ -62,10 +62,9 @@ async function submit() {
     <form class="space-y-4" novalidate @submit.prevent="submit">
       <div class="space-y-1.5">
         <label for="reset-password" class="text-sm font-medium">New password</label>
-        <Input
+        <PasswordInput
           id="reset-password"
           v-model="password"
-          type="password"
           autocomplete="new-password"
           required
           :aria-invalid="Boolean(fieldErrors.newPassword)"

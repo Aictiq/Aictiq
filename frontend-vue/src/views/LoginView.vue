@@ -9,7 +9,7 @@ import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
 import ResendConfirmation from '@/components/ResendConfirmation.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, PasswordInput } from '@/components/ui/input'
 import { useToast } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
@@ -98,10 +98,9 @@ async function submit() {
             Forgot password?
           </RouterLink>
         </div>
-        <Input
+        <PasswordInput
           id="password"
           v-model="password"
-          type="password"
           autocomplete="current-password"
           required
           :aria-invalid="Boolean(fieldErrors.password)"
