@@ -7,7 +7,9 @@ import type { Runner } from '@/api/runners'
 
 export type RunnerStatus = 'online' | 'offline' | 'never' | 'disabled'
 
-export function runnerStatus(runner: Pick<Runner, 'isDisabled' | 'isOnline' | 'lastSeenAt'>): RunnerStatus {
+export function runnerStatus(
+  runner: Pick<Runner, 'isDisabled' | 'isOnline' | 'lastSeenAt'>,
+): RunnerStatus {
   if (runner.isDisabled) return 'disabled'
   if (runner.isOnline) return 'online'
   // A runner that has never said hello is a registration nobody has used yet - a different
@@ -35,4 +37,59 @@ export function runnerRegisterCommand(origin: string, secret: string, name?: str
 /** Quotes only when the shell would split or expand the value. */
 function shellQuote(value: string): string {
   return /^[A-Za-z0-9._-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/** The three platforms `aictiq runner install-service` writes a definition for. */
+export type RunnerPlatform = 'linux' | 'macos' | 'windows'
+
+export type RunnerServiceSteps = {
+  label: string
+  commands: string
+  note: string
+}
+
+/**
+ * Installing the runner as a service, per platform - the same definitions the Factory guide
+ * gives, so the screen that hands out the secret can hand out the rest of the setup too.
+ * `install-service` only prints; these commands are what actually writes and enables it.
+ */
+export const runnerServiceSteps: Record<RunnerPlatform, RunnerServiceSteps> = {
+  linux: {
+    label: 'Linux',
+    commands: [
+      'mkdir -p ~/.config/systemd/user',
+      'aictiq runner install-service > ~/.config/systemd/user/aictiq-runner.service',
+      'systemctl --user daemon-reload',
+      'systemctl --user enable --now aictiq-runner',
+      'loginctl enable-linger "$USER"',
+    ].join('\n'),
+    note: 'Generate the unit from a shell whose PATH finds Node.js, aictiq and every harness: that path is embedded in it. Lingering keeps the runner up while nobody is logged in. Follow it with journalctl --user -u aictiq-runner -f.',
+  },
+  macos: {
+    label: 'macOS',
+    commands: [
+      'mkdir -p ~/Library/LaunchAgents',
+      'aictiq runner install-service > ~/Library/LaunchAgents/com.aictiq.runner.plist',
+      'launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aictiq.runner.plist',
+    ].join('\n'),
+    note: 'The agent starts at login and runs while you are logged in; launchd restarts it after a crash. Generate it from a shell whose PATH finds Node.js and every harness. Its log is ~/Library/Logs/aictiq-runner.log.',
+  },
+  windows: {
+    label: 'Windows',
+    commands: [
+      'aictiq runner install-service > install-runner.ps1',
+      'powershell -NoProfile -ExecutionPolicy Bypass -File install-runner.ps1',
+    ].join('\n'),
+    note: 'In PowerShell. It registers an "Aictiq runner" task that starts at logon and writes %LOCALAPPDATA%\\aictiq\\runner.log. The runner’s git credential scripts need Git for Windows.',
+  },
+}
+
+/**
+ * The platform tab to open on. The browser is usually not the runner's machine, so this is a
+ * guess anyone can override - it just saves the common case a click.
+ */
+export function runnerPlatformGuess(agent: string): RunnerPlatform {
+  if (/windows|win32|win64/i.test(agent)) return 'windows'
+  if (/mac|iphone|ipad/i.test(agent)) return 'macos'
+  return 'linux'
 }
