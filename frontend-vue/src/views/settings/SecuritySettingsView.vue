@@ -6,7 +6,7 @@ import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, PasswordInput } from '@/components/ui/input'
 import { listLogins, unlinkLogin, type ExternalLogin } from '@/api/auth'
 import {
   cancelEmailChange,
@@ -200,10 +200,9 @@ const formatted = (value: string) => new Date(value).toLocaleString()
       <form class="space-y-4" novalidate @submit.prevent="submitPassword">
         <div v-if="hasPassword" class="space-y-1.5">
           <label for="security-current" class="text-sm font-medium">Current password</label>
-          <Input
+          <PasswordInput
             id="security-current"
             v-model="currentPassword"
-            type="password"
             autocomplete="current-password"
             :aria-invalid="Boolean(passwordErrors.currentPassword)"
           />
@@ -218,10 +217,9 @@ const formatted = (value: string) => new Date(value).toLocaleString()
 
         <div class="space-y-1.5">
           <label for="security-new" class="text-sm font-medium">New password</label>
-          <Input
+          <PasswordInput
             id="security-new"
             v-model="newPassword"
-            type="password"
             autocomplete="new-password"
             :aria-invalid="Boolean(passwordErrors.newPassword)"
           />
@@ -275,10 +273,9 @@ const formatted = (value: string) => new Date(value).toLocaleString()
 
         <div v-if="hasPassword" class="space-y-1.5">
           <label for="security-email-password" class="text-sm font-medium">Your password</label>
-          <Input
+          <PasswordInput
             id="security-email-password"
             v-model="emailPassword"
-            type="password"
             autocomplete="current-password"
             :aria-invalid="Boolean(emailErrors.currentPassword)"
           />
