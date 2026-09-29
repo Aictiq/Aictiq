@@ -45,6 +45,10 @@ export interface Run {
   ruleName: string | null
   runnerId: string | null
   runnerName: string | null
+  /** The runner the run was sent to; null when any free runner may take it. */
+  requestedRunnerId: string | null
+  /** Null once that runner is deleted. */
+  requestedRunnerName: string | null
   status: RunStatus
   harness: PlaybookHarness
   playbookRevisionId: string | null
@@ -99,6 +103,8 @@ export interface DispatchRunBody {
   playbookId?: string | null
   /** Null names the project's default agent; with no default the API refuses. */
   agentId?: string | null
+  /** Only this runner takes the run. Null lets any free runner take it. */
+  runnerId?: string | null
 }
 
 const runsBase = (slug: string) => `/orgs/${slug}/runs`

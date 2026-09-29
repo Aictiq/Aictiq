@@ -110,7 +110,7 @@ public sealed class RuleFiringHandler(
             else
             {
                 result = await dispatcher.DispatchAsync(
-                    project, item.Key, rule.PlaybookId, rule.AgentUserId, DispatchActor.Rule(rule.Id), ct);
+                    project, item.Key, rule.PlaybookId, rule.AgentUserId, runnerId: null, DispatchActor.Rule(rule.Id), ct);
                 skipReason = result.Outcome switch
                 {
                     DispatchOutcome.Created => null,

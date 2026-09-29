@@ -141,6 +141,10 @@ public static partial class RunProtocolEndpoints
             await db.Database.OpenConnectionAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
+            // A run sent to one runner is that runner's alone, unless the runner has since
+            // been disabled or deleted: then any runner may take it rather than leave it
+            // queued for a machine that cannot come back.
+            //
             // The lock lives inside this transaction, so the row stays ours until the
             // assignment is saved; SKIP LOCKED hands a second poller the next run instead
             // of waiting on this one. Raw SQL because EF would bury the locking clause in
@@ -152,12 +156,16 @@ public static partial class RunProtocolEndpoints
                 command.CommandText = """
                     SELECT id FROM automation.runs
                     WHERE organization_id = @organizationId AND status = 0 AND harness = ANY(@harnesses)
+                      AND (requested_runner_id IS NULL OR requested_runner_id = @runnerId
+                           OR NOT EXISTS (SELECT 1 FROM automation.runners r
+                                          WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
                     ORDER BY queued_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                     """;
                 command.Parameters.AddWithValue("organizationId", organizationId);
                 command.Parameters.AddWithValue("harnesses", harnesses);
+                command.Parameters.AddWithValue("runnerId", runnerId);
                 claimedRunId = await command.ExecuteScalarAsync(ct) as Guid?;
             }
 

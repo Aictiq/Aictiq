@@ -61,6 +61,10 @@ function agentLike(userId: string, displayName: string, isActive = true) {
   }
 }
 
+function runnerLike(id: string, name: string, isOnline = true, harnesses = ['claude', 'codex']) {
+  return { id, name, harnesses, isOnline }
+}
+
 const agents = [
   agentLike('a1', 'claude-dev'),
   agentLike('a2', 'codex-dev'),
@@ -225,11 +229,74 @@ describe('StartRunDialog', () => {
     )!
     expect(String(url)).toBe('/api/v1/orgs/acme/items/PROJ-1/runs')
     expect(init?.method).toBe('POST')
-    expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2' })
+    // One runner or none is no choice, so the run goes to any free runner.
+    expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: null })
 
     expect(wrapper.emitted('dispatched')).toHaveLength(1)
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
-    expect(storage.get('aictiq.run.PROJ')).toBe(JSON.stringify({ playbookId: 'p1', agentId: 'a2' }))
+    expect(storage.get('aictiq.run.PROJ')).toBe(
+      JSON.stringify({ playbookId: 'p1', agentId: 'a2', runnerId: null }),
+    )
+  })
+
+  it('offers no runner choice with a single runner', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'laptop')],
+    })
+
+    const wrapper = await mountDialog()
+
+    expect(wrapper.find('[data-testid="start-run-runner"]').exists()).toBe(false)
+  })
+
+  it('sends the run to the chosen runner, offering only runners that have the playbook harness', async () => {
+    const fetchMock = stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2' },
+      '/members': members,
+      '/runners/choices': [
+        runnerLike('rn1', 'hetzner-vm'),
+        runnerLike('rn2', 'laptop', false),
+        runnerLike('rn3', 'codex-box', true, ['codex']),
+      ],
+      '/items/PROJ-1/runs': { id: 'r-1' },
+    })
+
+    const wrapper = await mountDialog()
+    const select = wrapper.find('[data-testid="start-run-runner"]')
+    expect((select.element as HTMLSelectElement).selectedIndex).toBe(0)
+    const labels = select.findAll('option').map((option) => option.text())
+    expect(labels).toEqual(['Any free runner', 'hetzner-vm · online', 'laptop · offline'])
+
+    await select.setValue('rn2')
+    expect(wrapper.text()).toContain('laptop is offline. The run waits in the queue until it comes back.')
+
+    await wrapper.find('form#start-run').trigger('submit.prevent')
+    await flushPromises()
+
+    const [, init] = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/items/PROJ-1/runs'))!
+    expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: 'rn2' })
+    expect(JSON.parse(storage.get('aictiq.run.PROJ')!)).toMatchObject({ runnerId: 'rn2' })
+  })
+
+  it('preselects the runner this project used last', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
+    })
+    storage.set('aictiq.run.PROJ', JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn2' }))
+
+    const wrapper = await mountDialog()
+
+    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn2')
   })
 
   it('sends no run when the project has no playbook, and says where to make one', async () => {

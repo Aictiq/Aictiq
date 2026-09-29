@@ -301,7 +301,11 @@ out of playbooks and review their revision history like code.
 
 ## 5. Start a run and read its result
 
-Open an unclaimed item and choose **Hand to agent**, then select the playbook and agent. The
+Open an unclaimed item and choose **Hand to agent**, then select the playbook and agent. By
+default, the first free runner that has the playbook's harness takes the run. When the
+organization has more than one runner, the dialog also offers **Runner**: pick one, and only
+that machine takes the run. If it is offline, the run waits in the queue until it comes back.
+If an Admin disables or deletes that runner while the run waits, any runner may take it. The
 equivalent CLI command is:
 
 ```bash
@@ -386,7 +390,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then start a new run. |
-| Run stays queued | No online runner in the organization currently advertises the selected harness. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner. |
+| Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
 | Runner exits with code 5 | Its `jrn_` secret was disabled, deleted, or rotated. Retrying cannot repair the credential. | Register or rotate the runner in Aictiq, then run `aictiq runner register` with the newly shown secret. |
 | The run cannot open a pull request | The harness can edit locally but the service account cannot push or use `gh`. | Verify the repository remote, Git/SSH or GitHub App permissions, and `gh auth status` as the runner account. Do not put a long-lived personal token in the playbook. |
 

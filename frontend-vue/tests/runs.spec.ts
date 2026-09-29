@@ -369,7 +369,7 @@ describe('lib/runs', () => {
       stubStorage()
       writeRunChoice('PROJ', { playbookId: 'p1', agentId: 'a1' })
       expect(localStorage.getItem(key)).toBeTruthy()
-      expect(readRunChoice('PROJ')).toEqual({ playbookId: 'p1', agentId: 'a1' })
+      expect(readRunChoice('PROJ')).toEqual({ playbookId: 'p1', agentId: 'a1', runnerId: null })
       localStorage.removeItem(key)
       expect(readRunChoice('PROJ')).toBeNull()
     })

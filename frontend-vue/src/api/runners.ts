@@ -72,6 +72,20 @@ export interface RunnerMachine {
 
 export const listRunners = (slug: string) => apiFetch<Runner[]>(`/orgs/${slug}/runners`)
 
+/**
+ * A runner as someone starting a run sees it. Open to factory operators, not only Admins,
+ * so it carries nothing but what picking one needs. Disabled runners are left out.
+ */
+export interface RunnerChoice {
+  id: string
+  name: string
+  /** What the runner last reported; empty until it has said hello. */
+  harnesses: string[]
+  isOnline: boolean
+}
+
+export const listRunnerChoices = (slug: string) => apiFetch<RunnerChoice[]>(`/orgs/${slug}/runners/choices`)
+
 export const listRunnerMachinesElsewhere = (slug: string) =>
   apiFetch<RunnerMachine[]>(`/orgs/${slug}/runners/elsewhere`)
 

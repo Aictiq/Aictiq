@@ -72,7 +72,15 @@ public sealed class Run : TenantEntity
     /// </summary>
     public Guid? RuleId { get; init; }
 
+    /// <summary>The runner that took the run, set on claim.</summary>
     public Guid? RunnerId { get; set; }
+
+    /// <summary>
+    /// The runner the dispatcher asked for, or null for whichever free runner claims it first.
+    /// Only that runner may claim the run, unless it is disabled or deleted while the run
+    /// waits: then any runner may, so a run never waits on a machine that cannot come back.
+    /// </summary>
+    public Guid? RequestedRunnerId { get; set; }
 
     public RunStatus Status { get; set; }
 

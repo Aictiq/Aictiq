@@ -120,7 +120,7 @@ The AI software factory.
 | `runners` | hashed `jrn_` secret, capabilities (harnesses, OS, arch, CLI version, parallelism, machine id), `last_seen_at`, disabled/deleted; soft-deleted because a runner id is on every run it ran |
 | `playbooks` | harness, wiki page holding the instructions, success/failure states, time limit; one default per project |
 | `project_settings` | repository source (GitHub binding or runner-local checkout), default branch, path hint, default agent |
-| `runs` | the queue and the record: status, harness, prompt snapshot, agent token, timings, outcome, pull request, cost and tokens. A partial unique index on `(item_id) WHERE status < 3` is what guarantees **one live run per item** |
+| `runs` | the queue and the record: status, harness, the runner it was sent to (if any), prompt snapshot, agent token, timings, outcome, pull request, cost and tokens. A partial unique index on `(item_id) WHERE status < 3` is what guarantees **one live run per item** |
 | `run_log_chunks` | `(run_id, seq)`, inserted `ON CONFLICT DO NOTHING`, capped per run and pruned after the retention window; run rows are kept |
 | `rules`, `rule_firings` | state-entry triggers, and the `(rule_id, item_id, event_id)` key that makes a redelivered event fire once |
 

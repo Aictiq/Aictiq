@@ -27,8 +27,8 @@ public sealed class RunMcpTools(
     RunDispatcher dispatcher)
 {
     [McpServerTool(Name = "start_run")]
-    [Description("Hands a work item to an agent by queueing a factory run for it. Needs whoami.canOperateFactory. playbook and agent may be a name or an id; each defaults to the project's factory settings. Answers { runId } or, in words, why not.")]
-    public async Task<object?> StartRun(string key, string? playbook = null, string? agent = null, CancellationToken cancellationToken = default)
+    [Description("Hands a work item to an agent by queueing a factory run for it. Needs whoami.canOperateFactory. playbook and agent may be a name or an id; each defaults to the project's factory settings. runner, a runner's name or id, makes only that machine take the run; omitted, any free runner does. Answers { runId } or, in words, why not.")]
+    public async Task<object?> StartRun(string key, string? playbook = null, string? agent = null, string? runner = null, CancellationToken cancellationToken = default)
     {
         var (project, role) = await ProjectForKeyAsync(key, cancellationToken) ?? throw NotFound(key);
         // A Guest sees the item and may not write it: the same "not found or no access" the
@@ -40,9 +40,10 @@ public sealed class RunMcpTools(
 
         Guid? playbookId = playbook is null ? null : await ResolvePlaybookAsync(project.Id, playbook, cancellationToken);
         var agentId = agent is null ? null : await ResolveAgentAsync(project.Id, agent, cancellationToken);
+        Guid? runnerId = runner is null ? null : await ResolveRunnerAsync(runner, cancellationToken);
 
         var result = await dispatcher.DispatchAsync(
-            project, Normalize(key), playbookId, agentId, DispatchActor.User(user.UserId!), cancellationToken);
+            project, Normalize(key), playbookId, agentId, runnerId, DispatchActor.User(user.UserId!), cancellationToken);
         return result.Outcome switch
         {
             DispatchOutcome.Created => new
@@ -119,6 +120,17 @@ public sealed class RunMcpTools(
             ? await query.Where(playbook => playbook.Id == id).Select(playbook => (Guid?)playbook.Id).FirstOrDefaultAsync(ct)
             : await query.Where(playbook => playbook.Name.ToLower() == text.ToLower()).Select(playbook => (Guid?)playbook.Id).FirstOrDefaultAsync(ct);
         return found ?? throw new McpAnswerException("playbook not found or no access");
+    }
+
+    /// <summary>A runner of this organization, by id or by name (case-insensitively); names are unique among live runners.</summary>
+    private async Task<Guid> ResolveRunnerAsync(string runner, CancellationToken ct)
+    {
+        var text = runner.Trim();
+        var query = db.Runners.AsNoTracking().Where(r => r.DeletedAt == null);
+        var found = Guid.TryParse(text, out var id)
+            ? await query.Where(r => r.Id == id).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(ct)
+            : await query.Where(r => r.Name.ToLower() == text.ToLower()).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(ct);
+        return found ?? throw new McpException($"runner '{text}' is not a runner of this organization.");
     }
 
     /// <summary>

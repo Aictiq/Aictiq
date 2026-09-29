@@ -222,9 +222,9 @@ resources, which render the same loop, the item's Markdown and a run's status an
 for clients that use them.
 
 **Delegating** is how an orchestrating agent hands a subtask to a worker the way a person
-does from the item page: `start_run(key, playbook?, agent?)` queues a factory run (the
+does from the item page: `start_run(key, playbook?, agent?, runner?)` queues a factory run (the
 playbook and the agent may be named or given by id, and default to the project's factory
-settings), `get_run(runId)` is what to poll, `list_runs(key)` is the item's run history. It
+settings; a runner, by name or id, makes only that machine take the run), `get_run(runId)` is what to poll, `list_runs(key)` is the item's run history. It
 needs `canOperateFactory` - an agent an administrator cleared it for gets
 `not permitted to operate the factory` - and the run records the caller as its requester,
 whichever agent it runs as. `start_run` refuses with the same words as the REST surface

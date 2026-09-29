@@ -197,7 +197,13 @@ const tokens = computed(() => {
           </div>
           <div>
             <dt class="inline">Runner&nbsp;</dt>
-            <dd class="text-foreground inline">{{ run.runnerName ?? '-' }}</dd>
+            <dd class="text-foreground inline" data-testid="run-runner">
+              <template v-if="run.runnerName">{{ run.runnerName }}</template>
+              <template v-else-if="run.requestedRunnerName">
+                {{ run.requestedRunnerName }} <span class="text-muted-foreground">(requested)</span>
+              </template>
+              <template v-else>-</template>
+            </dd>
           </div>
           <div v-if="requester" data-testid="run-requester">
             <dt class="inline">Requested by&nbsp;</dt>

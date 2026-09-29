@@ -96,14 +96,17 @@ public sealed class RunDispatcher(
     /// <param name="itemKey">The item to hand over.</param>
     /// <param name="playbookId">A playbook of the project, or null for its default.</param>
     /// <param name="agentId">The agent to run as, or null for the project's default agent.</param>
+    /// <param name="runnerId">
+    /// The runner that must take the run, or null for whichever free runner claims it first.
+    /// </param>
     /// <param name="actor">
     /// Who asked. For a user, the playbook page must be readable by them; a rule has no
     /// requester to check readability against - its author was checked when the rule was
     /// written, so only the page's existence and content matter here.
     /// </param>
     public async Task<DispatchResult> DispatchAsync(
-        ProjectRef project, string itemKey, Guid? playbookId, string? agentId, DispatchActor actor,
-        CancellationToken ct)
+        ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
+        DispatchActor actor, CancellationToken ct)
     {
         var organizationId = tenant.OrganizationId!.Value;
 
@@ -145,6 +148,12 @@ public sealed class RunDispatcher(
             return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
         }
 
+        if (runnerId is { } requestedRunner
+            && await RunnerErrorAsync(requestedRunner, playbook.Harness, ct) is { } runnerError)
+        {
+            return DispatchResult.Invalid("runnerId", runnerError);
+        }
+
         if (playbook.WikiPageId is not { } pageId
             || (actor.Kind == DispatchActorKind.User && !await pages.CanReadAsync(pageId, project.Id, actor.UserId!, ct)))
         {
@@ -179,6 +188,7 @@ public sealed class RunDispatcher(
             ItemKey = item.Key,
             PlaybookId = playbook.Id,
             AgentUserId = agentUserId,
+            RequestedRunnerId = runnerId,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
             RuleId = actor.Kind == DispatchActorKind.Rule ? actor.RuleId : null,
             Harness = playbook.Harness,
@@ -207,6 +217,31 @@ public sealed class RunDispatcher(
         AutomationMetrics.Started.Add(1);
 
         return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>
+    /// A requested runner must be one this organization still has, enabled, and - once it has
+    /// reported its capabilities - able to run the playbook's harness. Being offline is fine:
+    /// the run waits for it, as a run waits today when no runner is online.
+    /// </summary>
+    private async Task<string?> RunnerErrorAsync(Guid runnerId, string harness, CancellationToken ct)
+    {
+        var runner = await db.Runners.AsNoTracking()
+            .SingleOrDefaultAsync(r => r.Id == runnerId && r.DeletedAt == null, ct);
+        if (runner is null)
+        {
+            return "Choose a runner of this organization.";
+        }
+        if (!runner.IsUsable)
+        {
+            return $"{runner.Name} is disabled. Choose another runner.";
+        }
+        if (runner.Capabilities is { } capabilities
+            && !capabilities.Harnesses.Any(h => string.Equals(h.Name, harness, StringComparison.Ordinal)))
+        {
+            return $"{runner.Name} does not report {harness}, which this playbook uses.";
+        }
+        return null;
     }
 
     private async Task<Playbook?> FindPlaybookAsync(Guid? playbookId, Guid projectId, CancellationToken ct)
