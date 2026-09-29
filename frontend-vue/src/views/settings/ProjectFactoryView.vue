@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue'
+import { Check, Copy, Loader2 } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -44,6 +44,38 @@ const mayManage = computed(() => record.value?.role === 'admin' && !record.value
 const validRepository = computed(
   () => repoSource.value === 1 || repoFullName.value.trim().length > 0,
 )
+
+/** Quotes a path for a POSIX shell, leaving a leading `~/` outside so it still expands. */
+function shellPath(path: string): string {
+  if (/^[\w./~-]+$/.test(path)) return path
+  const [home, rest] = path.startsWith('~/') ? ['~/', path.slice(2)] : ['', path]
+  return `${home}'${rest.replaceAll("'", "'\\''")}'`
+}
+
+const hintPath = computed(() => localPathHint.value.trim().replace(/(.)\/+$/, '$1'))
+const hintParent = computed(() => {
+  const path = hintPath.value
+  const cut = path.lastIndexOf('/')
+  return cut > 0 ? path.slice(0, cut) : cut === 0 ? '/' : ''
+})
+const rootCommand = computed(
+  () =>
+    `aictiq runner root ${hintParent.value ? shellPath(hintParent.value) : '<directory>'} --org ${project.slug.value}`,
+)
+const mapCommand = computed(
+  () =>
+    `aictiq runner map ${project.projectKey.value} ${hintPath.value ? shellPath(hintPath.value) : '<path>'} --org ${project.slug.value}`,
+)
+const copied = ref<'root' | 'map' | null>(null)
+
+async function copy(id: 'root' | 'map', text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = id
+  } catch {
+    toast.error(new Error('Could not copy - select the command and copy it manually.'))
+  }
+}
 
 async function availableBindings() {
   try {
@@ -200,9 +232,57 @@ async function save() {
           placeholder="/srv/repos/aictiq"
         />
         <p class="text-muted-foreground text-xs">
-          Runners use this path when it lies inside one of their repository roots
-          (<code>aictiq runner root</code>); a runner's own <code>aictiq runner map</code> wins.
+          Runners use this path when it lies inside one of their repository roots (<code
+            >aictiq runner root</code
+          >); a runner's own <code>aictiq runner map</code> wins. Run one of these on the runner
+          machine:
         </p>
+        <div class="space-y-2 pt-1">
+          <div>
+            <p class="text-muted-foreground text-xs">
+              Trust path hints under the directory that holds your clones:
+            </p>
+            <div class="border-border mt-1 flex items-center gap-2 rounded border p-2">
+              <code
+                data-testid="factory-root-command"
+                class="min-w-0 flex-1 truncate font-mono text-[11px]"
+                >{{ rootCommand }}</code
+              >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Copy the repository root command"
+                @click="copy('root', rootCommand)"
+              >
+                <Check v-if="copied === 'root'" class="size-4" aria-hidden="true" />
+                <Copy v-else class="size-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+          <div>
+            <p class="text-muted-foreground text-xs">
+              Or map this project to its clone on that runner only:
+            </p>
+            <div class="border-border mt-1 flex items-center gap-2 rounded border p-2">
+              <code
+                data-testid="factory-map-command"
+                class="min-w-0 flex-1 truncate font-mono text-[11px]"
+                >{{ mapCommand }}</code
+              >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Copy the project mapping command"
+                @click="copy('map', mapCommand)"
+              >
+                <Check v-if="copied === 'map'" class="size-4" aria-hidden="true" />
+                <Copy v-else class="size-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="space-y-1.5">
