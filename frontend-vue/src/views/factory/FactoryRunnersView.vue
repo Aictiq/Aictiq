@@ -40,7 +40,14 @@ import { Input } from '@/components/ui/input'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
 import { since } from '@/lib/claims'
-import { runnerRegisterCommand, runnerStatus, runnerStatusLabel } from '@/lib/runners'
+import {
+  runnerPlatformGuess,
+  runnerRegisterCommand,
+  runnerServiceSteps,
+  runnerStatus,
+  runnerStatusLabel,
+  type RunnerPlatform,
+} from '@/lib/runners'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -80,7 +87,18 @@ const issued = ref<RunnerIssued | null>(null)
 /** Minted for a machine that already runs for another organization: it gets a new profile. */
 const issuedForExisting = ref(false)
 const issuedOpen = ref(false)
-const copied = ref<'secret' | 'command' | null>(null)
+const copied = ref<'secret' | 'command' | 'service' | null>(null)
+
+/**
+ * Starting the runner by hand ends with the terminal. The service definition is the part
+ * that survives a logout and a reboot, so it belongs beside `runner start` rather than in
+ * the README alone. The tab opens on a guess about the browser's machine; the runner often
+ * lives elsewhere, so all three stay one click away.
+ */
+const platform = ref<RunnerPlatform>(
+  runnerPlatformGuess(typeof navigator === 'undefined' ? '' : navigator.userAgent),
+)
+const service = computed(() => runnerServiceSteps[platform.value])
 
 const confirmingDelete = ref<Runner | null>(null)
 
@@ -275,10 +293,16 @@ async function remove() {
   }
 }
 
-async function copy(what: 'secret' | 'command') {
+const copyable: Record<'secret' | 'command' | 'service', () => string> = {
+  secret: () => issued.value?.secret ?? '',
+  command: () => command.value,
+  service: () => service.value.commands,
+}
+
+async function copy(what: 'secret' | 'command' | 'service') {
   if (!issued.value) return
   try {
-    await navigator.clipboard.writeText(what === 'secret' ? issued.value.secret : command.value)
+    await navigator.clipboard.writeText(copyable[what]())
     copied.value = what
   } catch {
     toast.error(new Error('Could not copy - select the text and copy it manually.'))
@@ -431,7 +455,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
           </li>
           <li>
             <span class="text-foreground font-medium">Register and keep it running.</span>
-            Create the runner here, paste its one-time command on the machine, then start it.
+            Create the runner here, paste its one-time command on the machine, then start it. The
+            next screen also gives you the commands that install it as a service, so it survives a
+            reboot.
           </li>
         </ol>
 
@@ -610,7 +636,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
           </DialogDescription>
         </DialogHeader>
 
-        <ol v-if="issued" class="text-muted-foreground list-decimal space-y-3 pl-4 text-xs">
+        <ol v-if="issued" class="text-muted-foreground min-w-0 list-decimal space-y-3 pl-4 text-xs">
           <li v-if="issuedForExisting">
             Update the CLI if it is older than this feature:
             <code class="font-mono">npm install -g @aictiq/cli@latest</code>
@@ -642,6 +668,38 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
             <code class="font-mono">aictiq runner root &lt;path&gt; --org {{ slug }}</code>
           </li>
           <li v-else>Start it: <code class="font-mono">aictiq runner start</code></li>
+          <li v-if="!issuedForExisting" data-testid="runner-service-step">
+            Then stop it and install it as a service, so it comes back after a logout or a reboot:
+            <div class="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="Runner platform">
+              <Button
+                v-for="(steps, key) in runnerServiceSteps"
+                :key="key"
+                size="sm"
+                class="h-6 px-2 text-[11px]"
+                :variant="platform === key ? 'secondary' : 'ghost'"
+                :aria-pressed="platform === key"
+                @click="platform = key"
+              >
+                {{ steps.label }}
+              </Button>
+            </div>
+            <div class="mt-1.5 flex items-start gap-2">
+              <pre
+                data-testid="runner-service-command"
+                class="bg-background border-border text-foreground min-w-0 flex-1 rounded border px-2 py-1 font-mono text-[11px] break-all whitespace-pre-wrap"
+                >{{ service.commands }}</pre>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Copy the service commands"
+                @click="copy('service')"
+              >
+                <Check v-if="copied === 'service'" class="size-4" aria-hidden="true" />
+                <Copy v-else class="size-4" aria-hidden="true" />
+              </Button>
+            </div>
+            <p class="mt-1 text-[11px]">{{ service.note }}</p>
+          </li>
         </ol>
 
         <div v-if="issued" class="border-border mt-1 flex items-center gap-2 rounded border p-2">

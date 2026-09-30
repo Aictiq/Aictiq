@@ -25,6 +25,33 @@ const organization: Organization = {
 
 afterEach(() => vi.unstubAllGlobals())
 
+/** Every dialog is rendered inline, so a test can read a step without opening a portal. */
+function mountRunners() {
+  const scope: OrgScope = {
+    slug: ref('acme'),
+    record: ref(organization),
+    loading: ref(false),
+    notFound: ref(false),
+    reload: async () => {},
+    set: () => {},
+  }
+  const passthrough = { template: '<div><slot /></div>' }
+  return mount(FactoryRunnersView, {
+    global: {
+      plugins: [createPinia()],
+      provide: { [orgScopeKey]: scope },
+      stubs: {
+        Dialog: passthrough,
+        DialogContent: passthrough,
+        DialogDescription: passthrough,
+        DialogFooter: passthrough,
+        DialogHeader: passthrough,
+        DialogTitle: passthrough,
+      },
+    },
+  })
+}
+
 describe('Factory onboarding', () => {
   it('opens the public Factory guide in a separate tab', () => {
     const wrapper = mount(FactoryDocsLink)
@@ -46,29 +73,7 @@ describe('Factory onboarding', () => {
           }),
       ),
     )
-    const scope: OrgScope = {
-      slug: ref('acme'),
-      record: ref(organization),
-      loading: ref(false),
-      notFound: ref(false),
-      reload: async () => {},
-      set: () => {},
-    }
-    const passthrough = { template: '<div><slot /></div>' }
-    const wrapper = mount(FactoryRunnersView, {
-      global: {
-        plugins: [createPinia()],
-        provide: { [orgScopeKey]: scope },
-        stubs: {
-          Dialog: passthrough,
-          DialogContent: passthrough,
-          DialogDescription: passthrough,
-          DialogFooter: passthrough,
-          DialogHeader: passthrough,
-          DialogTitle: passthrough,
-        },
-      },
-    })
+    const wrapper = mountRunners()
     await flushPromises()
 
     const steps = wrapper.get('[data-testid="runner-setup-checklist"]').findAll('li')
@@ -77,6 +82,58 @@ describe('Factory onboarding', () => {
     expect(steps[1]!.text()).toContain('Sign in and clone')
     expect(steps[2]!.text()).toContain('Register and keep it running')
     expect(wrapper.get(`a[href="${factoryDocsUrl}"]`).text()).toContain('Factory guide')
+
+    wrapper.unmount()
+  })
+
+  it('hands out the install-as-service commands beside `runner start`', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify(
+              init?.method === 'POST'
+                ? {
+                    runner: {
+                      id: 'r1',
+                      name: 'vps-1',
+                      tokenDisplay: 'jrn_ab…',
+                      registeredBy: 'u1',
+                      registeredByName: 'Alice',
+                      capabilities: null,
+                      lastSeenAt: null,
+                      isOnline: false,
+                      isDisabled: false,
+                      createdAt: '2026-01-01T00:00:00Z',
+                    },
+                    secret: 'jrn_secret',
+                  }
+                : [],
+            ),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    )
+    const wrapper = mountRunners()
+    await flushPromises()
+
+    await wrapper.get('#runner-name').setValue('vps-1')
+    await wrapper.get('#register-runner').trigger('submit')
+    await flushPromises()
+
+    const step = wrapper.get('[data-testid="runner-service-step"]')
+    expect(wrapper.text()).toContain('aictiq runner start')
+    expect(step.get('[data-testid="runner-service-command"]').text()).toContain(
+      'aictiq runner install-service',
+    )
+
+    // The runner rarely lives on the machine reading this page, so every platform is a click away.
+    const windows = step.findAll('button').find((button) => button.text() === 'Windows')!
+    await windows.trigger('click')
+    expect(step.get('[data-testid="runner-service-command"]').text()).toContain(
+      'install-runner.ps1',
+    )
 
     wrapper.unmount()
   })

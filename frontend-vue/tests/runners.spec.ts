@@ -10,7 +10,12 @@ import {
   updateRunner,
   type Runner,
 } from '@/api/runners'
-import { runnerRegisterCommand, runnerStatus } from '@/lib/runners'
+import {
+  runnerPlatformGuess,
+  runnerRegisterCommand,
+  runnerServiceSteps,
+  runnerStatus,
+} from '@/lib/runners'
 import { factoryLinks, factoryPath, factoryRunPath } from '@/router/paths'
 
 /**
@@ -128,6 +133,30 @@ describe('runnerRegisterCommand', () => {
       `aictiq runner register --url http://localhost:5173 --token jrn_abc --name 'Ana'\\''s box'`,
     )
     expect(runnerRegisterCommand('http://h', 'jrn_abc', 'vps-1')).toContain('--name vps-1')
+  })
+})
+
+describe('runnerServiceSteps', () => {
+  it('writes and enables the definition install-service only prints', () => {
+    for (const steps of Object.values(runnerServiceSteps)) {
+      expect(steps.commands).toContain('aictiq runner install-service')
+    }
+
+    expect(runnerServiceSteps.linux.commands).toContain(
+      'systemctl --user enable --now aictiq-runner',
+    )
+    expect(runnerServiceSteps.linux.commands).toContain('loginctl enable-linger')
+    expect(runnerServiceSteps.macos.commands).toContain('launchctl bootstrap gui/$(id -u)')
+    expect(runnerServiceSteps.windows.commands).toContain('-File install-runner.ps1')
+  })
+})
+
+describe('runnerPlatformGuess', () => {
+  it('opens on the browser’s own platform, and falls back to Linux', () => {
+    expect(runnerPlatformGuess('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('windows')
+    expect(runnerPlatformGuess('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')).toBe('macos')
+    expect(runnerPlatformGuess('Mozilla/5.0 (X11; Linux x86_64)')).toBe('linux')
+    expect(runnerPlatformGuess('')).toBe('linux')
   })
 })
 
