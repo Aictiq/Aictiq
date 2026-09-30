@@ -25,7 +25,7 @@ public sealed record RunnerClaimRequest(IReadOnlyList<string>? Harnesses, int Sl
 public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
-    string? AgentTokenDisplay, int HeartbeatIntervalSeconds);
+    string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false);
 
 /// <param name="Source"><c>github</c> when the project has a binding, <c>local</c> when the runner is expected to find the working copy itself.</param>
 public sealed record RunRepoView(string Source, string? RepoFullName, string? CloneToken, string? LocalPathHint);
@@ -253,9 +253,9 @@ public static partial class RunProtocolEndpoints
                 RunEndpoints.ProjectKeyOf(run.ItemKey) ?? run.ItemKey,
                 organization?.Slug ?? "",
                 run.Harness, run.PromptSnapshot, run.PlaybookRevisionId, repo,
-                settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
+                run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
-                options.Value.HeartbeatIntervalSeconds), false);
+                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch), false);
         }
     }
 

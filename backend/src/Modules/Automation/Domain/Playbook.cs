@@ -24,6 +24,7 @@ public sealed class Playbook : TenantEntity, IAudited
     public Guid? OnFailureStateId { get; set; }
     public int MaxMinutes { get; set; } = 60;
     public bool IsDefault { get; set; }
+    public bool WorkOnDefaultBranch { get; set; }
     public required string CreatedBy { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; set; }

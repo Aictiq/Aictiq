@@ -270,6 +270,39 @@ public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : R
     protected override Action<IDictionary<string, string?>>? Configure => settings =>
         settings["Automation:PollTimeoutSeconds"] = "2";
 
+    [Theory]
+    [InlineData("main")]
+    [InlineData("develop")]
+    public async Task direct_runs_snapshot_delivery_and_target_and_finish_without_a_pull_request(string branch)
+    {
+        var playbook = (await Owner.GetFromJsonAsync<PlaybookView>($"{ProjectBase}/playbooks/{PlaybookId}", ApiTestContext.Json, Ct))!;
+        (await Owner.PatchAsJsonAsync($"{ProjectBase}/playbooks/{PlaybookId}",
+            new UpdatePlaybookRequest { WorkOnDefaultBranch = true, Version = playbook.Version }, ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+        var settings = (await Owner.GetFromJsonAsync<FactorySettingsView>($"{ProjectBase}/factory-settings", ApiTestContext.Json, Ct))!;
+        var settingsResponse = await Owner.PutAsJsonAsync($"{ProjectBase}/factory-settings",
+            new UpdateFactorySettingsRequest(1, null, branch, "/srv/acme", AgentId, settings.Version), ApiTestContext.Json, Ct);
+        settingsResponse.EnsureSuccessStatusCode();
+        settings = (await settingsResponse.Content.ReadFromJsonAsync<FactorySettingsView>(ApiTestContext.Json, Ct))!;
+        var run = await DispatchAsync(ItemKey);
+        playbook = (await Owner.GetFromJsonAsync<PlaybookView>($"{ProjectBase}/playbooks/{PlaybookId}", ApiTestContext.Json, Ct))!;
+        (await Owner.PatchAsJsonAsync($"{ProjectBase}/playbooks/{PlaybookId}",
+            new UpdatePlaybookRequest { WorkOnDefaultBranch = false, Version = playbook.Version }, ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+        (await Owner.PutAsJsonAsync($"{ProjectBase}/factory-settings",
+            new UpdateFactorySettingsRequest(1, null, "changed", "/srv/acme", AgentId, settings.Version), ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await ClaimAsync(runner);
+        Assert.True(claimed.WorkOnDefaultBranch);
+        Assert.Equal(branch, claimed.DefaultBranch);
+        Assert.Equal(branch, claimed.BranchName);
+        Assert.Contains($"push directly to origin {branch}", claimed.Prompt);
+        Assert.Contains("never force-push", claimed.Prompt);
+        Assert.DoesNotContain("open a pull request when the work is reviewable", claimed.Prompt);
+        (await StartedAsync(runner, run.Id)).EnsureSuccessStatusCode();
+        (await FinishAsync(runner, run.Id, RunOutcomes.Succeeded, $"Pushed to {branch}.")).EnsureSuccessStatusCode();
+        Assert.Equal("succeeded", (await RunAsync(run.Id)).Status);
+        Assert.Null((await RunAsync(run.Id)).PullRequestUrl);
+    }
+
     [Fact]
     public async Task dispatch_claims_the_item_and_a_second_dispatch_conflicts()
     {
@@ -657,7 +690,7 @@ public sealed record RunnerRunClaimed(
     Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
     string OrganizationSlug, string Harness, string Prompt, Guid PlaybookRevisionId,
     RunnerRunRepo Repo, string DefaultBranch, string BranchName, int MaxMinutes,
-    string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds);
+    string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false);
 
 public sealed record RunnerHeartbeatView(bool CancelRequested);
 

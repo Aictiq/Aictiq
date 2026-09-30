@@ -102,6 +102,9 @@ public sealed class Run : TenantEntity
     /// </summary>
     public required string BranchName { get; init; }
 
+    /// <summary>Snapshot of the playbook delivery mode, unaffected by later edits.</summary>
+    public bool WorkOnDefaultBranch { get; init; }
+
     public int MaxMinutes { get; set; }
 
     public DateTimeOffset QueuedAt { get; init; }

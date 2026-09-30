@@ -136,6 +136,32 @@ describe('executeRun', () => {
     )
   })
 
+  it('finishes a direct run without discovering or linking an incidental pull request', async () => {
+    let lookedUp = false
+    options.findPullRequest = async () => {
+      lookedUp = true
+      return 'https://github.com/acme/app/pull/99'
+    }
+    options.adapters.fake = scriptAdapter(`
+      console.log('Related https://github.com/acme/app/pull/17')
+      console.log('RESULT Pushed to main')
+    `)
+    const report = await executeRun(
+      claimedRun({ workOnDefaultBranch: true, branchName: 'main' }),
+      options,
+    )
+    expect(report).toMatchObject({
+      outcome: 'succeeded',
+      pullRequestUrl: null,
+      summary: 'Pushed to main',
+    })
+    expect(lookedUp).toBe(false)
+    expect(instance.to('/finish')[0]!.body).toMatchObject({
+      outcome: 'succeeded',
+      pullRequestUrl: null,
+    })
+  })
+
   it('fails with harness-unavailable at once when the harness is not installed', async () => {
     options.adapters.fake = scriptAdapter('', false)
     const started = Date.now()

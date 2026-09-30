@@ -123,6 +123,51 @@ describe('defaultWorkspaceRoot', () => {
 })
 
 describe('local workspaces', () => {
+  it('pushes directly from an isolated clone while main is checked out and dirty locally', async () => {
+    const originalHead = git(local, 'rev-parse', 'HEAD').trim()
+    writeFileSync(join(local, 'README.md'), 'developer work in progress\n')
+    const ws = await provisionWorkspace(
+      claimed({ workOnDefaultBranch: true, branchName: 'main' }),
+      options(),
+    )
+    expect(git(ws.checkout, 'branch', '--show-current').trim()).toBe('main')
+    expect(git(ws.checkout, 'rev-parse', 'HEAD').trim()).toBe(
+      git(origin, 'rev-parse', 'main').trim(),
+    )
+    expect(git(ws.checkout, 'remote', 'get-url', 'origin').trim()).toBe(origin)
+    writeFileSync(join(ws.checkout, 'fix.txt'), 'fixed\n')
+    git(ws.checkout, 'add', '.')
+    git(ws.checkout, 'commit', '-m', 'APP-12 fix')
+    git(ws.checkout, 'push')
+    expect(git(origin, 'log', '-1', '--format=%s').trim()).toBe('APP-12 fix')
+    expect(git(local, 'rev-parse', 'HEAD').trim()).toBe(originalHead)
+    expect(readFileSync(join(local, 'README.md'), 'utf8')).toBe('developer work in progress\n')
+    expect(git(local, 'branch', '--show-current').trim()).toBe('main')
+    await ws.cleanup()
+    expect(existsSync(ws.runDir)).toBe(false)
+    expect(git(local, 'worktree', 'list').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('uses a dedicated default branch and rejects a push if another run advances it', async () => {
+    git(local, 'checkout', '-b', 'develop')
+    git(local, 'push', 'origin', 'develop')
+    const ws = await provisionWorkspace(
+      claimed({ workOnDefaultBranch: true, defaultBranch: 'develop', branchName: 'develop' }),
+      options(),
+    )
+    expect(git(ws.checkout, 'branch', '--show-current').trim()).toBe('develop')
+    writeFileSync(join(ws.checkout, 'fix.txt'), 'agent fix\n')
+    git(ws.checkout, 'add', '.')
+    git(ws.checkout, 'commit', '-m', 'APP-12 fix')
+    writeFileSync(join(local, 'other.txt'), 'other work\n')
+    git(local, 'add', '.')
+    git(local, 'commit', '-m', 'other work')
+    git(local, 'push', 'origin', 'develop')
+    expect(() => git(ws.checkout, 'push')).toThrow()
+    expect(git(origin, 'log', '-1', '--format=%s', 'develop').trim()).toBe('other work')
+    await ws.cleanup()
+  })
+
   it('provisions item and comment attachments beside the checkout and inventories them in the prompt', async () => {
     const downloads: string[] = []
     const ws = await provisionWorkspace(claimed(), options({
@@ -416,6 +461,21 @@ describe('github workspaces', () => {
 
     await ws.cleanup()
     expect(existsSync(ws.runDir)).toBe(false)
+  })
+
+  it('keeps the default branch for GitHub direct runs and can push without creating an item branch', async () => {
+    const ws = await provisionWorkspace(
+      { ...github(), workOnDefaultBranch: true, branchName: 'main' },
+      options({ githubBaseUrl: `file://${scratch}` }),
+    )
+    expect(git(ws.checkout, 'branch', '--show-current').trim()).toBe('main')
+    expect(git(ws.checkout, 'branch', '--list')).not.toContain('app-12')
+    writeFileSync(join(ws.checkout, 'fix.txt'), 'fixed\n')
+    git(ws.checkout, 'add', '.')
+    git(ws.checkout, 'commit', '-m', 'APP-12 fix')
+    git(ws.checkout, 'push')
+    expect(git(origin, 'log', '-1', '--format=%s').trim()).toBe('APP-12 fix')
+    await ws.cleanup()
   })
 
   it('asks for a fresh token when the claim carried none', async () => {

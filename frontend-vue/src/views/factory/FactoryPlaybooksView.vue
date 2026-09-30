@@ -74,6 +74,7 @@ const harness = ref<PlaybookHarness>('claude')
 const onSuccessStateId = ref('')
 const onFailureStateId = ref('')
 const maxMinutes = ref(60)
+const workOnDefaultBranch = ref(false)
 
 const mayEditCurrent = computed(
   () => editing.value?.group.project.role === 'admin' && !editing.value.group.project.isArchived,
@@ -140,6 +141,7 @@ async function openEditor(group: ProjectPlaybooks, playbook: Playbook | null = n
   onSuccessStateId.value = playbook?.onSuccessStateId ?? ''
   onFailureStateId.value = playbook?.onFailureStateId ?? ''
   maxMinutes.value = playbook?.maxMinutes ?? 60
+  workOnDefaultBranch.value = playbook?.workOnDefaultBranch ?? false
   fieldErrors.value = {}
   if (!playbook) return
   instructionsLoading.value = true
@@ -171,6 +173,7 @@ async function save() {
     onSuccessStateId: onSuccessStateId.value || null,
     onFailureStateId: onFailureStateId.value || null,
     maxMinutes: maxMinutes.value,
+    workOnDefaultBranch: workOnDefaultBranch.value,
   }
 
   submitting.value = true
@@ -347,7 +350,12 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                 </Badge>
               </div>
               <p class="text-muted-foreground mt-1 text-xs">
-                Success: {{ stateName(group, playbook.onSuccessStateId) }} · Failure:
+                {{
+                  playbook.workOnDefaultBranch
+                    ? 'Push to default branch'
+                    : 'Branch and pull request'
+                }}
+                · Success: {{ stateName(group, playbook.onSuccessStateId) }} · Failure:
                 {{ stateName(group, playbook.onFailureStateId) }} · {{ playbook.maxMinutes }} min
               </p>
               <RouterLink
@@ -440,6 +448,22 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
               class="text-destructive text-xs"
             >
               {{ message }}
+            </p>
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="playbook-delivery" class="text-sm font-medium">Delivery</label>
+            <select
+              id="playbook-delivery"
+              v-model="workOnDefaultBranch"
+              class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
+            >
+              <option :value="false">Branch and pull request</option>
+              <option :value="true">Push directly to default branch</option>
+            </select>
+            <p class="text-muted-foreground text-xs">
+              Direct runs push to the default branch set in this project's repository settings, such
+              as main or a dedicated branch. The agent must be allowed to push there.
             </p>
           </div>
 

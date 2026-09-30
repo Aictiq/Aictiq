@@ -309,7 +309,7 @@ async function provisionLocal(
   checkout: string,
   options: WorkspaceOptions,
   env: NodeJS.ProcessEnv,
-): Promise<string> {
+): Promise<string | null> {
   const { path: mapped, root } = resolveLocalRepository(run, options)
   const origin = root === null ? 'mapped for project' : 'the path hint for project'
 
@@ -351,6 +351,31 @@ async function provisionLocal(
     options.event(`Fetching origin in ${repo}`)
     await call(['fetch', 'origin'])
     base = `origin/${run.defaultBranch}`
+  }
+
+  if (run.workOnDefaultBranch) {
+    // The default branch is often already checked out by the developer. An independent
+    // clone avoids worktree conflicts and leaves their branch, files and index alone.
+    await call(['clone', '--no-hardlinks', '--', repo, checkout])
+    const isolated = (args: string[]) =>
+      gitStep(args, { cwd: checkout, env, signal: options.signal })
+    if (hasOrigin) {
+      const remote = (await git(['remote', 'get-url', 'origin'], { cwd: repo, env })).trim()
+      // Resolve relative local remotes against the source repository, not the new clone.
+      const remoteUrl =
+        isAbsolute(remote) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote) || /^[^/]+:/.test(remote)
+          ? remote
+          : resolve(repo, remote)
+      await isolated(['remote', 'set-url', 'origin', remoteUrl])
+      await isolated(['fetch', 'origin'])
+      await isolated(['checkout', '-B', run.branchName, `origin/${run.branchName}`])
+      await isolated(['branch', '--set-upstream-to', `origin/${run.branchName}`, run.branchName])
+    } else {
+      await isolated(['checkout', run.branchName])
+      await isolated(['remote', 'remove', 'origin'])
+    }
+    options.event(`Created isolated clone ${checkout} on default branch ${run.branchName}`)
+    return null
   }
 
   const branchExists = await git(
@@ -435,8 +460,10 @@ async function provisionGithub(
 
   const call = (args: string[]) =>
     gitStep(args, { cwd: checkout, env, signal: options.signal }, token)
-  await call(['checkout', '-b', run.branchName])
-  options.event(`Created branch ${run.branchName} from ${run.defaultBranch}`)
+  if (!run.workOnDefaultBranch) {
+    await call(['checkout', '-b', run.branchName])
+    options.event(`Created branch ${run.branchName} from ${run.defaultBranch}`)
+  }
 
   // So the agent can push: a helper that reads the token from the harness's environment.
   await call(['config', '--local', '--replace-all', 'credential.helper', ''])

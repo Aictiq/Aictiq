@@ -65,6 +65,8 @@ export interface ClaimedRun {
   repo: RunRepo
   defaultBranch: string
   branchName: string
+  /** Absent on older servers: keep the branch-and-PR workflow. */
+  workOnDefaultBranch?: boolean
   maxMinutes: number
   aictiqUrl: string | null
   agentToken: string
