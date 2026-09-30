@@ -104,7 +104,7 @@ async function save() {
     // Publishing it here is what gives the other tabs - and the switcher - the new name
     // and the new version, without a second round trip.
     org.set(updated)
-    toast.success('Saved.')
+    toast.saved()
   } catch (error) {
     if (error instanceof ConflictError) {
       // Someone else got there first. Show what they saved rather than retrying with a

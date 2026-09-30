@@ -105,7 +105,7 @@ async function save() {
         timeZone: timeZone.value,
       }),
     )
-    toast.success('Saved.')
+    toast.saved()
   } catch (error) {
     if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
       fieldErrors.value = error.fieldErrors

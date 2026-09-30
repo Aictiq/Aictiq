@@ -60,6 +60,7 @@ import { since } from '@/lib/claims'
 import { mentionToken, type Mentionable } from '@/lib/mentions'
 import { factoryRunPath } from '@/router/paths'
 import { useProjectRealtime } from '@/composables/useProjectRealtime'
+import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 import { isLiveRun, runDuration, runRequesterLabel, startRunButton } from '@/lib/runs'
@@ -75,6 +76,7 @@ const router = useRouter()
 const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
+const toast = useToast()
 const tab = ref<'comments' | 'activity' | 'relations'>('comments')
 const item = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey]),
@@ -559,9 +561,13 @@ async function save() {
       client.invalidateQueries({ queryKey: [props.slug, props.itemKey] }),
       invalidateLists(current),
     ])
+    toast.saved(`${current.key} saved.`)
     return true
   } catch (error) {
     conflict.value = (error as { status?: number }).status === 409
+    // A conflict keeps its standing note below the description as well: the toast says what
+    // happened, that line says what to do about it.
+    toast.saveFailed(error, `${current.key} could not be saved.`)
     return false
   } finally {
     saving.value = false
@@ -765,6 +771,7 @@ function logged(updated: TimeTrackingItem) {
     >
       <button
         class="border-input rounded border px-3"
+        data-testid="item-save"
         :disabled="saving || !isDirty"
         aria-label="Save item"
         title="Save"
@@ -773,7 +780,8 @@ function logged(updated: TimeTrackingItem) {
         <Save class="size-4" /></button
       ><button
         class="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded px-3 text-sm whitespace-nowrap disabled:opacity-50"
-        :disabled="saving"
+        data-testid="item-save-close"
+        :disabled="saving || !isDirty"
         @click="saveAndClose"
       >
         <Save class="size-4" /> Save &amp; close
@@ -1109,6 +1117,7 @@ function logged(updated: TimeTrackingItem) {
       <div class="hidden h-9 shrink-0 gap-2 lg:flex">
         <button
           class="border-input rounded border px-3"
+          data-testid="item-save"
           :disabled="saving || !isDirty"
           aria-label="Save item"
           title="Save"
@@ -1117,7 +1126,8 @@ function logged(updated: TimeTrackingItem) {
           <Save class="size-4" /></button
         ><button
           class="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded px-3 text-sm disabled:opacity-50"
-          :disabled="saving"
+          data-testid="item-save-close"
+          :disabled="saving || !isDirty"
           @click="saveAndClose"
         >
           <Save class="size-4" /> Save &amp; close

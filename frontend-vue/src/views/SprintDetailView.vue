@@ -154,9 +154,9 @@ async function saveCapacity() {
       })),
     )
     await capacity.refetch()
-    toast.success('Capacity saved.')
+    toast.saved('Capacity saved.')
   } catch (error) {
-    toast.error(error, 'Capacity could not be saved.')
+    toast.saveFailed(error, 'Capacity could not be saved.')
   }
 }
 async function complete() {
