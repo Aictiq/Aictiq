@@ -8,7 +8,7 @@ public sealed class AttachmentsOptions
     public string[] AllowedContentTypes { get; set; } =
     [
         "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf",
-        "text/plain", "text/markdown", "application/zip"
+        "text/plain", "text/markdown", "application/zip", .. AttachmentDocuments.ContentTypes
     ];
     /// <summary>Wider images are scaled down to this width; every still image is stored as WebP.</summary>
     public int MaxImageWidth { get; set; } = 1920;

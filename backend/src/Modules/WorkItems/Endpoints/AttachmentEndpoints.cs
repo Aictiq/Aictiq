@@ -237,6 +237,7 @@ public static class AttachmentEndpoints
     {
         fileName = file?.FileName.Trim(); contentType = file?.ContentType?.Trim().ToLowerInvariant();
         if (file is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["A file is required."] });
+        contentType = AttachmentDocuments.ResolveContentType(fileName, contentType);
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 255 || fileName.IndexOfAny(['/', '\\', '\0']) >= 0) errors["fileName"] = ["A plain filename of 1-255 characters is required."];
         if (string.IsNullOrWhiteSpace(contentType) || !policy.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase)) errors["contentType"] = ["This content type is not allowed."];
