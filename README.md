@@ -13,7 +13,7 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)
 [![Postgres 17](https://img.shields.io/badge/Postgres-17-336791)](https://www.postgresql.org/)
 
-[Documentation](https://aictiq.github.io/aictiq/) · [Getting started](docs/getting-started.md) · [Connect an agent](docs/agents.md) · [Self-hosting](docs/self-host.md)
+[Documentation](https://aictiq.github.io/Aictiq/) · [Getting started](docs/getting-started.md) · [Connect an agent](docs/agents.md) · [Self-hosting](docs/self-host.md)
 
 </div>
 

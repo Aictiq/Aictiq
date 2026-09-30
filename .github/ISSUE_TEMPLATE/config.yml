@@ -7,7 +7,7 @@ contact_links:
     url: https://github.com/Aictiq/Aictiq/security/advisories/new
     about: Private vulnerability report, per SECURITY.md. Never open a public issue for an unpatched flaw.
   - name: Documentation
-    url: https://aictiq.github.io/aictiq/
+    url: https://aictiq.github.io/Aictiq/
     about: Getting started, self-hosting, the API and the agent integration.
   - name: Contributing guide
     url: https://github.com/Aictiq/Aictiq/blob/main/CONTRIBUTING.md
