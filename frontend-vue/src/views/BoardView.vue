@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useRoute } from 'vue-router'
 import {
   ArrowLeft,
   ArrowRight,
@@ -53,6 +54,7 @@ const organizations = useOrganizationsStore()
 const projects = useProjectsStore()
 const session = useSessionStore()
 const teams = useTeamsStore()
+const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
 const toast = useToast()
@@ -83,9 +85,20 @@ const subtaskDraft = ref<{ parent: WorkItem; title: string } | null>(null)
 const creatingSubtask = ref(false)
 const subtaskInput = ref<HTMLInputElement[]>([])
 
-const slug = computed(() => organizations.currentSlug ?? '')
-const projectKey = computed(() => projects.currentKey ?? '')
-const teamId = computed(() => teams.currentId ?? '')
+const slug = computed(() =>
+  typeof route.params.slug === 'string' ? route.params.slug : (organizations.currentSlug ?? ''),
+)
+const projectKey = computed(() =>
+  typeof route.params.projectKey === 'string'
+    ? route.params.projectKey
+    : (projects.currentKey ?? ''),
+)
+// A scoped link must never read the previously selected project's team board.
+const teamId = computed(() =>
+  slug.value === organizations.currentSlug && projectKey.value === projects.currentKey
+    ? (teams.currentId ?? '')
+    : '',
+)
 const enabled = computed(() => Boolean(slug.value && projectKey.value && teamId.value))
 // Columns load a page of cards in rank order and grow as they are scrolled; the counts
 // in each header stay the full totals the server computed.

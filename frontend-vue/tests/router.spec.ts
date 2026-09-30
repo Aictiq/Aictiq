@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { router } from '@/router'
 import { useOrganizationsStore } from '@/stores/organizations'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 
 const alice = {
@@ -21,12 +22,18 @@ const alice = {
  * The guard reads the organization list as well when a URL names one. `stubSession` is
  * kept for the tests that never reach that branch.
  */
-function stubApi(organizations: { id: string; slug: string; name: string }[]) {
+function stubApi(organizations: { id: string; slug: string; name: string }[], projectKey?: string) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
-    const body = url.includes('/orgs')
-      ? organizations.map((o) => ({ ...o, role: 'member', canOperateFactory: false }))
-      : alice
+    const body = url.endsWith('/projects')
+      ? projectKey
+        ? [{ id: 'p1', key: projectKey, name: 'Web app', isArchived: false }]
+        : []
+      : url.endsWith('/teams')
+        ? []
+        : url.includes('/orgs')
+          ? organizations.map((o) => ({ ...o, role: 'member', canOperateFactory: false }))
+          : alice
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -77,6 +84,49 @@ describe('router', () => {
 
   it('catches unknown paths instead of 404ing the server', () => {
     expect(router.resolve('/orgs/acme/nope').name).toBe('not-found')
+  })
+
+  it('resolves an email link to the project board with the item query intact', () => {
+    const resolved = router.resolve('/o/acme/p/WEB-APP/board?item=WEB-APP-12')
+    expect(resolved.name).toBe('project-board')
+    expect(resolved.params).toEqual({ slug: 'acme', projectKey: 'WEB-APP' })
+    expect(resolved.query.item).toBe('WEB-APP-12')
+    expect(resolved.meta.requiresAuth).toBe(true)
+  })
+
+  it('preserves the board and modal link through login', async () => {
+    stubSession(false)
+    const link = '/o/acme/p/WEB-APP/board?item=WEB-APP-12'
+    await router.push(link)
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.query.next).toBe(link)
+
+    stubApi([{ id: 'o1', slug: 'acme', name: 'Acme' }], 'WEB-APP')
+    useSessionStore().set(alice)
+    await router.push({ name: 'login', query: { next: link, signedIn: 'true' } })
+    expect(router.currentRoute.value.fullPath).toBe(link)
+  })
+
+  it('selects the emailed organization and project over the remembered ones', async () => {
+    stubApi(
+      [
+        { id: 'o1', slug: 'acme', name: 'Acme' },
+        { id: 'o2', slug: 'globex', name: 'Globex' },
+      ],
+      'WEB-APP',
+    )
+    useSessionStore().set(alice)
+    const organizations = useOrganizationsStore()
+    await organizations.load()
+    organizations.select('globex')
+    useProjectsStore().select('OLD')
+    await router.replace('/')
+
+    await router.push('/o/acme/p/WEB-APP/board?item=WEB-APP-12')
+
+    expect(organizations.currentSlug).toBe('acme')
+    expect(useProjectsStore().currentKey).toBe('WEB-APP')
+    expect(router.currentRoute.value.query.item).toBe('WEB-APP-12')
   })
 
   it('marks the app routes as authenticated and the auth pages as public', () => {
