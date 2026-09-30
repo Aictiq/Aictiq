@@ -270,8 +270,9 @@ The target is the project's **Repository → Default branch**, which may be `mai
 dedicated branch such as `develop`. Both the mode and direct target are captured when a run
 is queued, so edits apply to future runs. The runner needs permission to push to that branch;
 repository branch protection still applies. Direct local runs use an isolated clone so the
-developer can keep the target branch checked out with uncommitted work. Concurrent pushes
-can be rejected: agents must fetch, reconcile and check again, never force-push.
+developer can keep the target branch checked out with uncommitted work, so that checkout
+needs an `origin` remote to push to; without one the run fails with `no-remote`. Concurrent
+pushes can be rejected: agents must fetch, reconcile and check again, never force-push.
 
 Tailor existing instructions that explicitly require an item branch or PR before selecting
 direct delivery. The starter follows the run's selected delivery mode. A successful direct
@@ -402,6 +403,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | --- | --- | --- |
 | `harness-unavailable` | The run asked for Claude Code, Codex, or OpenCode, but that executable did not work on the runner's service `PATH`. | Run `aictiq runner status` as the service user. Install and sign in to the playbook's harness, regenerate the systemd unit from the correct shell, then start a new run. |
 | `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
+| `no-remote` | A direct-delivery run's Runner-local checkout has no `origin` remote. The agent works in an isolated clone that is removed after the run, so without a remote its commits would be lost. | Add the remote (`git remote add origin <url>`) in the mapped checkout, or switch the playbook's **Delivery** to **Branch and pull request**, which works in a local-only repository. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then start a new run. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
