@@ -138,9 +138,13 @@ describe('RunnerSupervisor', () => {
     const runner = supervisor(() => config(...profiles), executed, notes)
 
     const running = runner.run()
+    const acmeClaims = () =>
+      instance.requests.filter((r) => r.authorization === 'Bearer jrn_acme' && r.path.endsWith('/runs/claim')).length
     await until(() => notes.some((n) => n.includes('[initech]') && n.includes('disabled, deleted or rotated')))
-    expect(instance.requests.filter((r) => r.authorization === 'Bearer jrn_acme' && r.path.endsWith('/runs/claim')).length)
-      .toBeGreaterThan(0)
+    // acme keeps polling after initech is revoked. Its first claim may land either side of
+    // the revocation, so wait for one after it rather than asserting at that instant.
+    const claimsAtRevocation = acmeClaims()
+    await until(() => acmeClaims() > claimsAtRevocation)
 
     profiles = [profile('acme'), profile('initech'), profile('globex')]
     await until(() => executed.some((e) => e.org === 'globex'))
