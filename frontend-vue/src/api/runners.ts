@@ -23,6 +23,12 @@ export interface RunnerCapabilities {
   maxParallel: number
   /** The same for every organization one machine serves; only groups them for display. */
   machineId?: string | null
+  /** Started by a definition from `install-service`. Absent from runners older than the setup guide. */
+  service?: boolean | null
+  /** This organization's project keys the runner maps to a clone. Absent from older runners. */
+  workspaces?: string[] | null
+  /** This organization's repository roots on the machine. Absent from older runners. */
+  repoRoots?: string[] | null
 }
 
 export interface Runner {

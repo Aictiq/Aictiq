@@ -295,6 +295,12 @@ const routes: RouteRecordRaw[] = [
         redirect: (to) => factoryPath(String(to.params.slug)),
       },
       {
+        path: 'setup',
+        name: 'factory-setup',
+        component: () => import('@/views/factory/FactorySetupView.vue'),
+        meta: { requiresAuth: true, title: 'Setup' },
+      },
+      {
         path: 'runs',
         name: 'factory-runs',
         component: () => import('@/views/factory/RunsTab.vue'),

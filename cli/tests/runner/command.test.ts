@@ -96,6 +96,29 @@ describe('aictiq runner register', () => {
     await expect(run('runner', 'remove', 'globex')).rejects.toThrow(/does not run for globex/)
   })
 
+  it('reports each organization only its own mappings and roots, for the setup guide', async () => {
+    await register(acme)
+    await register(globex)
+    await run('runner', 'map', 'ACME', configHome, '--org', 'acme')
+    await run('runner', 'root', configHome, '--org', 'globex')
+    const before = instance.to('/runner/hello').length
+
+    await run('runner', 'status')
+
+    const sent = instance
+      .to('/runner/hello')
+      .slice(before)
+      .map((r) => ({
+        token: r.authorization?.replace('Bearer ', ''),
+        capabilities: (r.body as { capabilities: { workspaces?: string[]; repoRoots?: string[] } }).capabilities,
+      }))
+      .sort((a, b) => String(a.token).localeCompare(String(b.token)))
+    expect(sent.map((s) => [s.token, s.capabilities.workspaces, s.capabilities.repoRoots])).toEqual([
+      [acme, ['ACME'], []],
+      [globex, [], [configHome]],
+    ])
+  })
+
   it('upgrades a file from before profiles: a rotated secret replaces it and keeps its roots', async () => {
     mkdirSync(join(configHome, 'aictiq'), { recursive: true })
     writeFileSync(path(), JSON.stringify({ url: instance.url, token: acme, workspaces: { ACME: '/src/acme' }, repoRoots: ['/src'] }))

@@ -20,7 +20,7 @@ import {
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
 import { harnesses, probeHarnesses } from '../runner/harness/index.js'
-import { serviceDefinition, servicePlatform, type ServicePlatform } from '../runner/service.js'
+import { serviceDefinition, servicePlatform, startedAsService, type ServicePlatform } from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
 import type { RunnerCapabilities } from '../runner/types.js'
@@ -71,7 +71,9 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       const machineId = existing?.machineId ?? randomUUID()
       // Verify before writing, as `auth login` does: a stored secret that never worked
       // turns into a service that restarts forever somewhere nobody is looking.
-      const capabilities = await probe(1, machineId)
+      // A registration runs in a terminal, so it is not a service yet: the guide says so rather
+      // than "cannot tell" until `runner start` reports for itself.
+      const capabilities = { ...(await probe(1, machineId)), service: false }
       const hello = await new RunnerClient({ baseUrl: url, token })
         .hello(capabilities)
         .catch((error: unknown) => {
@@ -212,7 +214,11 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       const registrations = await Promise.all(
         config.profiles.map(async (profile) => {
           try {
-            const hello = await new RunnerClient({ baseUrl: profile.url, token: profile.token }).hello(capabilities)
+            const hello = await new RunnerClient({ baseUrl: profile.url, token: profile.token }).hello({
+              ...capabilities,
+              workspaces: Object.keys(profile.workspaces).sort(),
+              repoRoots: [...profile.repoRoots],
+            })
             return { profile, hello, text: `ok - "${hello.name}" in ${hello.organizationSlug}`, revoked: false }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
@@ -325,7 +331,15 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             return new RunnerLoop({
               client,
               parallel,
-              probe: () => probe(parallel, config.machineId),
+              probe: async () => {
+                // Re-read, like each run does: a new mapping or root shows up in the web UI's
+                // setup guide on the next heartbeat. Only this profile's are reported.
+                const own = readRunnerConfig()?.profiles.find((p) => p.token === profile.token) ?? profile
+                return {
+                  ...(await probe(parallel, config.machineId, own)),
+                  service: startedAsService(),
+                }
+              },
               local,
               floor,
               floorKey: profileKey(profile),
@@ -414,7 +428,11 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
   return runner
 }
 
-async function probe(maxParallel: number, machineId: string): Promise<RunnerCapabilities> {
+async function probe(
+  maxParallel: number,
+  machineId: string,
+  profile?: Pick<RunnerProfile, 'workspaces' | 'repoRoots'>,
+): Promise<RunnerCapabilities> {
   return {
     v: 1,
     harnesses: await probeHarnesses(),
@@ -423,6 +441,9 @@ async function probe(maxParallel: number, machineId: string): Promise<RunnerCapa
     cliVersion: version,
     maxParallel,
     machineId,
+    ...(profile
+      ? { workspaces: Object.keys(profile.workspaces).sort(), repoRoots: [...profile.repoRoots] }
+      : {}),
   }
 }
 

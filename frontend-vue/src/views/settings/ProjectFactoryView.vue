@@ -19,11 +19,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useProjectScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
-import { projectSettingsPath } from '@/router/paths'
+import { useOrganizationsStore } from '@/stores/organizations'
+import { runnerMapCommand, runnerRootCommand } from '@/lib/runners'
+import { factorySetupPath, projectSettingsPath } from '@/router/paths'
 import { ApiError, ConflictError } from '@/utils/api'
 
 const project = useProjectScope()
 const toast = useToast()
+const organizations = useOrganizationsStore()
+const canOperateFactory = computed(
+  () => organizations.organizations.find((o) => o.slug === project.slug.value)?.canOperateFactory ?? false,
+)
 
 const settings = ref<FactorySettings | null>(null)
 const bindings = ref<RepoBinding[]>([])
@@ -45,26 +51,9 @@ const validRepository = computed(
   () => repoSource.value === 1 || repoFullName.value.trim().length > 0,
 )
 
-/** Quotes a path for a POSIX shell, leaving a leading `~/` outside so it still expands. */
-function shellPath(path: string): string {
-  if (/^[\w./~-]+$/.test(path)) return path
-  const [home, rest] = path.startsWith('~/') ? ['~/', path.slice(2)] : ['', path]
-  return `${home}'${rest.replaceAll("'", "'\\''")}'`
-}
-
-const hintPath = computed(() => localPathHint.value.trim().replace(/(.)\/+$/, '$1'))
-const hintParent = computed(() => {
-  const path = hintPath.value
-  const cut = path.lastIndexOf('/')
-  return cut > 0 ? path.slice(0, cut) : cut === 0 ? '/' : ''
-})
-const rootCommand = computed(
-  () =>
-    `aictiq runner root ${hintParent.value ? shellPath(hintParent.value) : '<directory>'} --org ${project.slug.value}`,
-)
-const mapCommand = computed(
-  () =>
-    `aictiq runner map ${project.projectKey.value} ${hintPath.value ? shellPath(hintPath.value) : '<path>'} --org ${project.slug.value}`,
+const rootCommand = computed(() => runnerRootCommand(localPathHint.value, project.slug.value))
+const mapCommand = computed(() =>
+  runnerMapCommand(project.projectKey.value, localPathHint.value, project.slug.value),
 )
 const copied = ref<'root' | 'map' | null>(null)
 
@@ -177,6 +166,21 @@ async function save() {
     </UiPageState>
 
     <form v-else-if="settings" class="space-y-5" @submit.prevent="save">
+      <RouterLink
+        v-if="canOperateFactory"
+        :to="factorySetupPath(project.slug.value, { project: project.projectKey.value })"
+        class="border-primary/30 bg-primary/5 hover:bg-primary/10 flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-xs transition-colors"
+        data-testid="project-setup-guide-link"
+      >
+        <span>
+          <span class="block text-sm font-medium">Factory setup guide</span>
+          <span class="text-muted-foreground">
+            Agent, checkout, credentials, playbook and runner for this project, checked live.
+          </span>
+        </span>
+        <span class="text-primary flex-none">Open →</span>
+      </RouterLink>
+
       <fieldset class="space-y-2">
         <legend class="text-sm font-medium">Repository source</legend>
         <label class="border-border flex cursor-pointer gap-3 rounded-lg border p-3 text-sm">

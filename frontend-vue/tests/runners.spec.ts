@@ -16,7 +16,7 @@ import {
   runnerServiceSteps,
   runnerStatus,
 } from '@/lib/runners'
-import { factoryLinks, factoryPath, factoryRunPath } from '@/router/paths'
+import { factoryLinks, factoryPath, factoryRunPath, factorySetupPath } from '@/router/paths'
 
 /**
  * Runners. The roster is an organization's, so every route nests under its slug;
@@ -164,11 +164,16 @@ describe('the Factory area', () => {
   it('lands on runners and links every factory tab', () => {
     expect(factoryPath('acme')).toBe('/o/acme/factory/runners')
     expect(factoryLinks('acme').map((link) => link.label)).toEqual([
+      'Setup',
       'Runs',
       'Rules',
       'Runners',
       'Playbooks',
     ])
     expect(factoryRunPath('acme', 'r-1')).toBe('/o/acme/factory/runs/r-1')
+    expect(factorySetupPath('acme')).toBe('/o/acme/factory/setup')
+    expect(factorySetupPath('acme', { runner: 'r 1', project: 'WEB' })).toBe(
+      '/o/acme/factory/setup?runner=r+1&project=WEB',
+    )
   })
 })

@@ -8,6 +8,7 @@ import {
   scheduledTaskInstaller,
   serviceDefinition,
   servicePlatform,
+  startedAsService,
   systemdUnit,
   type ServiceOptions,
 } from '../../src/runner/service.js'
@@ -50,6 +51,16 @@ describe('install-service', () => {
     )
     expect(unit).toContain('RestartPreventExitStatus=5')
     expect(unit).toContain('Environment=PATH=/usr/local/bin:/usr/bin:/bin')
+  })
+
+  it('marks every definition, so a runner can report that a service started it', () => {
+    expect(systemdUnit(options)).toContain('Environment=AICTIQ_RUNNER_SERVICE=1')
+    expect(launchdAgent(options)).toContain(
+      '<key>AICTIQ_RUNNER_SERVICE</key>\n    <string>1</string>',
+    )
+    expect(scheduledTaskInstaller(options)).toContain("$env:AICTIQ_RUNNER_SERVICE = '1'")
+    expect(startedAsService({ AICTIQ_RUNNER_SERVICE: '1' })).toBe(true)
+    expect(startedAsService({})).toBe(false)
   })
 
   describe('launchd agent', () => {

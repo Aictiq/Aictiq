@@ -21,6 +21,15 @@ export interface RunnerCapabilities {
   maxParallel: number
   /** The same for every organization this machine serves; groups them in the web UI, authorizes nothing. */
   machineId?: string
+  /**
+   * Set by `runner start`: whether a service definition from `install-service` started it, so
+   * the web UI's setup guide can tell a runner that survives a reboot from one in a terminal.
+   */
+  service?: boolean
+  /** This organization's project keys mapped with `runner map`. Reported to that organization only. */
+  workspaces?: string[]
+  /** This organization's repository roots (`runner root`), so the web UI can check a path hint. */
+  repoRoots?: string[]
 }
 
 export interface RunnerHello {
