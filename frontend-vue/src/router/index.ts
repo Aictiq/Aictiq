@@ -25,7 +25,6 @@ const placeholders: RouteRecordRaw[] = (
   [
     ['/items', 'items', 'Items'],
     ['/backlog', 'backlog', 'Backlog'],
-    ['/agents', 'agents', 'Agents'],
   ] as const
 ).map(([path, name, title]) => ({
   path,
@@ -466,6 +465,7 @@ const routes: RouteRecordRaw[] = [
     orgSettingsPath(slug, 'general'),
   ),
   legacyRedirect('/members', 'members-legacy', (slug) => orgSettingsPath(slug, 'members')),
+  legacyRedirect('/agents', 'agents', (slug) => orgSettingsPath(slug, 'agents')),
   // What `g then f` and the rail fall back to before an organization is known.
   legacyRedirect('/factory', 'factory-current', (slug) => factoryPath(slug)),
   // A finished run's comment on the item links `/runs/{id}`: the handler that writes it
