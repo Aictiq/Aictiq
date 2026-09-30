@@ -307,6 +307,10 @@ useProjectRealtime(
   () => props.slug,
   () => props.projectKey,
   () => props.itemKey,
+  undefined,
+  (actorId) =>
+    (projectMembers.data.value ?? []).find((member) => member.userId === actorId)?.displayName ??
+    people.data.value?.items.find((member) => member.userId === actorId)?.displayName,
 )
 watch(
   item.data,
@@ -714,6 +718,17 @@ watch(
 async function copy(value: string) {
   await navigator.clipboard.writeText(value)
 }
+// The key's own copy button answers with a check for a moment, so a click that put the
+// key on the clipboard looks different from one that missed.
+const keyCopied = ref(false)
+let keyCopiedTimer: ReturnType<typeof setTimeout> | undefined
+async function copyKey(key: string) {
+  await copy(key)
+  keyCopied.value = true
+  clearTimeout(keyCopiedTimer)
+  keyCopiedTimer = setTimeout(() => (keyCopied.value = false), 1500)
+}
+onBeforeUnmount(() => clearTimeout(keyCopiedTimer))
 async function toggleWatch() {
   const current = item.data.value
   if (!current) return
@@ -1150,7 +1165,19 @@ function logged(updated: TimeTrackingItem) {
         </button>
       </div>
       <div class="rounded-md border p-3">
-        <p class="font-label">{{ currentItem.key }}</p>
+        <div class="flex items-center gap-1.5">
+          <p class="font-mono text-sm font-semibold">{{ currentItem.key }}</p>
+          <button
+            type="button"
+            class="text-muted-foreground hover:text-foreground rounded p-1"
+            :aria-label="`Copy ${currentItem.key}`"
+            :title="keyCopied ? 'Copied' : 'Copy'"
+            @click="copyKey(currentItem.key)"
+          >
+            <Check v-if="keyCopied" class="size-3.5" />
+            <Copy v-else class="size-3.5" />
+          </button>
+        </div>
         <p class="mt-1 text-sm capitalize">
           {{ currentItem.type }} · {{ currentItem.stateCategory }}
         </p>

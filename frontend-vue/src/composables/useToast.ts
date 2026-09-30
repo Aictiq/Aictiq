@@ -10,6 +10,12 @@ import { ApiError } from '@/utils/api'
 const savedDuration = 2000
 
 /**
+ * News about what someone else did arrives unasked, so it gets its own corner: the top
+ * right, away from the bottom-right stack where the page answers the viewer's own actions.
+ */
+export const activityToasterId = 'activity'
+
+/**
  * The app's one notification surface. Wrapping `vue-sonner` keeps the import in one
  * place and gives errors a single house style - in particular, an ApiError shows the
  * server's own `title` rather than a generic "something went wrong".
@@ -30,6 +36,9 @@ export function useToast() {
   return {
     success: (message: string, description?: string) => toast.success(message, { description }),
     info: (message: string, description?: string) => toast(message, { description }),
+    /** Someone else's change to what is on screen - shown in the activity corner. */
+    activity: (message: string, description?: string) =>
+      toast(message, { description, toasterId: activityToasterId }),
     error,
 
     /** Every "it went through" for a save, so they all confirm alike and leave alike. */

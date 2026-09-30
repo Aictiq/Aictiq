@@ -3,6 +3,7 @@ import UiPageState from '@/components/UiPageState.vue'
 // The wrapper, not vue-sonner's own Toaster: it dresses the toast in the app's popover
 // tokens and its icon set, so a toast belongs to the same screen it appears over.
 import { Toaster } from '@/components/ui/sonner'
+import { activityToasterId } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 
@@ -18,5 +19,6 @@ const ui = useUiStore()
 <template>
   <UiPageState v-if="!session.isResolved" state="loading" />
   <RouterView v-else />
-  <Toaster :theme="ui.resolvedTheme" rich-colors close-button />
+  <Toaster :theme="ui.resolvedTheme" position="bottom-right" rich-colors close-button />
+  <Toaster :id="activityToasterId" :theme="ui.resolvedTheme" position="top-right" rich-colors close-button />
 </template>
