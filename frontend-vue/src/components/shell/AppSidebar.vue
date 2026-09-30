@@ -201,7 +201,7 @@ const organization = computed<NavItem[]>(() => {
     : []
   return [
     ...factory,
-    { label: 'Agents', icon: Bot, to: '/agents' },
+    { label: 'Agents', icon: Bot, to: slug ? orgSettingsPath(slug, 'agents') : '/agents' },
     { label: 'Members', icon: UserRound, to: slug ? orgSettingsPath(slug, 'members') : '/members' },
     {
       label: 'Settings',
