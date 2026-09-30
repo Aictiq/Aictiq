@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { referencedAttachmentIds, settleAttachments, uploadAttachment } from '@/api/attachments'
+import {
+  attachmentAccept,
+  referencedAttachmentIds,
+  settleAttachments,
+  uploadAttachment,
+} from '@/api/attachments'
 
 /**
  * Pasted files are uploaded before whatever owns them exists. What matters here: the file
@@ -23,10 +28,42 @@ function stubFetch() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('uploading an attachment', () => {
+  it.each([
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.ppt',
+    '.pptx',
+    '.odt',
+    '.ods',
+    '.odp',
+    '.rtf',
+    '.csv',
+    '.tsv',
+  ])('offers %s in the document picker even when the OS has no MIME mapping', (extension) =>
+    expect(attachmentAccept.split(',')).toContain(extension),
+  )
+
+  it('posts a document with no browser MIME type so the server can apply its policy', async () => {
+    const fetchMock = stubFetch()
+    await uploadAttachment('acme', 'WEB', new File(['document'], 'report.xlsx'))
+
+    const body = fetchMock.mock.calls[0]![1]!.body as FormData
+    const file = body.get('file') as File
+    expect(file.name).toBe('report.xlsx')
+    expect(file.type).toBe('')
+    expect(await file.text()).toBe('document')
+  })
+
   it('posts the file to the API as multipart with the CSRF header, and nothing else', async () => {
     const fetchMock = stubFetch()
 
-    const id = await uploadAttachment('acme', 'WEB', new File([new Uint8Array([1, 2])], 'shot.png', { type: 'image/png' }))
+    const id = await uploadAttachment(
+      'acme',
+      'WEB',
+      new File([new Uint8Array([1, 2])], 'shot.png', { type: 'image/png' }),
+    )
 
     expect(id).toBe(kept)
     expect(fetchMock).toHaveBeenCalledTimes(1)

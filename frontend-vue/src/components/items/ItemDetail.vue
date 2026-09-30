@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { Bot, Check, Copy, GitBranch, Reply, Save, Trash2, X } from '@lucide/vue'
 import {
-  attachmentContentTypes,
+  attachmentAccept,
   attachmentUrl,
   commitAttachment,
   settleAttachments,
@@ -609,7 +609,7 @@ async function changeAssignee(event: Event) {
     changingAssignee.value = false
   }
 }
-const acceptedFiles = attachmentContentTypes.join(',')
+const acceptedFiles = attachmentAccept
 // The item exists, so a description's file is committed to it straight away.
 async function uploadToDescription(file: File) {
   const current = item.data.value

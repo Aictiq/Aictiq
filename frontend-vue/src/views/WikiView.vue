@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import {
-  attachmentContentTypes,
+  attachmentAccept,
   attachmentUrl,
   commitAttachment,
   uploadAttachment,
@@ -252,7 +252,7 @@ const create = useMutation({
 
 // The page exists while it is edited, so a file is committed to it straight away - like an
 // item's description. A revision may keep referring to it after the text changes again.
-const acceptedFiles = attachmentContentTypes.join(',')
+const acceptedFiles = attachmentAccept
 async function uploadToPage(file: File) {
   const id = await uploadAttachment(props.slug, props.projectKey, file)
   await commitAttachment(props.slug, id, { pageId: selectedId.value })

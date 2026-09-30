@@ -35,7 +35,37 @@ export const attachmentContentTypes = [
   'text/plain',
   'text/markdown',
   'application/zip',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/vnd.oasis.opendocument.presentation',
+  'application/rtf',
+  'text/rtf',
+  'text/csv',
+  'text/tab-separated-values',
 ]
+
+/** Extensions also let a file picker show documents whose MIME type the OS does not know. */
+export const attachmentAccept = [
+  ...attachmentContentTypes,
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.odt',
+  '.ods',
+  '.odp',
+  '.rtf',
+  '.csv',
+  '.tsv',
+].join(',')
 
 export const attachmentUrl = (slug: string, attachmentId: string) =>
   `/api/v1/orgs/${slug}/attachments/${attachmentId}/download`
@@ -67,13 +97,20 @@ function fileNameOf(file: File): string {
 }
 
 /** Uploads a file as a pending attachment and returns its id. */
-export async function uploadAttachment(slug: string, projectKey: string, file: File): Promise<string> {
+export async function uploadAttachment(
+  slug: string,
+  projectKey: string,
+  file: File,
+): Promise<string> {
   const form = new FormData()
   form.append('file', file, fileNameOf(file))
-  const attachment = await apiFetch<Attachment>(`/orgs/${slug}/projects/${projectKey}/attachments`, {
-    method: 'POST',
-    body: form,
-  })
+  const attachment = await apiFetch<Attachment>(
+    `/orgs/${slug}/projects/${projectKey}/attachments`,
+    {
+      method: 'POST',
+      body: form,
+    },
+  )
   return attachment.id
 }
 
