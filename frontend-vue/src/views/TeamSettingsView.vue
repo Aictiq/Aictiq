@@ -152,7 +152,7 @@ async function save() {
     })
     fill(updated)
     teams.replace(updated)
-    toast.success('Saved.')
+    toast.saved()
   } catch (error) {
     if (error instanceof ConflictError) {
       toast.error(error)

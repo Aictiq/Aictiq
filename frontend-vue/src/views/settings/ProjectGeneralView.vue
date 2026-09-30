@@ -93,7 +93,7 @@ async function save() {
         version: record.value.version,
       }),
     )
-    toast.success('Saved.')
+    toast.saved()
   } catch (error) {
     if (error instanceof ConflictError) {
       // Someone else got there first. Show what they saved rather than retrying with a

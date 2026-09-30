@@ -477,7 +477,7 @@ async function saveSettings() {
     })
     settingsOpen.value = false
     await boardQuery.refetch()
-    toast.success('Board settings saved.')
+    toast.saved('Board settings saved.')
   } catch (error) {
     toast.error(error, 'Board settings could not be saved.')
   } finally {

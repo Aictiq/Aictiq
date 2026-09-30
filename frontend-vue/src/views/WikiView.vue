@@ -218,10 +218,12 @@ const save = useMutation({
     editing.value = false
     summary.value = ''
     conflict.value = false
+    toast.saved(`${value.title} saved.`)
   },
   onError: (error) => {
+    // A conflict opens its own comparison instead: a toast cannot offer the two versions.
     conflict.value = error instanceof ConflictError
-    if (!conflict.value) toast.error(error)
+    if (!conflict.value) toast.saveFailed(error, 'The page could not be saved.')
   },
 })
 

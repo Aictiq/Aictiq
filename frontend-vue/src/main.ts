@@ -16,6 +16,9 @@ import { useTeamsStore } from './stores/teams'
 import { setUnauthenticatedHandler } from './utils/api'
 
 import './assets/index.css'
+// vue-sonner ships its layout as a stylesheet and injects nothing at runtime: without this
+// import a toast is unstyled text at the foot of the page rather than a card on top of it.
+import 'vue-sonner/style.css'
 
 // Keep ECharts tree-shakeable: analytics routes lazy-load their view, and only the chart
 // types used by Aictiq are registered once the app is evaluated.

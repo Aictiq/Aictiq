@@ -150,7 +150,7 @@ async function saveEdit(label: Label) {
     })
     labels.value = labels.value.map((existing) => (existing.id === updated.id ? updated : existing))
     editingId.value = null
-    toast.success('Saved.')
+    toast.saved()
   } catch (error) {
     if (error instanceof ConflictError) {
       // Someone else saved first. Show the server's state rather than retry with a stale version.

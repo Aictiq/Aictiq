@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, watch, type MaybeRefOrGetter, toValue } fro
 import { useQueryClient } from '@tanstack/vue-query'
 
 import { useToast } from '@/composables/useToast'
+import { useSessionStore } from '@/stores/session'
 import { createHubConnection } from '@/utils/realtime'
 
 interface ItemChanged { id: string; key: string; actorId: string; changedFields: string[] }
@@ -26,15 +27,19 @@ interface RunChanged {
  * in rather than read from the store because a project key is unique per organization,
  * not per instance: the page's own scope is the truth, and someone who is in two
  * organizations that both have a `WEB` must not subscribe to the other one's.
+ * @param nameOf The display name for an actor id, when the page knows it. An id the page
+ * cannot name (a GitHub commit author, a member it has not loaded) is "Someone else".
  */
 export function useProjectRealtime(
   organizationSlug: MaybeRefOrGetter<string | null>,
   projectKey: MaybeRefOrGetter<string>,
   openItemKey?: MaybeRefOrGetter<string | undefined>,
   onBoardMoved?: (event: ItemChanged) => void,
+  nameOf?: (actorId: string) => string | undefined,
 ) {
   const client = useQueryClient()
   const toast = useToast()
+  const session = useSessionStore()
   let connection: HubConnection | null = null
 
   function invalidate(kind: 'items' | 'item' | 'board' | 'sprint', itemKey?: string) {
@@ -51,7 +56,9 @@ export function useProjectRealtime(
 
     connection.on('item.changed', (event: ItemChanged) => {
       invalidate('items', event.key)
-      if (toValue(openItemKey) === event.key) toast.info(`Item updated by ${event.actorId}`)
+      // The viewer's own save comes back through the hub too; the save already said so.
+      if (toValue(openItemKey) !== event.key || event.actorId === session.user?.id) return
+      toast.activity(`${nameOf?.(event.actorId) ?? 'Someone else'} updated this item.`)
     })
     connection.on('comment.added', (event: CommentAdded) => {
       invalidate('item', event.itemId)

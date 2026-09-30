@@ -141,7 +141,7 @@ async function save() {
       version: settings.value.version,
     })
     apply(saved)
-    toast.success('Factory settings saved.')
+    toast.saved('Factory settings saved.')
   } catch (error) {
     if (error instanceof ConflictError) {
       toast.error(new Error('Someone changed these settings first. The latest values are shown.'))

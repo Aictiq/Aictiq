@@ -57,8 +57,9 @@ async function save() {
       : await createItemTemplate(project.slug.value, project.projectKey.value, body)
     const index = templates.value.findIndex((template) => template.id === saved.id)
     if (index < 0) templates.value.push(saved); else templates.value.splice(index, 1, saved)
+    toast.saved(`${saved.name} saved.`)
     reset()
-  } catch (error) { toast.error(error) } finally { saving.value = false }
+  } catch (error) { toast.saveFailed(error, 'The template could not be saved.') } finally { saving.value = false }
 }
 
 async function remove(template: ItemTemplate) {

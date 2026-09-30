@@ -60,6 +60,7 @@ import { since } from '@/lib/claims'
 import { mentionToken, type Mentionable } from '@/lib/mentions'
 import { factoryRunPath } from '@/router/paths'
 import { useProjectRealtime } from '@/composables/useProjectRealtime'
+import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 import { isLiveRun, runDuration, runRequesterLabel, startRunButton } from '@/lib/runs'
@@ -75,6 +76,7 @@ const router = useRouter()
 const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
+const toast = useToast()
 const tab = ref<'comments' | 'activity' | 'relations'>('comments')
 const item = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey]),
@@ -305,6 +307,10 @@ useProjectRealtime(
   () => props.slug,
   () => props.projectKey,
   () => props.itemKey,
+  undefined,
+  (actorId) =>
+    (projectMembers.data.value ?? []).find((member) => member.userId === actorId)?.displayName ??
+    people.data.value?.items.find((member) => member.userId === actorId)?.displayName,
 )
 watch(
   item.data,
@@ -559,9 +565,13 @@ async function save() {
       client.invalidateQueries({ queryKey: [props.slug, props.itemKey] }),
       invalidateLists(current),
     ])
+    toast.saved(`${current.key} saved.`)
     return true
   } catch (error) {
     conflict.value = (error as { status?: number }).status === 409
+    // A conflict keeps its standing note below the description as well: the toast says what
+    // happened, that line says what to do about it.
+    toast.saveFailed(error, `${current.key} could not be saved.`)
     return false
   } finally {
     saving.value = false
@@ -708,6 +718,17 @@ watch(
 async function copy(value: string) {
   await navigator.clipboard.writeText(value)
 }
+// The key's own copy button answers with a check for a moment, so a click that put the
+// key on the clipboard looks different from one that missed.
+const keyCopied = ref(false)
+let keyCopiedTimer: ReturnType<typeof setTimeout> | undefined
+async function copyKey(key: string) {
+  await copy(key)
+  keyCopied.value = true
+  clearTimeout(keyCopiedTimer)
+  keyCopiedTimer = setTimeout(() => (keyCopied.value = false), 1500)
+}
+onBeforeUnmount(() => clearTimeout(keyCopiedTimer))
 async function toggleWatch() {
   const current = item.data.value
   if (!current) return
@@ -765,6 +786,7 @@ function logged(updated: TimeTrackingItem) {
     >
       <button
         class="border-input rounded border px-3"
+        data-testid="item-save"
         :disabled="saving || !isDirty"
         aria-label="Save item"
         title="Save"
@@ -773,7 +795,8 @@ function logged(updated: TimeTrackingItem) {
         <Save class="size-4" /></button
       ><button
         class="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded px-3 text-sm whitespace-nowrap disabled:opacity-50"
-        :disabled="saving"
+        data-testid="item-save-close"
+        :disabled="saving || !isDirty"
         @click="saveAndClose"
       >
         <Save class="size-4" /> Save &amp; close
@@ -1109,6 +1132,7 @@ function logged(updated: TimeTrackingItem) {
       <div class="hidden h-9 shrink-0 gap-2 lg:flex">
         <button
           class="border-input rounded border px-3"
+          data-testid="item-save"
           :disabled="saving || !isDirty"
           aria-label="Save item"
           title="Save"
@@ -1117,7 +1141,8 @@ function logged(updated: TimeTrackingItem) {
           <Save class="size-4" /></button
         ><button
           class="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded px-3 text-sm disabled:opacity-50"
-          :disabled="saving"
+          data-testid="item-save-close"
+          :disabled="saving || !isDirty"
           @click="saveAndClose"
         >
           <Save class="size-4" /> Save &amp; close
@@ -1140,7 +1165,19 @@ function logged(updated: TimeTrackingItem) {
         </button>
       </div>
       <div class="rounded-md border p-3">
-        <p class="font-label">{{ currentItem.key }}</p>
+        <div class="flex items-center gap-1.5">
+          <p class="font-mono text-sm font-semibold">{{ currentItem.key }}</p>
+          <button
+            type="button"
+            class="text-muted-foreground hover:text-foreground rounded p-1"
+            :aria-label="`Copy ${currentItem.key}`"
+            :title="keyCopied ? 'Copied' : 'Copy'"
+            @click="copyKey(currentItem.key)"
+          >
+            <Check v-if="keyCopied" class="size-3.5" />
+            <Copy v-else class="size-3.5" />
+          </button>
+        </div>
         <p class="mt-1 text-sm capitalize">
           {{ currentItem.type }} · {{ currentItem.stateCategory }}
         </p>
