@@ -39,6 +39,30 @@ function shellQuote(value: string): string {
   return /^[A-Za-z0-9._-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+/** Quotes a path for a POSIX shell, leaving a leading `~/` outside so it still expands. */
+export function shellPath(path: string): string {
+  if (/^[\w./~-]+$/.test(path)) return path
+  const [home, rest] = path.startsWith('~/') ? ['~/', path.slice(2)] : ['', path]
+  return `${home}'${rest.replaceAll("'", "'\\''")}'`
+}
+
+/** A path hint without its trailing slashes; `/` stays `/`. */
+const trimHint = (hint: string) => hint.trim().replace(/(.)\/+$/, '$1')
+
+/** Trusts path hints under the directory that holds the hinted clone. */
+export function runnerRootCommand(hint: string, slug: string): string {
+  const path = trimHint(hint)
+  const cut = path.lastIndexOf('/')
+  const parent = cut > 0 ? path.slice(0, cut) : cut === 0 ? '/' : ''
+  return `aictiq runner root ${parent ? shellPath(parent) : '<directory>'} --org ${slug}`
+}
+
+/** Maps one project to its clone on this runner only. */
+export function runnerMapCommand(projectKey: string, hint: string, slug: string): string {
+  const path = trimHint(hint)
+  return `aictiq runner map ${projectKey} ${path ? shellPath(path) : '<path>'} --org ${slug}`
+}
+
 /** The three platforms `aictiq runner install-service` writes a definition for. */
 export type RunnerPlatform = 'linux' | 'macos' | 'windows'
 

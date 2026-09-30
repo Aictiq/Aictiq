@@ -23,6 +23,17 @@ palette and it tracks each part below - agent, repository, runner, playbook, han
 review - against what the API can actually confirm. Use it to see where you are; use this
 page for the commands and the reasoning.
 
+**Factory → Setup** is the same path for one runner and one project, in more detail. An
+animated diagram shows how a run travels from the ticket to your runner and back. Below it,
+two checklists (the runner machine and the project) carry the commands for each step and tick
+themselves as Aictiq sees them done: the runner's hello and heartbeats confirm the CLI, the
+harnesses, that it is online and that a service definition started it; its reported mappings
+and repository roots confirm that it can find a runner-local checkout. Only what no server can
+see, such as the machine's `gh` sign-in, takes a tick from you, and it is shown as yours. The
+guide opens after you register a runner, and after you create a project if you operate the
+factory; **Project settings → Factory** links to it too. The Aictiq MCP server and the run's
+agent token need no setup: the runner provides both for every run.
+
 ## 1. Prepare the project and agent
 
 Before touching the VPS:
@@ -205,6 +216,10 @@ Then stop it and install it as a service. `install-service` prints the definitio
 machine it runs on (pass `--platform linux|macos|windows` for another); it does not write or
 enable anything. Every variant runs as the user who generated it, with that user's harness
 sign-ins and git credentials, and stops for good when the runner secret is revoked.
+
+Every definition sets `AICTIQ_RUNNER_SERVICE=1`, which is how a runner tells **Factory →
+Setup** that a service started it. A service installed by an older CLI does not set it;
+generate and install the definition again to have that step confirmed.
 
 ### Linux (systemd)
 

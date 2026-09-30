@@ -95,6 +95,20 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         Assert.Equal(HttpStatusCode.NoContent, beat.StatusCode);
         Assert.Equal(["claude", "codex"], (await ListAsync(_owner, Acme)).Single().Capabilities!.Harnesses.Select(h => h.Name));
         Assert.Equal(HttpStatusCode.NoContent, (await runner.PostAsync("/api/v1/runner/heartbeat", null, Ct)).StatusCode);
+
+        // What the setup guide confirms: started as a service, and this organization's clones.
+        var setUp = codex with { Service = true, Workspaces = ["ACME"], RepoRoots = ["/home/aictiq/src"] };
+        await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(setUp), ApiTestContext.Json, Ct);
+        var reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
+        Assert.True(reported.Service);
+        Assert.Equal(["ACME"], reported.Workspaces!);
+        Assert.Equal(["/home/aictiq/src"], reported.RepoRoots!);
+
+        // `runner status` says hello from a terminal without knowing: the service start stands.
+        await runner.PostAsJsonAsync("/api/v1/runner/hello", new RunnerHelloRequest(setUp with { Service = null, Workspaces = [] }), ApiTestContext.Json, Ct);
+        reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
+        Assert.True(reported.Service);
+        Assert.Empty(reported.Workspaces!);
     }
 
     [Fact]
@@ -235,6 +249,8 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
             Claude with { V = 2 },
             Claude with { Harnesses = [new RunnerHarness("Claude Code", null)] },
             Claude with { MaxParallel = 0 },
+            Claude with { Workspaces = [.. Enumerable.Range(0, 201).Select(i => $"P{i}")] },
+            Claude with { RepoRoots = [new string('a', 1025)] },
         })
         {
             var refused = await runner.PostAsJsonAsync("/api/v1/runner/hello", new RunnerHelloRequest(bad), ApiTestContext.Json, Ct);

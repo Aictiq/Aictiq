@@ -109,6 +109,18 @@ public static class RunnerCredential
 /// ("use a runner I already have"); nothing is authorized by it, because a runner could
 /// report any value.
 /// </param>
+/// <param name="Service">
+/// Whether a definition from <c>aictiq runner install-service</c> started the runner. Only the
+/// setup guide reads it, to tell a runner that survives a reboot from one left in a terminal.
+/// </param>
+/// <param name="Workspaces">
+/// This organization's project keys the runner maps to a clone (<c>aictiq runner map</c>). Each
+/// profile reports its own, so one organization never learns another's.
+/// </param>
+/// <param name="RepoRoots">
+/// This organization's repository roots (<c>aictiq runner root</c>), so the setup guide can say
+/// whether a project's path hint lies under one. Display only: the runner decides for itself.
+/// </param>
 public sealed record RunnerCapabilities(
     int V,
     IReadOnlyList<RunnerHarness> Harnesses,
@@ -116,7 +128,10 @@ public sealed record RunnerCapabilities(
     string? Arch,
     string? CliVersion,
     int MaxParallel,
-    string? MachineId = null);
+    string? MachineId = null,
+    bool? Service = null,
+    IReadOnlyList<string>? Workspaces = null,
+    IReadOnlyList<string>? RepoRoots = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);

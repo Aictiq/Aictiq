@@ -25,6 +25,17 @@ export interface ServiceOptions {
 
 export const RevokedExitCode = 5
 
+/**
+ * Every definition sets this, so a runner can report that a service manager started it. The
+ * harness never sees it: the runner strips its own `AICTIQ_` variables from an agent's environment.
+ */
+export const ServiceEnvironmentVariable = 'AICTIQ_RUNNER_SERVICE'
+
+/** True when this process was started by a definition from `install-service`. */
+export function startedAsService(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[ServiceEnvironmentVariable] === '1'
+}
+
 export function servicePlatform(platform: NodeJS.Platform = process.platform): ServicePlatform {
   if (platform === 'darwin') return 'macos'
   if (platform === 'win32') return 'windows'
@@ -66,6 +77,7 @@ RestartPreventExitStatus=${RevokedExitCode}
 KillMode=mixed
 TimeoutStopSec=15min
 Environment=PATH=${path}
+Environment=${ServiceEnvironmentVariable}=1
 
 [Install]
 WantedBy=default.target
@@ -126,6 +138,8 @@ export function launchdAgent({ node, entry, parallel, path, home }: ServiceOptio
   <dict>
     <key>PATH</key>
     ${string(path)}
+    <key>${ServiceEnvironmentVariable}</key>
+    ${string('1')}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -162,6 +176,7 @@ export function scheduledTaskInstaller({ node, entry, parallel, path }: ServiceO
   const loop = `# Written by \`aictiq runner install-service\`; the "${ScheduledTaskName}" task runs it at logon.
 $ErrorActionPreference = 'Continue'
 $env:PATH = ${ps(path)}
+$env:${ServiceEnvironmentVariable} = '1'
 $log = Join-Path $env:LOCALAPPDATA 'aictiq\\runner.log'
 while ($true) {
   # "$_" turns stderr's error records back into the plain lines the runner wrote.

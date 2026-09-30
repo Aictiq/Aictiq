@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Copy, Loader2, MoreHorizontal } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { hasOrgRole } from '@/api/organizations'
 import {
@@ -48,6 +49,7 @@ import {
   runnerStatusLabel,
   type RunnerPlatform,
 } from '@/lib/runners'
+import { factorySetupPath } from '@/router/paths'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -60,6 +62,8 @@ import { ApiError } from '@/utils/api'
  */
 const org = useOrgScope()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const slug = computed(() => org.slug.value)
 const mayManage = computed(() => hasOrgRole(org.record.value?.role, 'admin'))
@@ -68,7 +72,8 @@ const runners = ref<Runner[]>([])
 const loading = ref(true)
 const busyId = ref<string | null>(null)
 
-const registering = ref(false)
+// The setup guide sends "Register a runner" here with ?register=1.
+const registering = ref(route?.query.register === '1')
 const name = ref('')
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
@@ -147,6 +152,16 @@ watch(issuedOpen, (open) => {
   // The secret leaves memory with the dialog: there is no second look.
   if (!open) issued.value = null
 })
+
+/**
+ * "I have copied it" leads to the setup guide, following this runner: the rest of the setup
+ * happens on the machine, and the guide ticks each step as the runner reports it.
+ */
+function continueSetup() {
+  const runnerId = issued.value?.runner.id
+  issuedOpen.value = false
+  if (runnerId) void router.push(factorySetupPath(slug.value, { runner: runnerId }))
+}
 
 async function submit() {
   submitting.value = true
@@ -329,6 +344,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
         </p>
       </div>
       <div v-if="mayManage" class="flex flex-wrap gap-2">
+        <Button size="sm" variant="ghost" @click="router.push(factorySetupPath(slug))">
+          Setup guide
+        </Button>
         <Button size="sm" variant="outline" @click="openExisting">Use existing runner</Button>
         <Button size="sm" @click="registering = true">Register runner</Button>
       </div>
@@ -412,6 +430,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" class="w-60">
+              <DropdownMenuItem @select="router.push(factorySetupPath(slug, { runner: runner.id }))">
+                Setup guide
+              </DropdownMenuItem>
               <DropdownMenuItem @select="rotate(runner)">New secret (re-register)</DropdownMenuItem>
               <DropdownMenuItem v-if="runner.isDisabled" @select="setDisabled(runner, false)">
                 Enable
@@ -713,8 +734,15 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
           </Button>
         </div>
 
+        <p v-if="issued" class="text-muted-foreground text-[11px]">
+          Next, the setup guide follows {{ issued.runner.name }} and ticks each step as the machine
+          reports it: harness, start, service, and the projects it can reach.
+        </p>
+
         <DialogFooter>
-          <Button @click="issuedOpen = false">I have copied it</Button>
+          <Button data-testid="runner-continue-setup" @click="continueSetup">
+            I have copied it - continue setup
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

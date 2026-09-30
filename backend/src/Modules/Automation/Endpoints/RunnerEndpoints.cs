@@ -342,9 +342,16 @@ public static partial class RunnerEndpoints
         var now = clock.GetUtcNow();
         var capabilities = Serialize(request?.Capabilities);
         // Unthrottled: a hello is rare, and it is the moment the roster should turn green.
+        // `aictiq runner status` says hello from a terminal without knowing how the running
+        // runner was started, so a hello that leaves `service` out keeps the last one reported.
         var updated = await db.Database.ExecuteSqlAsync($"""
             UPDATE automation.runners
-            SET last_seen_at = {now}, capabilities = COALESCE({capabilities}::jsonb, capabilities)
+            SET last_seen_at = {now}, capabilities = CASE
+                WHEN {capabilities}::jsonb IS NULL THEN capabilities
+                WHEN jsonb_typeof({capabilities}::jsonb -> 'service') = 'boolean' OR capabilities IS NULL
+                    OR jsonb_typeof(capabilities -> 'service') IS DISTINCT FROM 'boolean' THEN {capabilities}::jsonb
+                ELSE jsonb_set({capabilities}::jsonb, {ServicePath}, capabilities -> 'service')
+            END
             WHERE id = {runnerId} AND disabled_at IS NULL AND deleted_at IS NULL
             """, cancellationToken);
         if (updated == 0)
@@ -412,6 +419,12 @@ public static partial class RunnerEndpoints
     private static string? Serialize(RunnerCapabilities? capabilities) =>
         capabilities is null ? null : JsonSerializer.Serialize(capabilities, AutomationDbContext.CapabilitiesJson);
 
+    /// <summary>The <c>jsonb_set</c> path of <see cref="RunnerCapabilities.Service"/>, as a parameter.</summary>
+    private static readonly string[] ServicePath = ["service"];
+
+    /// <summary>Bounds what a runner may report about its mappings and roots, so one heartbeat stays small.</summary>
+    private const int MaxReportedPaths = 200;
+
     private static Dictionary<string, string[]> CapabilitiesErrors(RunnerCapabilities? capabilities)
     {
         var errors = new Dictionary<string, string[]>();
@@ -440,6 +453,16 @@ public static partial class RunnerEndpoints
         if (capabilities.MachineId is { } machineId && !Guid.TryParseExact(machineId, "D", out _))
         {
             errors["capabilities.machineId"] = ["A UUID, the same for every organization this machine is registered with."];
+        }
+        if (capabilities.Workspaces is { } workspaces
+            && (workspaces.Count > MaxReportedPaths || workspaces.Any(k => k is null || k.Length is 0 or > 64)))
+        {
+            errors["capabilities.workspaces"] = [$"At most {MaxReportedPaths} project keys of at most 64 characters."];
+        }
+        if (capabilities.RepoRoots is { } roots
+            && (roots.Count > MaxReportedPaths || roots.Any(r => r is null || r.Length is 0 or > 1024)))
+        {
+            errors["capabilities.repoRoots"] = [$"At most {MaxReportedPaths} paths of at most 1024 characters."];
         }
 
         return errors;

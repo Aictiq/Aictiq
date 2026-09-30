@@ -40,7 +40,7 @@ export const teamSettingsPath = (slug: string, projectKey: string, teamId: strin
   `/o/${slug}/p/${projectKey}/settings/teams/${teamId}`
 
 /** The AI software factory's tabs (phase 10). */
-export type FactoryTab = 'runs' | 'runners' | 'playbooks' | 'rules'
+export type FactoryTab = 'setup' | 'runs' | 'runners' | 'playbooks' | 'rules'
 
 /**
  * The Factory area: an organization's runners, runs and playbooks. Named by slug like the
@@ -50,11 +50,24 @@ export const factoryPath = (slug: string, tab: FactoryTab = 'runners') => `/o/${
 
 export function factoryLinks(slug: string): SettingsLink[] {
   return [
+    { to: factoryPath(slug, 'setup'), label: 'Setup' },
     { to: factoryPath(slug, 'runs'), label: 'Runs' },
     { to: factoryPath(slug, 'rules'), label: 'Rules' },
     { to: factoryPath(slug, 'runners'), label: 'Runners', tour: 'factory-runners' },
     { to: factoryPath(slug, 'playbooks'), label: 'Playbooks' },
   ]
+}
+
+/**
+ * The setup guide, following one runner and one project when they are named - where a new
+ * runner's registration and a new project's creation both lead.
+ */
+export function factorySetupPath(slug: string, focus: { runner?: string; project?: string } = {}) {
+  const query = new URLSearchParams()
+  if (focus.runner) query.set('runner', focus.runner)
+  if (focus.project) query.set('project', focus.project)
+  const search = query.toString()
+  return `${factoryPath(slug, 'setup')}${search ? `?${search}` : ''}`
 }
 
 /** One run's page - where "open log" goes and what a run's link pasted in chat opens. */
