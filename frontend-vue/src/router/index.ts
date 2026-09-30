@@ -237,6 +237,13 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/BoardView.vue'),
     meta: { requiresAuth: true, title: 'Board' },
   },
+  {
+    // Email links name the project rather than relying on the browser's last selection.
+    path: '/o/:slug/p/:projectKey/board',
+    name: 'project-board',
+    component: () => import('@/views/BoardView.vue'),
+    meta: { requiresAuth: true, title: 'Board' },
+  },
 
   // ── Personal settings ────────────────────────────────────────────────────────────
   // No slug: a password, an avatar and a personal access token follow the account across
@@ -550,7 +557,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.guestOnly && session.isAuthenticated) {
-    return { path: typeof to.query.next === 'string' ? to.query.next : '/' }
+    return typeof to.query.next === 'string' ? to.query.next : '/'
   }
 
   if (session.isAuthenticated) await syncScopeWithRoute(to.params)

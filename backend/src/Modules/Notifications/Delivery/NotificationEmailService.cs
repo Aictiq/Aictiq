@@ -22,6 +22,7 @@ public sealed class NotificationEmailService(
         var profiles = await users.GetDeliveryProfilesAsync(ids, ct);
         var preferences = await db.Preferences.AsNoTracking().Where(p => ids.Contains(p.UserId)).ToListAsync(ct);
         var modes = preferences.ToDictionary(p => (p.UserId, p.Kind), p => p.EmailMode);
+        var organizationSlugs = new Dictionary<Guid, string?>();
         foreach (var notification in notifications)
         {
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent ||
@@ -30,8 +31,13 @@ public sealed class NotificationEmailService(
             if (modes.TryGetValue((notification.UserId, notification.Kind), out var mode) &&
                 mode != EmailNotificationMode.Immediate)
                 continue;
+            if (!organizationSlugs.TryGetValue(notification.OrganizationId, out var organizationSlug))
+            {
+                organizationSlug = (await organizations.FindByIdAsync(notification.OrganizationId, ct))?.Slug;
+                organizationSlugs[notification.OrganizationId] = organizationSlug;
+            }
             var variables = Variables(notification, recipient, unsubscribe.Create(notification.UserId, notification.Kind),
-                emailOptions.Value.BaseUrl);
+                emailOptions.Value.BaseUrl, organizationSlug);
             var rendered = renderer.Render("notification", variables);
             db.EmailOutbox.Add(new EmailOutboxMessage
             {
@@ -101,19 +107,31 @@ public sealed class NotificationEmailService(
     }
 
     internal static Dictionary<string, string> Variables(Notification notification, UserDeliveryProfile recipient, string unsubscribeUrl,
-        string? emailBaseUrl) =>
+        string? emailBaseUrl, string? organizationSlug) =>
         new()
         {
             ["recipientName"] = recipient.DisplayName,
             ["message"] = notification.Message,
             ["itemKey"] = notification.ItemKey ?? "",
-            ["notificationUrl"] = Link(notification.ItemId, emailBaseUrl),
+            ["notificationUrl"] = Link(notification.ItemKey, emailBaseUrl, organizationSlug),
             ["unsubscribeUrl"] = unsubscribeUrl
         };
 
-    internal static string Link(Guid? itemId, string? emailBaseUrl) =>
-        string.IsNullOrWhiteSpace(emailBaseUrl) ? "/inbox" :
-        $"{emailBaseUrl.TrimEnd('/')}{(itemId is null ? "/inbox" : $"/items/{itemId}")}";
+    /// <summary>Open the item's project board with its detail dialog. Notifications without
+    /// item context (including older events) still have a working inbox destination.</summary>
+    internal static string Link(string? itemKey, string? emailBaseUrl, string? organizationSlug = null)
+    {
+        if (string.IsNullOrWhiteSpace(emailBaseUrl)) return "/inbox";
+        var baseUrl = emailBaseUrl.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(organizationSlug) || string.IsNullOrWhiteSpace(itemKey))
+            return $"{baseUrl}/inbox";
+        var separator = itemKey.LastIndexOf('-');
+        if (separator < 1 || separator == itemKey.Length - 1)
+            return $"{baseUrl}/inbox";
+        var projectKey = itemKey[..separator];
+        return $"{baseUrl}/o/{Uri.EscapeDataString(organizationSlug)}/p/{Uri.EscapeDataString(projectKey)}" +
+            $"/board?item={Uri.EscapeDataString(itemKey)}";
+    }
 }
 
 /// <summary>What a comment email says, gathered from the comment's event.</summary>
