@@ -52,7 +52,7 @@ these values in `.env` to skip the local build:
 
 ```dotenv
 AICTIQ_IMAGE_PULL_POLICY=always
-AICTIQ_IMAGE_REGISTRY=ghcr.io/green-code-dev
+AICTIQ_IMAGE_REGISTRY=ghcr.io/aictiq
 AICTIQ_IMAGE_TAG=<release-tag>
 ```
 
