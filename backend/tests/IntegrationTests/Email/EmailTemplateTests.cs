@@ -19,6 +19,7 @@ public sealed class EmailTemplateTests
     [InlineData("password-reset")]
     [InlineData("email-change")]
     [InlineData("email-confirmation")]
+    [InlineData("transition")]
     public void every_shipped_template_renders_a_subject_and_both_bodies(string template)
     {
         var rendered = _renderer.Render(template, new Dictionary<string, string>
@@ -31,6 +32,7 @@ public sealed class EmailTemplateTests
             ["acceptUrl"] = "https://aictiq.test/invitations/abc",
             ["itemKey"] = "ACME-12",
             ["itemTitle"] = "Ship the thing",
+            ["toState"] = "In Review",
             ["itemUrl"] = "https://aictiq.test/items/ACME-12",
             ["inboxUrl"] = "https://aictiq.test/inbox",
             ["summary"] = "Two items moved.",
@@ -124,6 +126,46 @@ public sealed class EmailTemplateTests
 
         Assert.NotEmpty(rendered.Html);
         Assert.DoesNotContain("{{", rendered.Html);
+    }
+
+    [Fact]
+    public void transition_subject_fits_the_queue_even_with_the_longest_item_title()
+    {
+        var rendered = _renderer.Render("transition", new Dictionary<string, string>
+        {
+            ["itemKey"] = "PROJECTKEY12-1234567", ["itemTitle"] = new string('a', 500),
+            ["toState"] = new string('b', 100)
+        });
+        Assert.True(rendered.Subject.Length <= 500);
+        Assert.Contains(new string('a', 500), rendered.Html);
+    }
+
+    [Fact]
+    public void transition_details_are_escaped_and_optional_run_sections_are_hidden()
+    {
+        var variables = new Dictionary<string, string>
+        {
+            ["itemKey"] = "ACME-12", ["itemTitle"] = "Fix <b>everything</b>",
+            ["actorName"] = "<script>alert(1)</script>",
+            ["fromState"] = "Active", ["toState"] = "In <b>Review</b>",
+            ["excerpt"] = "A <script>description</script>",
+            ["notificationUrl"] = "https://aictiq.test/board?item=ACME-12"
+        };
+        var itemOnly = _renderer.Render("transition", variables);
+        Assert.Contains("Fix &lt;b&gt;everything&lt;/b&gt;", itemOnly.Html);
+        Assert.DoesNotContain("<script>", itemOnly.Html);
+        Assert.DoesNotContain("Factory run", itemOnly.Html);
+        Assert.DoesNotContain("Factory run", itemOnly.Text);
+
+        variables["runId"] = Guid.NewGuid().ToString();
+        variables["runOutcome"] = "failed";
+        variables["runSummary"] = "Fix <script>the build</script>";
+        var withRun = _renderer.Render("transition", variables);
+        Assert.Contains("Factory run", withRun.Html);
+        Assert.Contains("Fix &lt;script&gt;the build&lt;/script&gt;", withRun.Html);
+        Assert.Contains("Fix <script>the build</script>", withRun.Text);
+        Assert.DoesNotContain("Review pull request", withRun.Html);
+        Assert.DoesNotContain("View run details", withRun.Html);
     }
 
     [Fact]

@@ -58,7 +58,7 @@ public sealed class Comment : TenantEntity
     /// <summary>Enough of the text to decide whether to open the email, not the whole comment.
     /// An email shows it as text, so the Markdown is read rather than quoted: "**Friday**"
     /// arrives as "Friday", a link as its words, an image as its alt text.</summary>
-    private static string Excerpt(string markdown)
+    internal static string Excerpt(string markdown)
     {
         const int limit = 600;
         var text = Regex.Replace(Markdig.Markdown.ToPlainText(markdown, PlainText), @"\n{3,}", "\n\n").Trim();

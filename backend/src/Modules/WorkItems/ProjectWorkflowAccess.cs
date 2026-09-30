@@ -5,6 +5,13 @@ namespace Aictiq.Modules.WorkItems;
 
 internal sealed class ProjectWorkflowAccess(WorkItemsDbContext db) : IProjectWorkflowAccess
 {
+    public async Task<IReadOnlyDictionary<Guid, string>> GetStateNamesAsync(
+        Guid projectId, IReadOnlyCollection<Guid> stateIds, CancellationToken cancellationToken = default) =>
+        await db.WorkflowStates.AsNoTracking()
+            .Where(state => stateIds.Contains(state.Id)
+                && db.Workflows.Any(workflow => workflow.Id == state.WorkflowId && workflow.ProjectId == projectId))
+            .ToDictionaryAsync(state => state.Id, state => state.Name, cancellationToken);
+
     public async Task<bool> StatesBelongToProjectAsync(
         Guid projectId, IReadOnlyCollection<Guid> stateIds, CancellationToken cancellationToken = default)
     {

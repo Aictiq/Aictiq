@@ -206,6 +206,11 @@ name next.
 
 ## Email
 
+Watched-item workflow emails show the item title, type, priority, a short description,
+and the state change. When a factory run moves the item, its public outcome, summary,
+and pull request are included. Factory operators also get a link to the run details.
+These emails follow each recipient's notification settings and online-presence rules.
+
 Email is **optional**. An instance with no SMTP relay is a supported deployment, not a
 broken one - it starts normally, and the screens that would have sent a message offer a
 link to copy instead.
