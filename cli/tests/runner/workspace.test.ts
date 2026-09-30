@@ -168,6 +168,27 @@ describe('local workspaces', () => {
     await ws.cleanup()
   })
 
+  it('fails with no-remote before cloning when a direct run has no origin to push to', async () => {
+    git(local, 'remote', 'remove', 'origin')
+    const error = await failure(
+      provisionWorkspace(
+        claimed({ workOnDefaultBranch: true, branchName: 'main' }),
+        options(),
+      ),
+    )
+
+    expect(error.reason).toBe('no-remote')
+    expect(error.message).toContain('no origin remote')
+    expect(existsSync(join(root, claimed().runId))).toBe(false)
+  })
+
+  it('still works on an item branch in a repository without origin', async () => {
+    git(local, 'remote', 'remove', 'origin')
+    const ws = await provisionWorkspace(claimed(), options())
+    expect(git(ws.checkout, 'branch', '--show-current').trim()).toBe('aictiq/app-12-fix-the-bug')
+    await ws.cleanup()
+  })
+
   it('provisions item and comment attachments beside the checkout and inventories them in the prompt', async () => {
     const downloads: string[] = []
     const ws = await provisionWorkspace(claimed(), options({

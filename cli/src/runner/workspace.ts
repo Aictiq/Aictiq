@@ -346,6 +346,15 @@ async function provisionLocal(
       return false
     },
   )
+  if (run.workOnDefaultBranch && !hasOrigin) {
+    // The isolated clone has nowhere to push, and it is deleted after the run: the agent's
+    // commits would be lost while the run still reported success.
+    throw new RunFailure(
+      'no-remote',
+      `${repo}, ${origin} ${run.projectKey}, has no origin remote to push ${run.branchName} to. Direct delivery needs one; add it with \`git remote add origin <url>\` or use branch-and-pull-request delivery.`,
+    )
+  }
+
   let base = run.defaultBranch
   if (hasOrigin) {
     options.event(`Fetching origin in ${repo}`)
@@ -359,21 +368,16 @@ async function provisionLocal(
     await call(['clone', '--no-hardlinks', '--', repo, checkout])
     const isolated = (args: string[]) =>
       gitStep(args, { cwd: checkout, env, signal: options.signal })
-    if (hasOrigin) {
-      const remote = (await git(['remote', 'get-url', 'origin'], { cwd: repo, env })).trim()
-      // Resolve relative local remotes against the source repository, not the new clone.
-      const remoteUrl =
-        isAbsolute(remote) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote) || /^[^/]+:/.test(remote)
-          ? remote
-          : resolve(repo, remote)
-      await isolated(['remote', 'set-url', 'origin', remoteUrl])
-      await isolated(['fetch', 'origin'])
-      await isolated(['checkout', '-B', run.branchName, `origin/${run.branchName}`])
-      await isolated(['branch', '--set-upstream-to', `origin/${run.branchName}`, run.branchName])
-    } else {
-      await isolated(['checkout', run.branchName])
-      await isolated(['remote', 'remove', 'origin'])
-    }
+    const remote = (await git(['remote', 'get-url', 'origin'], { cwd: repo, env })).trim()
+    // Resolve relative local remotes against the source repository, not the new clone.
+    const remoteUrl =
+      isAbsolute(remote) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote) || /^[^/]+:/.test(remote)
+        ? remote
+        : resolve(repo, remote)
+    await isolated(['remote', 'set-url', 'origin', remoteUrl])
+    await isolated(['fetch', 'origin'])
+    await isolated(['checkout', '-B', run.branchName, `origin/${run.branchName}`])
+    await isolated(['branch', '--set-upstream-to', `origin/${run.branchName}`, run.branchName])
     options.event(`Created isolated clone ${checkout} on default branch ${run.branchName}`)
     return null
   }
