@@ -13,6 +13,7 @@ export interface Playbook {
   harness: PlaybookHarness
   onSuccessStateId: string | null
   onFailureStateId: string | null
+  workOnDefaultBranch: boolean
   maxMinutes: number
   isDefault: boolean
   createdBy: string
@@ -32,6 +33,7 @@ export interface SavePlaybookBody {
   harness: PlaybookHarness
   onSuccessStateId: string | null
   onFailureStateId: string | null
+  workOnDefaultBranch: boolean
   maxMinutes: number
 }
 

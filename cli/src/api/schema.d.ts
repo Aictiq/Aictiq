@@ -3916,6 +3916,8 @@ export interface components {
             onSuccessStateId: null | string;
             /** Format: uuid */
             wikiPageId: null | string;
+            /** @default false */
+            workOnDefaultBranch: boolean;
         };
         CreateProjectRequest: {
             color: null | string;
@@ -4288,6 +4290,7 @@ export interface components {
             version?: number | string;
             /** Format: uuid */
             wikiPageId?: null | string;
+            workOnDefaultBranch?: null | boolean;
         };
         UpdateProfileRequest: {
             firstName: null | string;

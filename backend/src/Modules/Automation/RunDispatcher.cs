@@ -174,10 +174,12 @@ public sealed class RunDispatcher(
                 return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
         }
 
-        var branch = BranchNames.For(item.Key, item.Title);
+        var branch = playbook.WorkOnDefaultBranch
+            ? settings?.DefaultBranch ?? "main"
+            : BranchNames.For(item.Key, item.Title);
         var prompt = RunPromptComposer.Compose(
             agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-            branch, playbook.Name, content.Markdown);
+            branch, playbook.Name, content.Markdown, playbook.WorkOnDefaultBranch);
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -195,6 +197,7 @@ public sealed class RunDispatcher(
             PromptSnapshot = prompt,
             PlaybookRevisionId = content.RevisionId,
             BranchName = branch,
+            WorkOnDefaultBranch = playbook.WorkOnDefaultBranch,
             MaxMinutes = Math.Clamp(playbook.MaxMinutes, 5, 720),
             QueuedAt = now,
         };

@@ -58,12 +58,34 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
     }
 
     [Fact]
+    public async Task direct_branch_setting_round_trips_and_partial_edits_preserve_it()
+    {
+        var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Direct", null, "codex", null, null, 60, "Implement the item.", true), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.True(playbook.WorkOnDefaultBranch);
+        var renamed = await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { Name = "Direct work", Version = playbook.Version }, ApiTestContext.Json, Ct);
+        renamed.EnsureSuccessStatusCode();
+        playbook = (await renamed.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.True(playbook.WorkOnDefaultBranch);
+        Assert.Equal(HttpStatusCode.Conflict, (await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { WorkOnDefaultBranch = false, Version = 0 }, ApiTestContext.Json, Ct)).StatusCode);
+        var updated = await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new UpdatePlaybookRequest { WorkOnDefaultBranch = false, Version = playbook.Version }, ApiTestContext.Json, Ct);
+        updated.EnsureSuccessStatusCode();
+        Assert.False((await _owner.GetFromJsonAsync<PlaybookView>($"{Base(_project)}/playbooks/{playbook.Id}", ApiTestContext.Json, Ct))!.WorkOnDefaultBranch);
+    }
+
+    [Fact]
     public async Task starter_creates_a_default_playbook_backed_by_an_editable_wiki_page_and_is_idempotent()
     {
         var response = await _owner.PostAsync($"{Base(_project)}/playbooks/starter", null, Ct);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var playbook = (await response.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
         Assert.True(playbook.IsDefault);
+        Assert.False(playbook.WorkOnDefaultBranch);
         Assert.Equal("claude", playbook.Harness);
         Assert.NotNull(playbook.WikiPageId);
 

@@ -66,6 +66,7 @@ describe('the playbook endpoints', () => {
       onSuccessStateId: 'done',
       onFailureStateId: null,
       maxMinutes: 90,
+      workOnDefaultBranch: true,
     }
 
     await createPlaybook('acme', 'ACME', body)

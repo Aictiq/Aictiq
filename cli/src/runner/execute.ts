@@ -214,7 +214,9 @@ export async function executeRun(
         // Harnesses colour their errors even into a pipe; the log view and the summary
         // are plain text.
         const line = stripVTControlCharacters(raw)
-        for (const match of line.matchAll(PullRequestUrl)) pullRequestUrl = match[0]
+        if (!run.workOnDefaultBranch) {
+          for (const match of line.matchAll(PullRequestUrl)) pullRequestUrl = match[0]
+        }
         if (stream === 'stderr') {
           log.push('stderr', line)
           remember(line)
@@ -242,7 +244,7 @@ export async function executeRun(
     if (stopReason) return stopped(exitCode, lastLines, usage)
 
     const verdict = adapter.outcome(exitCode, lastLines, lastResult)
-    if (verdict.outcome === 'succeeded' && !pullRequestUrl) {
+    if (verdict.outcome === 'succeeded' && !run.workOnDefaultBranch && !pullRequestUrl) {
       pullRequestUrl = await (options.findPullRequest ?? findPullRequest)(
         workspace.checkout,
         run.branchName,

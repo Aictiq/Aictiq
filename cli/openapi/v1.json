@@ -762,6 +762,10 @@
               "null",
               "string"
             ]
+          },
+          "workOnDefaultBranch": {
+            "default": false,
+            "type": "boolean"
           }
         },
         "required": [
@@ -2585,6 +2589,12 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "workOnDefaultBranch": {
+            "type": [
+              "null",
+              "boolean"
             ]
           }
         },

@@ -9,15 +9,19 @@ namespace Aictiq.Modules.Automation.Prompts;
 public static class RunPromptComposer
 {
     public static string Compose(string agentDisplayName, string itemKey, string projectKey,
-        string projectName, string branchName, string playbookName, string playbookMarkdown)
+        string projectName, string branchName, string playbookName, string playbookMarkdown,
+        bool workOnDefaultBranch = false)
     {
         var playbook = string.IsNullOrWhiteSpace(playbookMarkdown)
             ? "(The playbook page is empty.)"
             : playbookMarkdown.Trim();
+        var delivery = workOnDefaultBranch
+            ? $"Report progress by editing one comment on the item; when the work is verified, commit and push directly to origin {branchName}. Do not create an item branch or open a pull request. If a push is rejected, fetch and reconcile the remote changes, then rerun relevant checks; never force-push."
+            : "Report progress by editing one comment on the item; open a pull request when the work is reviewable and link it on the item.";
         return $"""
             You are {agentDisplayName}, a software agent working item {itemKey} in project {projectName} ({projectKey}).
             Use the branch {branchName}. Start every commit subject with {itemKey} so the work links itself.
-            Report progress by editing one comment on the item; open a pull request when the work is reviewable and link it on the item.
+            {delivery}
             Do not transition the item yourself - Aictiq moves it from this run's outcome. If you cannot finish, stop cleanly and make the last line of your log say why.
 
             # Playbook: {playbookName}

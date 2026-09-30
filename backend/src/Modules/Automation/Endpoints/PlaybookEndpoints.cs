@@ -15,7 +15,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 public sealed record PlaybookView(
     Guid Id, Guid ProjectId, string Name, Guid? WikiPageId, string Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
-    string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version);
+    string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false);
 
 /// <param name="InstructionsMarkdown">
 /// What agents should follow. Aictiq files it as a page in the wiki's Factory section, named
@@ -23,7 +23,7 @@ public sealed record PlaybookView(
 /// </param>
 public sealed record CreatePlaybookRequest(
     string? Name, Guid? WikiPageId, string? Harness,
-    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null);
+    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null, bool WorkOnDefaultBranch = false);
 
 /// <param name="InFactorySection">
 /// False for a playbook from before its page had to live in the Factory section: saving new
@@ -50,6 +50,7 @@ public sealed class UpdatePlaybookRequest
         init { _onFailureStateId = value; HasOnFailureStateId = true; }
     }
     public int? MaxMinutes { get; init; }
+    public bool? WorkOnDefaultBranch { get; init; }
     /// <summary>New instructions: a new revision of the playbook's Factory page, or a new page there when it has none.</summary>
     public string? InstructionsMarkdown { get; init; }
     public uint Version { get; init; }
@@ -80,10 +81,10 @@ public static class PlaybookEndpoints
 
         1. Start with `whoami`, find the ready work, and claim the item before you write code.
         2. Read the whole item context, including its parent chain, comments, links, and relevant wiki pages, before you plan.
-        3. Create a branch named from the item key and begin commit subjects with that key so the work links itself.
+        3. Use the branch and delivery mode specified for this run, and begin commit subjects with the item key so the work links itself.
         4. Keep the claim alive with heartbeats and report progress by editing one `<!-- aictiq:progress -->` comment.
-        5. When coding is done, run the project's tests and verify before opening the pull request.
-        6. Link the pull request. Do not transition the item yourself; Aictiq applies this playbook's success or failure state after the run ends.
+        5. When coding is done, run the project's tests and verify before delivering the work.
+        6. For a pull-request run, open and link the pull request; for a direct run, push to the specified branch. Do not transition the item yourself; Aictiq applies this playbook's success or failure state after the run ends.
         7. If you stop before finishing, release the item cleanly.
 
         Treat a claim conflict as a signal to choose different work. After an edit conflict, re-read and reconcile once; never overwrite another person's change blindly.
@@ -174,6 +175,7 @@ public static class PlaybookEndpoints
             OnSuccessStateId = request.OnSuccessStateId,
             OnFailureStateId = request.OnFailureStateId,
             MaxMinutes = request.MaxMinutes,
+            WorkOnDefaultBranch = request.WorkOnDefaultBranch,
             CreatedBy = user.UserId!,
             CreatedAt = now,
             UpdatedAt = now,
@@ -231,6 +233,7 @@ public static class PlaybookEndpoints
         row.OnSuccessStateId = successStateId;
         row.OnFailureStateId = failureStateId;
         row.MaxMinutes = maxMinutes;
+        row.WorkOnDefaultBranch = request.WorkOnDefaultBranch ?? row.WorkOnDefaultBranch;
         row.UpdatedAt = clock.GetUtcNow();
         db.Entry(row).Property(playbook => playbook.Version).OriginalValue = request.Version;
         try { await db.SaveChangesAsync(ct); }
@@ -460,7 +463,7 @@ public static class PlaybookEndpoints
     private static PlaybookView ToView(Playbook row) => new(
         row.Id, row.ProjectId, row.Name, row.WikiPageId, row.Harness,
         row.OnSuccessStateId, row.OnFailureStateId, row.MaxMinutes, row.IsDefault,
-        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version);
+        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch);
 
     private static FactorySettingsView ToView(ProjectFactorySettings row) => new(
         row.ProjectId, (short)row.RepoSource, row.RepoFullName, row.DefaultBranch,

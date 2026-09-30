@@ -1,8 +1,8 @@
 # The AI software factory
 
 Aictiq's factory hands a work item to a coding agent and runs it on a machine your
-organization controls. The expected result is a branch and a pull request; deployment stays
-in your own delivery pipeline.
+organization controls. By default, the result is a branch and a pull request; playbooks can
+also push directly to the default branch. Deployment stays in your own delivery pipeline.
 
 There are five parts:
 
@@ -263,6 +263,20 @@ an **Implement** playbook. The starter covers reading the full
 item, branch and commit naming, claim heartbeats, one editable progress comment, tests, the
 pull request, and clean release on an incomplete attempt. **New playbook** starts from a blank
 page: write the instructions in the playbook dialog.
+
+The **Delivery** setting defaults to **Branch and pull request**. For solo or small projects,
+choose **Push directly to default branch** to commit and push without an item branch or PR.
+The target is the project's **Repository → Default branch**, which may be `main` or a
+dedicated branch such as `develop`. Both the mode and direct target are captured when a run
+is queued, so edits apply to future runs. The runner needs permission to push to that branch;
+repository branch protection still applies. Direct local runs use an isolated clone so the
+developer can keep the target branch checked out with uncommitted work. Concurrent pushes
+can be rejected: agents must fetch, reconcile and check again, never force-push.
+
+Tailor existing instructions that explicitly require an item branch or PR before selecting
+direct delivery. The starter follows the run's selected delivery mode. A successful direct
+run records its summary and applies the same configured success transition without a PR link.
+Use an updated runner for direct delivery; older runners only support the branch-and-PR mode.
 
 Aictiq keeps every playbook's instructions as a page in the project wiki's **Factory**
 section, named after the playbook, so their revision history is reviewable there. A playbook
