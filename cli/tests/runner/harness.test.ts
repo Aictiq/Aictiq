@@ -125,6 +125,54 @@ describe('harness output parsers', () => {
   })
 })
 
+describe('session ids and resume invocations', () => {
+  it.each([
+    ['claude', claude, 'ed68b27b-fc06-4480-91fd-685c05f3a581'],
+    ['codex', codex, '01a0b01c-1219-78a1-bd0c-aa8b55d7a829'],
+    ['opencode', opencode, 'ses_f4fe5eee7ffe7zgcmFa6ohCxwN'],
+  ] as const)('reads the %s session id from its fixture', (name, harness, id) => {
+    const ids = fixture(name)
+      .map((line) => harness.parse(line).sessionId)
+      .filter((value) => value !== undefined)
+    expect(ids.length).toBeGreaterThan(0)
+    expect(new Set(ids)).toEqual(new Set([id]))
+  })
+
+  const resuming: InvocationContext = { ...context, prompt: 'Continue where you stopped.', resumeSessionId: 'sess-1' }
+
+  it('resumes Claude by session id with the continue message on stdin', () => {
+    const invocation = claude.invocation(resuming)
+    expect(invocation.args.slice(-2)).toEqual(['--resume', 'sess-1'])
+    expect(invocation.args).toContain('--mcp-config')
+    expect(invocation.stdin).toBe('Continue where you stopped.')
+  })
+
+  it('resumes Codex with exec resume, reading the message from stdin', () => {
+    const invocation = codex.invocation(resuming)
+    expect(invocation.args.slice(0, 4)).toEqual(['exec', 'resume', 'sess-1', '--json'])
+    // `exec resume` has no -C; the runner starts it in the checkout.
+    expect(invocation.args).not.toContain('-C')
+    expect(invocation.args).toContain('mcp_servers.aictiq.command="aictiq"')
+    expect(invocation.args.at(-1)).toBe('-')
+    expect(invocation.stdin).toBe('Continue where you stopped.')
+  })
+
+  it('resumes OpenCode with --session and only the continue message', () => {
+    const invocation = opencode.invocation(resuming)
+    expect(invocation.args).toEqual([
+      'run',
+      'Continue where you stopped.',
+      '--format',
+      'json',
+      '--dir',
+      '/work/run',
+      '--session',
+      'sess-1',
+    ])
+    expect(invocation.env?.OPENCODE_CONFIG_CONTENT).toContain('aictiq')
+  })
+})
+
 describe('outcomes and capability probes', () => {
   it('maps success, failures, and killed harnesses', () => {
     expect(codex.outcome(0, ['last line'], 'final answer')).toEqual({
@@ -139,8 +187,35 @@ describe('outcomes and capability probes', () => {
     })
     expect(claude.outcome(null, ['last'], null)).toMatchObject({
       outcome: 'failed',
-      failureReason: 'harness-killed',
+      failureReason: 'harness-crashed',
     })
+  })
+
+  it('tells transient failures from the rest so the instance can continue them', () => {
+    expect(claude.outcome(1, ['API Error: 429 rate_limit_error'], null).failureReason).toBe(
+      'harness-rate-limited',
+    )
+    expect(codex.outcome(1, ['stream disconnected before completion'], null).failureReason).toBe(
+      'harness-transient',
+    )
+    expect(opencode.outcome(1, ['Error: overloaded_error'], null).failureReason).toBe(
+      'harness-transient',
+    )
+    expect(codex.outcome(1, ['error: unknown flag'], null).failureReason).toBe('harness-exit-1')
+    // A refused prompt stays a plain error; the same result with a rate limit does not.
+    const logged = claude.parse(
+      '{"type":"result","subtype":"success","is_error":true,"duration_ms":5,"result":"nope"}',
+    ).log!
+    expect(claude.outcome(0, [logged], 'nope').failureReason).toBe('harness-error')
+    expect(claude.outcome(0, [logged], 'Claude AI usage limit reached').failureReason).toBe(
+      'harness-rate-limited',
+    )
+  })
+
+  it('reports a session that will not resume as session-unavailable, only when resuming', () => {
+    const lines = ['No conversation found with session ID: 0b7e']
+    expect(claude.outcome(1, lines, null, true).failureReason).toBe('session-unavailable')
+    expect(claude.outcome(1, lines, null, false).failureReason).toBe('harness-exit-1')
   })
 
   it('treats a Claude error result as a failure despite a zero exit', () => {

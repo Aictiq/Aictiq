@@ -81,6 +81,19 @@ export interface ClaimedRun {
   agentToken: string
   agentTokenDisplay: string | null
   heartbeatIntervalSeconds: number
+  /**
+   * Set when the run continues a failed one: the harness resumes `sessionId` in the
+   * workspace the failed run kept on this runner, instead of starting fresh.
+   */
+  resume?: RunResume | null
+}
+
+export interface RunResume {
+  /** The failed run whose kept workspace this run works in. */
+  continuesRunId: string
+  sessionId: string
+  /** Why the failed run stopped, told to the agent. */
+  failureReason: string | null
 }
 
 export type LogStream = 'stdout' | 'stderr' | 'event'
@@ -96,6 +109,8 @@ export interface FinishReport {
   inputTokens?: number | null
   outputTokens?: number | null
   failureReason?: string | null
+  /** The harness session, so the run can be continued later. */
+  sessionId?: string | null
 }
 
 /** One stdout line of a harness, as the adapter reads it. */
@@ -110,6 +125,8 @@ export interface ParsedLine {
   accumulate?: boolean
   /** A final answer the harness produced, used as the success summary. */
   result?: string
+  /** The harness's session or thread id, when this line names it. */
+  sessionId?: string
 }
 
 export interface HarnessInvocation {
@@ -141,6 +158,8 @@ export interface InvocationContext {
   mcpConfigFile: string
   /** The same server as a command line, for harnesses configured by flags or their own file. */
   mcpServer: { command: string; args: string[] }
+  /** Resume this harness session rather than start one; `prompt` is then the continue message. */
+  resumeSessionId?: string
 }
 
 export interface HarnessAdapter {
@@ -154,7 +173,13 @@ export interface HarnessAdapter {
    */
   invocation(context: InvocationContext): HarnessInvocation
   parse(line: string): ParsedLine
-  outcome(exitCode: number | null, lastLines: string[], lastResult: string | null): HarnessOutcome
+  /** `resuming` is set when the invocation resumed a session, so a lost session can be told apart. */
+  outcome(
+    exitCode: number | null,
+    lastLines: string[],
+    lastResult: string | null,
+    resuming?: boolean,
+  ): HarnessOutcome
 }
 
 /** A failure the runner reports as the run's `failureReason` rather than crashing on. */

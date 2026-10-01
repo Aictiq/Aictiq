@@ -70,6 +70,7 @@ describe('RunnerLoop', () => {
               prompt: run.prompt,
               env: {},
               cleanup: async () => {},
+              retain: () => {},
             }),
             findPullRequest: async () => null,
             flushIntervalMs: 10,

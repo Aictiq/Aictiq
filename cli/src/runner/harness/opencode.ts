@@ -1,5 +1,6 @@
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
 import { versionOf } from './claude.js'
+import { failedOutcome } from './failure.js'
 
 const limit = (value: string, length: number) =>
   value.length > length ? `${value.slice(0, Math.max(0, length - 1))}…` : value
@@ -19,18 +20,30 @@ export const opencode: HarnessAdapter = {
     return {
       command: 'opencode',
       // `--file` is a variadic option: anything after it is taken as another file to
-      // attach, so the message goes first and the prompt file last.
-      args: [
-        'run',
-        'Follow the instructions in the attached file.',
-        '--format',
-        'json',
-        '--dir',
-        context.workspace,
-        '--file',
-        context.promptFile,
-        context.attachmentsDir,
-      ],
+      // attach, so the message goes first and the prompt file last. A resumed session
+      // already has the instructions and attachments; it only gets the continue message.
+      args: context.resumeSessionId
+        ? [
+            'run',
+            context.prompt,
+            '--format',
+            'json',
+            '--dir',
+            context.workspace,
+            '--session',
+            context.resumeSessionId,
+          ]
+        : [
+            'run',
+            'Follow the instructions in the attached file.',
+            '--format',
+            'json',
+            '--dir',
+            context.workspace,
+            '--file',
+            context.promptFile,
+            context.attachmentsDir,
+          ],
       env: {
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           $schema: 'https://opencode.ai/config.json',
@@ -60,10 +73,13 @@ export const opencode: HarnessAdapter = {
     }
 
     const part = recordOf(event.part)
-    if (!part) return { log: null }
+    // Every event carries the session it belongs to, at the top or on its part.
+    const session = event.sessionID ?? part?.sessionID
+    const sessionId = typeof session === 'string' ? { sessionId: session } : {}
+    if (!part) return { log: null, ...sessionId }
     if (event.type === 'text' && typeof part.text === 'string') {
       // Returning each text part as result lets the runner retain the final one per run.
-      return { log: part.text, result: part.text }
+      return { log: part.text, result: part.text, ...sessionId }
     }
     if (event.type === 'tool_use') {
       const tool =
@@ -73,7 +89,10 @@ export const opencode: HarnessAdapter = {
             ? part.name
             : 'tool'
       const state = recordOf(part.state)
-      return { log: `→ ${tool} ${limit(JSON.stringify(state?.input ?? part.input ?? {}), 200)}` }
+      return {
+        log: `→ ${tool} ${limit(JSON.stringify(state?.input ?? part.input ?? {}), 200)}`,
+        ...sessionId,
+      }
     }
     // Each step reports its own usage, so the runner adds them up. Cache reads and writes
     // are input the model processed, as the Codex adapter counts them; reasoning is output.
@@ -86,27 +105,20 @@ export const opencode: HarnessAdapter = {
         costUsd: numberOrUndefined(part.cost),
         inputTokens: sumOf(tokens?.input, cache?.read, cache?.write),
         outputTokens: sumOf(tokens?.output, tokens?.reasoning),
+        ...sessionId,
       }
     }
-    return { log: null }
+    return { log: null, ...sessionId }
   },
 
-  outcome(exitCode, lastLines, lastResult) {
-    if (exitCode !== 0) return failedOutcome(exitCode, lastLines)
+  outcome(exitCode, lastLines, lastResult, resuming) {
+    if (exitCode !== 0) return failedOutcome(exitCode, lastLines, resuming)
     return {
       outcome: 'succeeded',
       failureReason: null,
       summary: limit(lastResult ?? lastLines.slice(-20).join('\n'), 4_000) || null,
     }
   },
-}
-
-function failedOutcome(exitCode: number | null, lastLines: string[]) {
-  return {
-    outcome: 'failed' as const,
-    failureReason: exitCode === null ? 'harness-killed' : `harness-exit-${exitCode}`,
-    summary: limit(lastLines.slice(-20).join('\n'), 4_000) || null,
-  }
 }
 
 function sumOf(...values: unknown[]): number | undefined {

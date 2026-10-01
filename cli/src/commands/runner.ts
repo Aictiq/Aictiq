@@ -24,7 +24,12 @@ import { serviceDefinition, servicePlatform, startedAsService, type ServicePlatf
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
 import type { RunnerCapabilities } from '../runner/types.js'
-import { DefaultAttachmentMaxBytes, DefaultAttachmentMaxCount, defaultWorkspaceRoot } from '../runner/workspace.js'
+import {
+  DefaultAttachmentMaxBytes,
+  DefaultAttachmentMaxCount,
+  defaultWorkspaceRoot,
+  pruneKeptWorkspaces,
+} from '../runner/workspace.js'
 
 /**
  * `aictiq runner` - the worker on the factory floor. It authenticates with a
@@ -313,6 +318,8 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         const log = (message: string) =>
           process.stderr.write(`${new Date().toISOString()} ${message}\n`)
         const workspaceRoot = resolve(options.workspaceRoot ?? defaultWorkspaceRoot())
+        // Workspaces failed runs kept for a continue expire while the runner is down too.
+        if (options.keepWorkspaces !== true) await pruneKeptWorkspaces(workspaceRoot)
         const supervisor = new RunnerSupervisor({
           readConfig: () => readRunnerConfig(),
           local: log,
