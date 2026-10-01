@@ -63,11 +63,21 @@ export const useTeamsStore = defineStore('teams', () => {
   }
 
   let loading: Promise<void> | null = null
+  let loadingScope = ''
+  let loadVersion = 0
 
   function load(): Promise<void> {
-    loading ??= (async () => {
-      const slug = organizations.currentSlug
-      const projectKey = projects.currentKey
+    const slug = organizations.currentSlug
+    const projectKey = projects.currentKey
+    const scope = JSON.stringify([slug, projectKey])
+    if (loading && loadingScope === scope) return loading
+    loadingScope = scope
+    const version = ++loadVersion
+    const isCurrentScope = () =>
+      version === loadVersion &&
+      slug === organizations.currentSlug &&
+      projectKey === projects.currentKey
+    const request = (async () => {
       if (!slug || !projectKey) {
         teams.value = []
         status.value = 'ready'
@@ -76,21 +86,23 @@ export const useTeamsStore = defineStore('teams', () => {
 
       status.value = 'loading'
       try {
-        teams.value = await listTeams(slug, projectKey)
+        const result = await listTeams(slug, projectKey)
+        if (!isCurrentScope()) return
+        teams.value = result
         currentId.value ??= readStoredId(slug, projectKey)
         status.value = 'ready'
         reconcile()
       } catch {
-        status.value = 'error'
+        if (isCurrentScope()) status.value = 'error'
       }
-      // Cleared in `finally` on the promise, never inside the body: the early return above
-      // runs synchronously, and clearing there would happen *before* `??=` stores the
-      // promise - leaving a settled promise cached, so every later load() skipped the fetch.
+      // The no-scope return is synchronous, so clear after the promise is assigned.
+      // An older request must not clear the pending request for the new scope.
     })().finally(() => {
-      loading = null
+      if (loading === request) loading = null
     })
 
-    return loading
+    loading = request
+    return request
   }
 
   async function reload(): Promise<void> {

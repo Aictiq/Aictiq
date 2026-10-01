@@ -18,7 +18,7 @@ import {
   UserRound,
   Users,
 } from '@lucide/vue'
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import ProjectBadge from '@/components/common/ProjectBadge.vue'
@@ -42,6 +42,7 @@ import {
   projectSettingsPath,
   wikiPath,
 } from '@/router/paths'
+import { projectSwitchLocation, projectSwitchNeedsTeam } from '@/router/projectSwitch'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
@@ -53,10 +54,7 @@ import { useUiStore } from '@/stores/ui'
  * The left rail. Three sections, matching the design: what is mine, what is in this
  * project, what is in the organization.
  *
- * The "Project" links have no project in their URLs - they act on the *selected* one,
- * which is what the project list above them chooses. That is the same shape as the
- * organization switcher, and for the same reason: a person works in one place at a time,
- * and every request names it anyway.
+ * The project list chooses the scope of the project and team links below it.
  */
 const ui = useUiStore()
 const session = useSessionStore()
@@ -139,9 +137,35 @@ const project = computed<NavItem[]>(() => {
 
 /** Selecting a project must also move the content pane into that project's work. */
 async function selectProject(projectKey: string) {
-  projects.select(projectKey)
+  const route = router.currentRoute.value
   const slug = organizations.currentSlug
-  if (slug) await router.push(projectItemsPath(slug, projectKey))
+  if (projectKey === projects.currentKey) {
+    closeMobileNavigation()
+    return
+  }
+  projects.select(projectKey)
+  // Let the team store reset its scope before awaiting the destination project's teams.
+  if (projectSwitchNeedsTeam(route)) {
+    await nextTick()
+    await teams.load()
+  }
+  // A later click or an organization switch owns the navigation if it happened meanwhile.
+  if (
+    slug &&
+    organizations.currentSlug === slug &&
+    projects.currentKey === projectKey &&
+    router.currentRoute.value === route
+  ) {
+    await router.push(
+      projectSwitchLocation(
+        route,
+        slug,
+        projectKey,
+        projects.current?.role === 'admin',
+        teams.current?.id ?? null,
+      ),
+    )
+  }
   closeMobileNavigation()
 }
 

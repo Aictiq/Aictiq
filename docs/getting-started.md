@@ -45,6 +45,13 @@ publishes ports; the rest are reachable only inside the compose network.
    instead of mail - email is optional everywhere. See
    [Self-hosting → Email](./self-host.md#email).
 
+Switch projects using the project list in the left sidebar. The current view stays open
+for the selected project: Overview, Items, Wiki, Board, Backlog, Sprints or project
+Settings. Backlog and Sprints use that project's remembered team, or its default team.
+An open item, wiki page or sprint returns to the corresponding list. Personal and
+organization pages stay open; project Settings opens Items if you are not an admin in
+the selected project.
+
 ## The in-app tour and Get started
 
 Aictiq offers a short product tour on a new account's first working screen, and a
