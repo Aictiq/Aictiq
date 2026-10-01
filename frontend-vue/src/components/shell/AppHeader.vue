@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useCommandStore } from '@/composables/useCommands'
 import { useSessionStore } from '@/stores/session'
+import { useOrganizationsStore } from '@/stores/organizations'
+import { useProjectsStore } from '@/stores/projects'
 import { useUiStore, type ThemePreference } from '@/stores/ui'
 import { createHubConnection } from '@/utils/realtime'
 
@@ -28,6 +30,8 @@ import { createHubConnection } from '@/utils/realtime'
 const commands = useCommandStore()
 const route = useRoute()
 const session = useSessionStore()
+const organizations = useOrganizationsStore()
+const projects = useProjectsStore()
 const ui = useUiStore()
 const client = useQueryClient()
 let notificationConnection: HubConnection | null = null
@@ -77,7 +81,22 @@ const themeModel = computed({
   get: () => ui.theme,
   set: (next: ThemePreference) => ui.setTheme(next),
 })
-const crumbs = computed(() => ['Aictiq', currentTitle.value].filter(Boolean))
+const scopeTitle = computed(() => {
+  // Scoped pages follow the URL, even while the sidebar's selection is changing.
+  // The unscoped board reads its project from the store, just like its content does.
+  const projectKey =
+    typeof route.params.projectKey === 'string'
+      ? route.params.projectKey
+      : route.name === 'board'
+        ? projects.currentKey
+        : null
+  if (!projectKey) return 'Aictiq'
+
+  // Project keys are only unique within an organization. Never use another tenant's name.
+  if (route.params.slug && route.params.slug !== organizations.currentSlug) return projectKey
+  return projects.projects.find((project) => project.key === projectKey)?.name ?? projectKey
+})
+const crumbs = computed(() => [scopeTitle.value, currentTitle.value].filter(Boolean))
 </script>
 
 <template>
