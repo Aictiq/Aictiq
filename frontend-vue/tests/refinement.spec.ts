@@ -1,6 +1,6 @@
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { VueQueryPlugin } from '@tanstack/vue-query'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import CreateTicketDialog from '@/components/items/CreateTicketDialog.vue'
@@ -206,10 +206,22 @@ describe('CreateTicketDialog', () => {
     )
     expect(wrapper.emitted('created')).toHaveLength(1)
   })
+
+  it('lets stakeholders create tickets without fetching refinement settings', async () => {
+    const { wrapper, calls } = await mountDialog(false, true)
+    expect(wrapper.text()).not.toContain('Refine ticket')
+    expect(wrapper.find('#create-ticket-title').attributes('placeholder')).toBe('What is it?')
+    await wrapper.find('#create-ticket-title').setValue('Login button broken')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('created')).toHaveLength(1)
+    expect(calls.some((call) => call.url.includes('refinement'))).toBe(false)
+  })
 })
 
 describe('RefinementPanel', () => {
-  async function mountPanel(current: unknown, dirty = false) {
+  async function mountPanel(current: unknown, dirty = false, canOperateFactory = true) {
     const calls = stubFetch([
       ['GET', /\/refinement-settings\/$/, settings(true)],
       ['GET', /\/items\/PROJ-7\/refinement\/$/, current],
@@ -217,13 +229,17 @@ describe('RefinementPanel', () => {
       ['POST', /\/items\/PROJ-7\/transition$/, { ...item, stateId: 's-ready', version: 4 }],
       ['POST', /\/items\/PROJ-7\/refinement\/confirm$/, refinement('confirmed')],
     ])
-    const pinia = withOrganization(true)
+    const pinia = withOrganization(canOperateFactory)
+    const queryClient = new QueryClient()
     const wrapper = mount(RefinementPanel, {
       props: { slug: 'acme', projectKey: 'PROJ', item: item as never, dirty, busy: false },
-      global: { plugins: [pinia, VueQueryPlugin], stubs: { RouterLink: RouterLinkStub } },
+      global: {
+        plugins: [pinia, [VueQueryPlugin, { queryClient }]],
+        stubs: { RouterLink: RouterLinkStub },
+      },
     })
     await flushPromises()
-    return { wrapper, calls }
+    return { wrapper, calls, queryClient }
   }
 
   it('asks the agent questions and sends the answers back with a new refinement', async () => {
@@ -269,6 +285,35 @@ describe('RefinementPanel', () => {
   it('will not confirm over unsaved edits', async () => {
     const { wrapper } = await mountPanel(refinement('ready'), true)
     expect(wrapper.find('[data-testid="refinement-confirm"]').attributes('disabled')).toBeDefined()
+  })
+
+  it.each(['refining', 'needsInput', 'ready', 'failed', 'confirmed'])(
+    'hides %s refinement and makes no refinement requests for stakeholders',
+    async (status) => {
+      const { wrapper, calls } = await mountPanel(
+        refinement(status, { questions: ['Which platform?'], summary: 'Internal refinement' }),
+        false,
+        false,
+      )
+      expect(wrapper.text()).toBe('')
+      expect(wrapper.find('[data-testid="refinement-panel"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="refinement-start"]').exists()).toBe(false)
+      expect(calls).toHaveLength(0)
+    },
+  )
+
+  it('hides cached refinement when factory permission is revoked', async () => {
+    const { wrapper, calls, queryClient } = await mountPanel(refinement('ready'))
+    expect(wrapper.find('[data-testid="refinement-confirm"]').exists()).toBe(true)
+    const organizations = useOrganizationsStore()
+    organizations.organizations[0]!.canOperateFactory = false
+    await flushPromises()
+    const previousCalls = calls.length
+    await queryClient.invalidateQueries()
+    await flushPromises()
+
+    expect(wrapper.text()).toBe('')
+    expect(calls).toHaveLength(previousCalls)
   })
 
   it('offers Refine ticket on an item that was never refined', async () => {

@@ -47,6 +47,7 @@ const emit = defineEmits<{ 'update:open': [open: boolean]; created: [item: WorkI
 const client = useQueryClient()
 const toast = useToast()
 const organizations = useOrganizationsStore()
+const canOperate = computed(() => organizations.current?.canOperateFactory === true)
 
 // The standalone kinds: Features and Tasks are made beneath their parent.
 const types: { value: WorkItemType; label: string }[] = [
@@ -69,7 +70,7 @@ const pending = new Set<string>()
 const settings = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'refinement-settings']),
   queryFn: () => getRefinementSettings(props.slug, props.projectKey),
-  enabled: computed(() => props.open),
+  enabled: computed(() => props.open && canOperate.value),
 })
 const templates = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'item-templates']),
@@ -94,9 +95,7 @@ watch([type, () => templates.isSuccess.value], () => {
       null,
   )
 })
-const canRefine = computed(
-  () => organizations.current?.canOperateFactory === true && settings.data.value?.enabled === true,
-)
+const canRefine = computed(() => canOperate.value && settings.data.value?.enabled === true)
 const hasDescription = computed(() => description.value.trim().length > 0)
 const busy = computed(() => submitting.value !== null || editor.value?.uploading === true)
 
@@ -127,6 +126,7 @@ async function upload(file: File) {
 
 async function submit(refine: boolean) {
   if (busy.value) return
+  if (refine && !canRefine.value) return
   if (refine ? !hasDescription.value : !title.value.trim()) return
   submitting.value = refine ? 'refine' : 'create'
   error.value = null

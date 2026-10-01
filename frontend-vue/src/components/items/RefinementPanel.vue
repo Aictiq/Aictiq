@@ -39,10 +39,12 @@ const canOperate = computed(() => organizations.current?.canOperateFactory === t
 const refinement = useQuery({
   queryKey: computed(() => [props.slug, props.item.key, 'refinement']),
   queryFn: () => getRefinement(props.slug, props.item.key),
+  enabled: canOperate,
 })
 const settings = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'refinement-settings']),
   queryFn: () => getRefinementSettings(props.slug, props.projectKey),
+  enabled: canOperate,
 })
 const current = computed(() => refinement.data.value ?? null)
 const status = computed(() => current.value?.status ?? null)
@@ -72,7 +74,7 @@ async function refresh() {
 }
 
 async function refine(body: RefineBody = {}) {
-  if (working.value) return
+  if (!canRefine.value || working.value) return
   working.value = 'refine'
   try {
     await refineItem(props.slug, props.item.key, body)
@@ -98,7 +100,7 @@ function sendAnswers() {
 
 async function confirm() {
   const refined = current.value
-  if (!refined || working.value) return
+  if (!canOperate.value || !refined || working.value) return
   working.value = 'confirm'
   try {
     // The move is the person's own transition, so the workflow's rules apply to it.
@@ -122,7 +124,7 @@ async function confirm() {
 
 <template>
   <section
-    v-if="active && current"
+    v-if="canOperate && active && current"
     class="border-border bg-muted/30 mt-5 rounded-md border p-4"
     data-testid="refinement-panel"
     :data-status="current.status"
