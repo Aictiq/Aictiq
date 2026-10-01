@@ -39,6 +39,25 @@ surfacing later as a failed upload. `/health/ready` includes a `storage` check t
 the bucket - it turns **Unhealthy** if credentials, addressing style or the bucket itself
 are wrong, which keeps traffic away from a node that cannot accept an upload.
 
+### Document attachments
+
+Items, comments, replies and wiki pages accept Word (`.doc`, `.docx`), Excel (`.xls`,
+`.xlsx`), PowerPoint (`.ppt`, `.pptx`), OpenDocument (`.odt`, `.ods`, `.odp`), RTF, CSV and
+TSV files alongside the existing images, PDF, text, Markdown and ZIP uploads. Pick a file
+with the editor's attachment button, or drag it into the editor.
+
+The API enforces `Attachments:MaxBytes` (25 MiB by default) and
+`Attachments:AllowedContentTypes`. When a client omits the MIME type or sends
+`application/octet-stream`, the API resolves only the listed document extensions, then
+checks the resolved type against the configured allowlist. This does not enable arbitrary
+binary uploads or override an explicitly disallowed MIME type.
+
+Documents retain their original bytes and filename. Downloads require access to the
+project and attachment owner, use `Content-Disposition: attachment` and `nosniff`, and are
+never rendered inline. Document contents are not sanitized or scanned for malware; use
+malware scanning in the storage event path for deployments that accept untrusted files.
+Macro-enabled Office MIME types (`.docm`, `.xlsm`, etc.) are not in the default allowlist.
+
 ### `PublicEndpoint`: the one setting people get wrong
 
 Attachments on items and comments pass through the API - images are re-encoded to WebP on

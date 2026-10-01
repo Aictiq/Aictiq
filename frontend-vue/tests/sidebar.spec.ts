@@ -86,3 +86,20 @@ describe('AppSidebar project settings link', () => {
     expect(hrefs(wrapper)).toContain('/o/acme/settings/general')
   })
 })
+
+describe('AppSidebar agents link', () => {
+  it('opens agent management for the selected organization and follows organization changes', async () => {
+    const wrapper = await render('member')
+    const agentsLink = () => wrapper.findAll('a').find((link) => link.text() === 'Agents')!
+
+    expect(agentsLink().attributes('href')).toBe('/o/acme/settings/agents')
+
+    useOrganizationsStore().select('globex')
+    await flushPromises()
+    expect(agentsLink().attributes('href')).toBe('/o/globex/settings/agents')
+
+    useOrganizationsStore().select(null)
+    await flushPromises()
+    expect(agentsLink().attributes('href')).toBe('/agents')
+  })
+})

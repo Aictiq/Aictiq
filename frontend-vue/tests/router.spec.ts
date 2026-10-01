@@ -206,6 +206,7 @@ describe('router', () => {
 
   it('marks only the screens that do not exist yet as unbuilt', () => {
     expect(router.resolve('/items').meta.soon).toBe(true)
+    expect(router.resolve('/agents').meta.soon).toBeUndefined()
     expect(router.resolve('/o/acme/settings/billing').meta.soon).toBeUndefined()
     expect(router.resolve('/o/acme/p/ACME/settings/templates').meta.soon).toBeUndefined()
     expect(router.resolve('/o/acme/p/ACME/settings/labels').meta.soon).toBeUndefined()
@@ -230,6 +231,9 @@ describe('router', () => {
     await router.push('/members')
     expect(router.currentRoute.value.path).toBe('/o/acme/settings/members')
 
+    await router.push('/agents')
+    expect(router.currentRoute.value.path).toBe('/o/acme/settings/agents')
+
     await router.push('/projects/ACME/settings')
     expect(router.currentRoute.value.path).toBe('/o/acme/p/ACME/settings/general')
 
@@ -245,9 +249,10 @@ describe('router', () => {
     organizations.status = 'ready'
     organizations.select(null)
 
-    await router.push('/settings/organization')
-
-    expect(router.currentRoute.value.path).toBe('/')
+    for (const path of ['/settings/organization', '/agents']) {
+      await router.push(path)
+      expect(router.currentRoute.value.path).toBe('/')
+    }
   })
 
   it('moves the shell to the organization a pasted settings link names', async () => {

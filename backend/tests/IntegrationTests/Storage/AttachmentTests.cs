@@ -15,10 +15,119 @@ using Aictiq.SharedKernel.Storage;
 
 namespace Aictiq.IntegrationTests.Storage;
 
-/// <summary>HTTP coverage for the metadata guard around direct-to-Garage attachment uploads.</summary>
+/// <summary>HTTP coverage for API attachment uploads, ownership, and authenticated downloads.</summary>
 [Trait("Category", "Storage")]
 public sealed class AttachmentTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
+    [Theory]
+    [InlineData("doc", "application/msword")]
+    [InlineData("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")]
+    [InlineData("xls", "application/vnd.ms-excel")]
+    [InlineData("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [InlineData("ppt", "application/vnd.ms-powerpoint")]
+    [InlineData("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation")]
+    [InlineData("odt", "application/vnd.oasis.opendocument.text")]
+    [InlineData("ods", "application/vnd.oasis.opendocument.spreadsheet")]
+    [InlineData("odp", "application/vnd.oasis.opendocument.presentation")]
+    [InlineData("rtf", "application/rtf")]
+    [InlineData("rtf", "text/rtf")]
+    [InlineData("csv", "text/csv")]
+    [InlineData("tsv", "text/tab-separated-values")]
+    public async Task documents_round_trip_verbatim_as_private_downloads(string extension, string contentType)
+    {
+        byte[] payload = [0, 1, 2, 127, 128, 255];
+        var name = $"report.{extension}";
+        var attachment = await UploadOkAsync(name, contentType, payload);
+        var item = await CreateAsync(WorkItemType.Bug, "Document owner");
+        (await Client.PostAsJsonAsync(AttachmentPath(attachment.Id, "commit"),
+            new CommitAttachmentRequest(item.Id, null), ApiTestContext.Json, CancellationToken)).EnsureSuccessStatusCode();
+
+        Assert.Equal(name, attachment.FileName);
+        Assert.Equal(contentType, attachment.ContentType);
+        Assert.Equal(payload.LongLength, attachment.SizeBytes);
+        var listed = await Client.GetFromJsonAsync<List<AttachmentView>>(
+            ItemPath(item.Key, "attachments"), ApiTestContext.Json, CancellationToken);
+        Assert.Equal(attachment.Id, Assert.Single(listed!).Id);
+
+        var download = await Client.GetAsync(AttachmentPath(attachment.Id, "download"), CancellationToken);
+        download.EnsureSuccessStatusCode();
+        Assert.Equal(contentType, download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal(name, download.Content.Headers.ContentDisposition?.FileNameStar);
+        Assert.Equal("nosniff", Assert.Single(download.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Contains("private", download.Headers.CacheControl?.ToString());
+        Assert.Equal(payload, await download.Content.ReadAsByteArrayAsync(CancellationToken));
+
+        using var anonymous = Context.Anonymous();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await anonymous.GetAsync(AttachmentPath(attachment.Id, "download"), CancellationToken)).StatusCode);
+        var outsider = await Context.RegisterAsync($"outsider-{Guid.NewGuid():N}@test.local");
+        using var otherUser = Context.ClientFor(outsider);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await otherUser.GetAsync(AttachmentPath(attachment.Id, "download"), CancellationToken)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("DOC", "application/msword")]
+    [InlineData("DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")]
+    [InlineData("XLS", "application/vnd.ms-excel")]
+    [InlineData("XLSX", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [InlineData("PPT", "application/vnd.ms-powerpoint")]
+    [InlineData("PPTX", "application/vnd.openxmlformats-officedocument.presentationml.presentation")]
+    [InlineData("ODT", "application/vnd.oasis.opendocument.text")]
+    [InlineData("ODS", "application/vnd.oasis.opendocument.spreadsheet")]
+    [InlineData("ODP", "application/vnd.oasis.opendocument.presentation")]
+    [InlineData("RTF", "application/rtf")]
+    [InlineData("CSV", "text/csv")]
+    [InlineData("TSV", "text/tab-separated-values")]
+    public async Task generic_document_uploads_use_the_extension_without_changing_bytes(string extension, string expectedType)
+    {
+        foreach (var suppliedType in new string?[] { "application/octet-stream", null })
+        {
+            var response = await UploadAsync($"report.{extension}", suppliedType, "document bytes"u8.ToArray());
+            response.EnsureSuccessStatusCode();
+            var attachment = (await response.Content.ReadFromJsonAsync<AttachmentView>(ApiTestContext.Json, CancellationToken))!;
+            Assert.Equal(expectedType, attachment.ContentType);
+            Assert.Equal($"report.{extension}", attachment.FileName);
+            var download = await Client.GetAsync(AttachmentPath(attachment.Id, "download"), CancellationToken);
+            Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
+            Assert.Equal("document bytes", await download.Content.ReadAsStringAsync(CancellationToken));
+        }
+    }
+
+    [Theory]
+    [InlineData("report.html", "application/octet-stream")]
+    [InlineData("report.exe", "application/octet-stream")]
+    [InlineData("report.svg", null)]
+    [InlineData("report.docm", "application/octet-stream")]
+    [InlineData("report.xlsm", "application/vnd.ms-excel.sheet.macroenabled.12")]
+    [InlineData("report.docx", "text/html")]
+    [InlineData("report.xlsx", "application/x-msdownload")]
+    [InlineData("report.docx.exe", "application/octet-stream")]
+    [InlineData("../report.docx", "application/octet-stream")]
+    [InlineData("report", null)]
+    public async Task document_fallback_does_not_allow_arbitrary_files_or_override_explicit_types(string name, string? type)
+    {
+        var response = await UploadAsync(name, type, "untrusted bytes"u8.ToArray());
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0L, await CountAttachmentsAsync());
+    }
+
+    [Fact]
+    public async Task document_uploads_still_obey_the_configured_size_and_type_limits()
+    {
+        var policy = Context.Factory.Services.GetRequiredService<IOptions<AttachmentsOptions>>().Value;
+        policy.MaxBytes = 4;
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await UploadAsync("large.docx", "application/octet-stream", "too big"u8.ToArray())).StatusCode);
+        policy.AllowedContentTypes = ["text/plain"];
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await UploadAsync("report.docx", "application/octet-stream", "doc"u8.ToArray())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await UploadAsync("report.doc", "application/msword", "doc"u8.ToArray())).StatusCode);
+        Assert.Equal(0L, await CountAttachmentsAsync());
+    }
+
     [Fact]
     public async Task upload_rejects_unapproved_type_empty_file_and_a_fake_image_before_creating_metadata()
     {
@@ -159,11 +268,11 @@ public sealed class AttachmentTests(PostgresFixture postgres, GarageFixture gara
     private string UploadPath => $"/api/v1/orgs/work-items/projects/{Project.Key}/attachments";
     private static string AttachmentPath(Guid id, string suffix) => $"/api/v1/orgs/work-items/attachments/{id}/{suffix}";
 
-    private async Task<HttpResponseMessage> UploadAsync(string name, string type, byte[] payload)
+    private async Task<HttpResponseMessage> UploadAsync(string name, string? type, byte[] payload)
     {
         using var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(payload);
-        file.Headers.ContentType = new MediaTypeHeaderValue(type);
+        if (type is not null) file.Headers.ContentType = new MediaTypeHeaderValue(type);
         form.Add(file, "file", name);
         return await Client.PostAsync(UploadPath, form, CancellationToken);
     }
