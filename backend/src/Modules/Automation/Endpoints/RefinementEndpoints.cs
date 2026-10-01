@@ -61,8 +61,8 @@ public static class RefinementEndpoints
         ## Read before you write
 
         - Read the item, its comments and every attachment. Screenshots often answer what the text leaves out: which screen, which platform, what looks wrong.
-        - Look at the code that the ticket touches, so the requirements match how the product works today and name what the change could break.
         - Use the project's item template for this type when it has one.
+        - Check the code only where the ticket's wording depends on it - what the thing is called today, whether the behaviour already exists, what the change could break. Search for that one answer and move on; a refined ticket is worth a few minutes, and the implement run does the real reading.
 
         ## What to write
 
