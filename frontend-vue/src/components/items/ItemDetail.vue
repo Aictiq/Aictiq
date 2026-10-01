@@ -873,7 +873,7 @@ function logged(updated: TimeTrackingItem) {
         :dirty="isDirty"
         :busy="liveRun !== null"
       />
-      <div class="mt-5">
+      <div class="mt-3">
         <label class="font-label">Description</label
         ><MarkdownEditor
           v-model="description"
