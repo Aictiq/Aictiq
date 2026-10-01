@@ -264,7 +264,7 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
           </header>
           <template v-for="row in flattenBacklog(section.items, collapsed)" :key="row.item.id">
             <div
-              class="hover:bg-accent/60 group grid cursor-grab grid-cols-[minmax(0,1fr)_4.5rem_5rem] items-center gap-2 border-b px-3 py-1.5 text-sm"
+              class="hover:bg-accent/60 group grid cursor-pointer grid-cols-[minmax(0,1fr)_4.5rem_5rem] items-center gap-2 border-b px-3 py-1.5 text-sm"
               :class="selected.has(row.item.key) && 'bg-accent'" :data-backlog-row="row.item.key" draggable="true" tabindex="0"
               @click="toggleSelection(row.item.key, $event)" @keydown="keyboardReorder($event, row.item, section)"
               @dragstart="startDrag(row.item)" @dragover.prevent @drop.prevent="dropOn(row.item, section, $event.altKey)"

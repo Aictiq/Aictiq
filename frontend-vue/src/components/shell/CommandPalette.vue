@@ -131,7 +131,7 @@ function indexOf(command: Command) {
 <template>
   <div
     v-if="store.open"
-    class="fixed inset-0 z-60 flex justify-center bg-black/60 pt-[13vh] backdrop-blur-[3px]"
+    class="fixed inset-0 z-60 flex cursor-pointer justify-center bg-black/60 pt-[13vh] backdrop-blur-[3px]"
     @click="store.hide()"
   >
     <div
@@ -139,7 +139,7 @@ function indexOf(command: Command) {
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
-      class="bg-popover border-border h-fit w-[560px] max-w-[92vw] overflow-hidden rounded-lg border shadow-2xl"
+      class="bg-popover border-border h-fit w-[560px] max-w-[92vw] cursor-auto overflow-hidden rounded-lg border shadow-2xl"
       @click.stop
     >
       <div class="border-border flex items-center gap-2 border-b px-3.5 py-3">
