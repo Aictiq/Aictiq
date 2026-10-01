@@ -245,10 +245,10 @@ async function confirm() {
       </div>
     </div>
   </section>
-  <div v-else-if="canRefine && !refinement.isPending.value && !props.busy" class="mt-3">
+  <div v-else-if="canRefine && !refinement.isPending.value && !props.busy" class="mt-2 flex">
     <Button
       size="sm"
-      variant="ghost"
+      variant="default"
       data-testid="refinement-start"
       :disabled="working !== null"
       @click="refine()"
