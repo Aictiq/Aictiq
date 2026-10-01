@@ -47,7 +47,7 @@ public sealed class WorkItem : TenantEntity, IAudited
     public uint Version { get; private set; }
     public string Key => $"{ProjectKey}-{Number}";
 
-    public void Transition(Guid toStateId, WorkflowStateCategory category, string actorId, DateTimeOffset now)
+    public void Transition(Guid toStateId, WorkflowStateCategory category, string actorId, DateTimeOffset now, TransitionRun? run = null)
     {
         var fromStateId = StateId;
         StateId = toStateId;
@@ -61,7 +61,11 @@ public sealed class WorkItem : TenantEntity, IAudited
             ClaimHeartbeatAt = null;
         }
         UpdatedAt = now;
-        Raise(new WorkItemTransitioned(OrganizationId, ProjectId, Id, Key, fromStateId, toStateId, actorId, SprintId) { OccurredAt = now });
+        Raise(new WorkItemTransitioned(OrganizationId, ProjectId, Id, Key, fromStateId, toStateId, actorId, SprintId)
+        {
+            OccurredAt = now, ItemTitle = Title, ItemExcerpt = Comment.Excerpt(DescriptionMarkdown),
+            ItemType = Type.ToString(), ItemPriority = Priority.ToString(), Run = run
+        });
         Raise(new ItemChanged(OrganizationId, ProjectId, Id, Key, actorId, ["stateId"]) { OccurredAt = now });
     }
 

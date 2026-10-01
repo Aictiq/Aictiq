@@ -1,0 +1,17 @@
+Watched item update
+
+{{ itemKey }} · {{ itemTitle }}
+{{ actorName }} moved this item from {{ fromState }} to {{ toState }}.
+{% if itemType != blank %}Type: {{ itemType }}
+{% endif %}{% if itemPriority != blank %}Priority: {{ itemPriority }}
+{% endif %}{% if excerpt != blank %}
+About this item:
+{{ excerpt }}
+{% endif %}{% if runId != blank %}
+Factory run: {{ runOutcome }}
+Run: {{ runId }}
+{% if runSummary != blank %}{{ runSummary }}
+{% endif %}{% if pullRequestUrl != blank %}Review pull request: {{ pullRequestUrl }}
+{% endif %}{% if runUrl != blank %}View run details: {{ runUrl }}
+{% endif %}{% endif %}
+Open {{ itemKey }} in {{ productName }}: {{ notificationUrl }}

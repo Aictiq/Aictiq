@@ -80,6 +80,33 @@ public sealed class EmailDeliveryTests(PostgresFixture postgres, MailpitFixture 
     }
 
     [Fact]
+    public async Task transition_details_survive_delivery_to_a_real_smtp_server()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string recipient = "transition@test.local";
+        const string itemUrl = "https://aictiq.test/o/acme/p/WEB/board?item=WEB-12";
+        const string pullRequestUrl = "https://github.com/acme/web/pull/42";
+        await _host.EnqueueAsync(new SendEmailRequested(recipient, "transition", new Dictionary<string, string>
+        {
+            ["organizationName"] = "Acme", ["actorName"] = "Builder",
+            ["itemKey"] = "WEB-12", ["itemTitle"] = "Fix <b>delivery</b>",
+            ["fromState"] = "Active", ["toState"] = "In Review",
+            ["notificationUrl"] = itemUrl, ["runId"] = Guid.NewGuid().ToString(),
+            ["runOutcome"] = "succeeded", ["runSummary"] = "All checks passed.",
+            ["pullRequestUrl"] = pullRequestUrl
+        }), ct);
+        Assert.Equal(1, await _host.Outbox.ProcessPendingAsync(ct));
+        Assert.Equal(1, await _host.Delivery.RunOnceAsync(ct));
+
+        var delivered = await mailpit.WaitForMessageAsync(recipient, ct);
+        Assert.Contains("WEB-12 moved to In Review", delivered.Subject);
+        Assert.Contains("Fix &lt;b&gt;delivery&lt;/b&gt;", delivered.Html);
+        Assert.Contains("All checks passed.", delivered.Text);
+        Assert.Contains(itemUrl, delivered.Html);
+        Assert.Contains(pullRequestUrl, delivered.Text);
+    }
+
+    [Fact]
     public async Task the_queued_row_is_keyed_by_the_event_so_a_replay_sends_once()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -5,7 +5,19 @@ namespace Aictiq.Modules.WorkItems.Contracts;
 /// <summary>Durable transition feed for analytics, notifications, and integrations.</summary>
 public sealed record WorkItemTransitioned(
     Guid OrganizationId, Guid ProjectId, Guid ItemId, string Key,
-    Guid FromStateId, Guid ToStateId, string ActorId, Guid? SprintId = null) : DomainEvent, IIntegrationEvent;
+    Guid FromStateId, Guid ToStateId, string ActorId, Guid? SprintId = null) : DomainEvent, IIntegrationEvent
+{
+    // Optional snapshots keep older outbox payloads readable and preserve the item as it
+    // was when it moved, even if it is edited before Workers delivers the notification.
+    public string? ItemTitle { get; init; }
+    public string? ItemExcerpt { get; init; }
+    public string? ItemType { get; init; }
+    public string? ItemPriority { get; init; }
+    public TransitionRun? Run { get; init; }
+}
+
+/// <summary>The public result of the exact run that moved the item. No prompts or logs.</summary>
+public sealed record TransitionRun(Guid Id, string Outcome, string? Summary, string? PullRequestUrl);
 
 /// <summary>Post-commit item update pushed to project subscribers.</summary>
 /// <remarks>Carries the organization because it is an integration event: webhook fan-out

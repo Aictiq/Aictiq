@@ -58,7 +58,8 @@ public sealed class RunFinishedHandler(
             var previousStateId = item.StateId;
             if (allowed)
             {
-                item.Transition(target!.Id, target.Category, actorId, now);
+                item.Transition(target!.Id, target.Category, actorId, now,
+                    new Contracts.TransitionRun(@event.RunId, @event.Outcome, @event.Summary, @event.PullRequestUrl));
                 // Workers have no request user, so stage the normal state history here.
                 db.ItemHistory.Add(new ItemHistory
                 {

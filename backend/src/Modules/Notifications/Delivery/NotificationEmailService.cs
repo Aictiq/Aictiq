@@ -1,5 +1,6 @@
 using Aictiq.Modules.Notifications.Domain;
 using Aictiq.Modules.Notifications.Templates;
+using Aictiq.Modules.WorkItems.Contracts;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Email;
 using Microsoft.EntityFrameworkCore;
@@ -12,17 +13,22 @@ namespace Aictiq.Modules.Notifications.Delivery;
 /// protection as the integration-event email path.</summary>
 public sealed class NotificationEmailService(
     NotificationsDbContext db, IUserDirectory users, IOrganizationLookup organizations, INotificationPresence presence,
+    IProjectWorkflowAccess workflows, IProjectAccess access,
     EmailTemplateRenderer renderer, NotificationUnsubscribeTokens unsubscribe,
     IOptions<NotificationEmailOptions> options, IOptions<EmailOptions> emailOptions, TimeProvider clock)
 {
-    public async Task QueueImmediateAsync(IReadOnlyList<Notification> notifications, CancellationToken ct)
+    public async Task QueueImmediateAsync(IReadOnlyList<Notification> notifications, CancellationToken ct,
+        WorkItemTransitioned? transition = null)
     {
         if (!options.Value.EmailEnabled || notifications.Count == 0) return;
         var ids = notifications.Select(n => n.UserId).Distinct().ToArray();
         var profiles = await users.GetDeliveryProfilesAsync(ids, ct);
+        var actor = transition is null ? null : (await users.GetAsync([transition.ActorId], ct)).GetValueOrDefault(transition.ActorId);
+        var states = transition is null ? new Dictionary<Guid, string>() :
+            await workflows.GetStateNamesAsync(transition.ProjectId, [transition.FromStateId, transition.ToStateId], ct);
         var preferences = await db.Preferences.AsNoTracking().Where(p => ids.Contains(p.UserId)).ToListAsync(ct);
         var modes = preferences.ToDictionary(p => (p.UserId, p.Kind), p => p.EmailMode);
-        var organizationSlugs = new Dictionary<Guid, string?>();
+        var organizationDetails = new Dictionary<Guid, OrganizationRef?>();
         foreach (var notification in notifications)
         {
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent ||
@@ -31,17 +37,42 @@ public sealed class NotificationEmailService(
             if (modes.TryGetValue((notification.UserId, notification.Kind), out var mode) &&
                 mode != EmailNotificationMode.Immediate)
                 continue;
-            if (!organizationSlugs.TryGetValue(notification.OrganizationId, out var organizationSlug))
+            if (transition is not null && await access.GetProjectRoleAsync(notification.UserId, transition.ProjectId, ct) is null)
+                continue;
+            if (!organizationDetails.TryGetValue(notification.OrganizationId, out var organization))
             {
-                organizationSlug = (await organizations.FindByIdAsync(notification.OrganizationId, ct))?.Slug;
-                organizationSlugs[notification.OrganizationId] = organizationSlug;
+                organization = await organizations.FindByIdAsync(notification.OrganizationId, ct);
+                organizationDetails[notification.OrganizationId] = organization;
             }
             var variables = Variables(notification, recipient, unsubscribe.Create(notification.UserId, notification.Kind),
-                emailOptions.Value.BaseUrl, organizationSlug);
-            var rendered = renderer.Render("notification", variables);
+                emailOptions.Value.BaseUrl, organization?.Slug);
+            var template = "notification";
+            if (transition?.ItemTitle is not null)
+            {
+                template = "transition";
+                variables["organizationName"] = organization?.Name ?? "";
+                variables["actorName"] = actor?.DisplayName ?? "Someone";
+                variables["itemTitle"] = transition.ItemTitle;
+                variables["excerpt"] = transition.ItemExcerpt ?? "";
+                variables["itemType"] = transition.ItemType ?? "";
+                variables["itemPriority"] = transition.ItemPriority ?? "";
+                variables["fromState"] = states.GetValueOrDefault(transition.FromStateId) ?? "Previous state";
+                variables["toState"] = states.GetValueOrDefault(transition.ToStateId) ?? "New state";
+                if (transition.Run is { } run)
+                {
+                    variables["runId"] = run.Id.ToString();
+                    variables["runOutcome"] = run.Outcome.Replace('_', ' ');
+                    variables["runSummary"] = Excerpt(run.Summary);
+                    variables["pullRequestUrl"] = SafeWebUrl(run.PullRequestUrl);
+                    if (organization is not null && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl)
+                        && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
+                        variables["runUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/runs/{run.Id}";
+                }
+            }
+            var rendered = renderer.Render(template, variables);
             db.EmailOutbox.Add(new EmailOutboxMessage
             {
-                Id = notification.Id, ToAddress = recipient.Email, Template = "notification",
+                Id = notification.Id, ToAddress = recipient.Email, Template = template,
                 Subject = rendered.Subject, BodyHtml = rendered.Html, BodyText = rendered.Text,
                 SendAfter = clock.GetUtcNow(), CreatedAt = clock.GetUtcNow()
             });
@@ -49,6 +80,12 @@ public sealed class NotificationEmailService(
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) { db.ChangeTracker.Clear(); } // notification replay already queued it
     }
+
+    private static string Excerpt(string? text) =>
+        text is null ? "" : text.Length <= 600 ? text : text[..600].TrimEnd() + "…";
+
+    private static string SafeWebUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http" ? uri.AbsoluteUri : "";
 
     /// <summary>
     /// Mail for someone a comment was addressed to: tagged in it, or answered in their own

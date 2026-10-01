@@ -40,7 +40,7 @@ public sealed class TransitionNotificationHandler(
         try
         {
             await db.SaveChangesAsync(cancellationToken);
-            await email.QueueImmediateAsync(created, cancellationToken);
+            await email.QueueImmediateAsync(created, cancellationToken, e);
             foreach (var recipient in recipients.Where(id => !muted.Contains(id)))
                 await realtime.PublishToUserAsync(recipient, "notification.new", new { eventId = e.EventId }, cancellationToken);
         }

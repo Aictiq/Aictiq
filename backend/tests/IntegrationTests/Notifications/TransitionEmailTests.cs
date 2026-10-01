@@ -12,6 +12,7 @@ using Aictiq.Modules.WorkItems.Contracts;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel.Authorization;
+using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,8 +23,12 @@ namespace Aictiq.IntegrationTests.Notifications;
 [Trait("Category", "Notifications")]
 public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture garage)
 {
-    [Fact]
-    public async Task a_state_change_email_opens_the_project_board_with_the_watched_item()
+    [Theory]
+    [InlineData(RunOutcomes.Succeeded)]
+    [InlineData(RunOutcomes.Failed)]
+    [InlineData(RunOutcomes.Cancelled)]
+    [InlineData(RunOutcomes.TimedOut)]
+    public async Task state_change_emails_include_item_and_causal_run_details(string outcome)
     {
         var ct = TestContext.Current.CancellationToken;
         await using var context = await ApiTestContext.CreateAsync(postgres, garage, "transition_email",
@@ -42,7 +47,7 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
             new CreateProjectRequest("Web", "WEB", null, ProjectVisibility.Organization, null, null), ApiTestContext.Json, ct);
         projectResponse.EnsureSuccessStatusCode();
         var itemResponse = await context.Admin.PostAsJsonAsync("/api/v1/orgs/email-links/projects/WEB/items/",
-            new CreateWorkItemRequest(WorkItemType.Bug, "Follow the email", null, null, null, null, null, null, null, null, null, null, null, null),
+            new CreateWorkItemRequest(WorkItemType.Bug, "Follow <b>the email</b>", "Fix **delivery** today.", null, null, null, null, null, null, null, null, null, null, null),
             ApiTestContext.Json, ct);
         itemResponse.EnsureSuccessStatusCode();
         var item = (await itemResponse.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, ct))!;
@@ -77,6 +82,13 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
         Assert.Contains($"href=\"{expected}\"", queued.BodyHtml);
         Assert.Contains(expected, queued.BodyText);
         Assert.DoesNotContain($"/items/{item.Id}", queued.BodyText);
+        Assert.Equal("transition", queued.Template);
+        Assert.Contains($"{item.Key} moved to Active", queued.Subject);
+        Assert.Contains("Follow &lt;b&gt;the email&lt;/b&gt;", queued.BodyHtml);
+        Assert.Contains("Fix delivery today.", queued.BodyText);
+        Assert.Contains("Priority: None", queued.BodyText);
+        Assert.Contains("to Active", queued.BodyText);
+        Assert.DoesNotContain("Factory run", queued.BodyHtml);
 
         // An older notification with an id but no key cannot name a project: use the inbox.
         using var tenant = scope.ServiceProvider.GetRequiredService<AmbientCurrentTenant>().Use(organization.Id);
@@ -91,5 +103,49 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
         var fallback = await db.EmailOutbox.SingleAsync(m => m.Id == legacy.Id, ct);
         Assert.Contains("href=\"https://aictiq.test/inbox\"", fallback.BodyHtml);
         Assert.Contains("https://aictiq.test/inbox", fallback.BodyText);
+
+        // WorkItems applies the run result, then Notifications reads its durable transition.
+        var resolved = workflows![0].States.Single(s => s.Name == "Resolved");
+        var runId = Guid.NewGuid();
+        var finished = new RunFinished(organization.Id, e.ProjectId, item.Id, item.Key, runId, actor.User.Id,
+            outcome, resolved.Id, resolved.Id, "Shipped <script>the fix</script>.",
+            "https://github.com/acme/web/pull/42", "private operator failure reason");
+        await using (var runScope = context.Factory.Services.CreateAsyncScope())
+            await ActivatorUtilities.CreateInstance<Aictiq.Modules.WorkItems.Events.RunFinishedHandler>(runScope.ServiceProvider)
+                .HandleAsync(finished, ct);
+        await using var runCommand = new NpgsqlCommand("SELECT payload::text FROM shared.outbox_messages WHERE type LIKE '%WorkItemTransitioned%' AND payload::text LIKE @run", connection);
+        runCommand.Parameters.AddWithValue("run", $"%{runId}%");
+        var runEvent = JsonSerializer.Deserialize<WorkItemTransitioned>((string)(await runCommand.ExecuteScalarAsync(ct))!)!;
+        await ActivatorUtilities.CreateInstance<TransitionNotificationHandler>(scope.ServiceProvider).HandleAsync(runEvent, ct);
+        var runMail = await db.EmailOutbox.SingleAsync(m => m.Id != queued.Id && m.Id != legacy.Id, ct);
+        Assert.Contains(outcome.Replace('_', ' '), runMail.BodyText);
+        Assert.Contains(runId.ToString(), runMail.BodyText);
+        Assert.Contains("Shipped &lt;script&gt;the fix&lt;/script&gt;.", runMail.BodyHtml);
+        Assert.DoesNotContain("private operator failure reason", runMail.BodyText);
+        Assert.Contains("https://github.com/acme/web/pull/42", runMail.BodyHtml);
+        Assert.Contains($"https://aictiq.test/o/email-links/runs/{runId}", runMail.BodyText);
+
+        // Replaying the outbox event never creates another email.
+        await using (var replayScope = context.Factory.Services.CreateAsyncScope())
+            await ActivatorUtilities.CreateInstance<TransitionNotificationHandler>(replayScope.ServiceProvider).HandleAsync(runEvent, ct);
+        Assert.Equal(3, await db.EmailOutbox.CountAsync(ct));
+
+        // A stakeholder can see the public result but cannot follow an operator-only run link.
+        var stakeholder = new Notification
+        {
+            OrganizationId = organization.Id, UserId = actor.User.Id, EventId = Guid.NewGuid(),
+            Kind = NotificationKind.Transitioned, ProjectId = e.ProjectId, ItemId = item.Id, ItemKey = item.Key,
+            Message = "A watched item moved to a new workflow state.", CreatedAt = DateTimeOffset.UtcNow
+        };
+        await scope.ServiceProvider.GetRequiredService<NotificationEmailService>().QueueImmediateAsync([stakeholder], ct, runEvent);
+        var stakeholderMail = await db.EmailOutbox.SingleAsync(m => m.Id == stakeholder.Id, ct);
+        Assert.Contains(runId.ToString(), stakeholderMail.BodyText);
+        Assert.DoesNotContain("/runs/", stakeholderMail.BodyText);
+
+        // A legacy durable event still produces the original email, without new snapshots.
+        await ActivatorUtilities.CreateInstance<TransitionNotificationHandler>(scope.ServiceProvider)
+            .HandleAsync(new WorkItemTransitioned(organization.Id, e.ProjectId, item.Id, item.Key,
+                active.Id, resolved.Id, actor.User.Id), ct);
+        Assert.Equal(2, await db.EmailOutbox.CountAsync(m => m.Template == "notification", ct));
     }
 }
