@@ -1,6 +1,9 @@
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
+
+import * as teamsApi from '@/api/teams'
 
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
@@ -33,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('single-flight loaders', () => {
@@ -126,5 +130,46 @@ describe('teams across organizations', () => {
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/orgs/dana-co/projects/WEB/teams'))).toBe(true)
     expect(teams.currentId).toBe('dana-default')
+  })
+  it('loads a new project immediately and ignores the old project response arriving later', async () => {
+    stubApi()
+    useOrganizationsStore().select('acme')
+    const projects = useProjectsStore()
+    projects.select('WEB')
+    const teams = useTeamsStore()
+    await flushPromises()
+
+    let finishOld!: (value: teamsApi.Team[]) => void
+    let finishNew!: (value: teamsApi.Team[]) => void
+    const api = vi
+      .spyOn(teamsApi, 'listTeams')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishNew = resolve
+          }),
+      )
+    const oldRequest = teams.reload()
+    projects.select('NEW')
+    await nextTick()
+    const newRequest = teams.load()
+    expect(api).toHaveBeenCalledTimes(2)
+    expect(api).toHaveBeenLastCalledWith('acme', 'NEW')
+
+    const newTeam = { id: 'new-default', name: 'New default', isDefault: true } as teamsApi.Team
+    finishNew([newTeam])
+    await newRequest
+    expect(teams.currentId).toBe('new-default')
+    finishOld([{ id: 'old-default', name: 'Old default', isDefault: true } as teamsApi.Team])
+    await oldRequest
+    expect(teams.teams).toEqual([newTeam])
+    expect(teams.currentId).toBe('new-default')
+    expect(storage.get('aictiq.team.acme.NEW')).toBe('new-default')
   })
 })

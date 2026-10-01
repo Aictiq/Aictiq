@@ -152,6 +152,17 @@ function select(id: string) {
 // ── Edit / save / cancel ────────────────────────────────────────────────────────────
 let draftTimer: ReturnType<typeof setTimeout> | undefined
 
+watch(
+  () => [props.slug, props.projectKey],
+  () => {
+    clearTimeout(draftTimer)
+    selectedId.value = props.pageId ?? ''
+    editing.value = false
+    conflict.value = false
+    recoveredDraft.value = null
+  },
+)
+
 watch([title, markdown, summary], () => {
   if (!editing.value || !selectedId.value) return
   clearTimeout(draftTimer)
