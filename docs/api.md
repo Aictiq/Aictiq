@@ -78,3 +78,15 @@ available for a documented migration window. Deprecated endpoints and fields are
 OpenAPI document and responses carry `Deprecation: true` plus a `Sunset` date and `Link` header
 to migration guidance where applicable. Clients should tolerate unknown response fields and enum
 values, and should surface deprecation notices during development rather than waiting for sunset.
+
+## Notification destinations
+
+`GET /api/v1/me/notifications` includes `organizationId` on each entry. Resolve this ID
+using the caller’s organizations from `GET /api/v1/orgs`, and combine its slug with the
+entry’s `itemKey` to link to `/o/{slug}/p/{projectKey}/items/{itemKey}`. Derive the project
+key from the item key’s prefix before the final hyphen. Use `/inbox` for entries without
+item context or when the organization is no longer accessible.
+
+Run-completion updates also include an optional `runId`. When the notification’s
+organization grants `canOperateFactory`, link to `/o/{slug}/factory/runs/{runId}`;
+otherwise open the related item. Older notifications have no run ID.

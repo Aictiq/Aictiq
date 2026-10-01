@@ -13,6 +13,7 @@ public sealed class Notification : TenantEntity
     public Guid? ProjectId { get; init; }
     public Guid? ItemId { get; init; }
     public string? ItemKey { get; init; }
+    public Guid? RunId { get; init; }
     public required string Message { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? ReadAt { get; set; }
