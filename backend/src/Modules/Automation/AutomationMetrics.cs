@@ -23,5 +23,9 @@ public static class AutomationMetrics
         "automation.runs.runner_lost", unit: "{run}",
         description: "Runs failed because their runner stopped answering; alert on this.");
 
+    public static readonly Counter<long> AutoContinued = Meter.CreateCounter<long>(
+        "automation.runs.auto_continued", unit: "{run}",
+        description: "Continue runs queued automatically after a transient failure.");
+
     public static KeyValuePair<string, object?> OutcomeTag(string outcome) => new("outcome", outcome);
 }

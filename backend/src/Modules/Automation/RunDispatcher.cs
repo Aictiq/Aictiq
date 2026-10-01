@@ -29,6 +29,9 @@ public enum DispatchOutcome
 
     /// <summary>A run was inserted for the item between the claim and this insert.</summary>
     RunInProgress,
+
+    /// <summary>The run cannot be continued; <see cref="DispatchResult.Message"/> says why.</summary>
+    NotContinuable,
 }
 
 public enum DispatchActorKind { User, Rule }
@@ -70,6 +73,9 @@ public sealed record DispatchResult(
         new(DispatchOutcome.ItemClaimed, ClaimedBy: claimedBy, Version: version);
 
     public static DispatchResult InProgress() => new(DispatchOutcome.RunInProgress);
+
+    public static DispatchResult NotContinuable(string message) =>
+        new(DispatchOutcome.NotContinuable, Message: message);
 }
 
 /// <summary>
@@ -235,6 +241,136 @@ public sealed class RunDispatcher(
         AutomationMetrics.Started.Add(1);
 
         return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>
+    /// Queues a run that resumes <paramref name="previous"/>'s harness session in the workspace
+    /// its runner kept, pinned to that runner. Everything a dispatch checks still applies - a
+    /// read-only organization, an inactive agent, a claimed item - and the continue run is a run
+    /// like any other for limits and billing. It copies what the failed run was told (playbook,
+    /// branch, prompt, time limit) rather than recomposing it: the session already holds the
+    /// original instructions, and the runner sends only a short "continue" message.
+    /// </summary>
+    /// <param name="automatic">Queued by the sweeper after a transient failure, not by a person.</param>
+    public async Task<DispatchResult> ContinueAsync(
+        Run previous, DispatchActor actor, bool automatic, CancellationToken ct)
+    {
+        var organizationId = tenant.OrganizationId!.Value;
+        if (await billing.IsReadOnlyAsync(organizationId, ct))
+        {
+            return DispatchResult.ReadOnly();
+        }
+
+        if (await ContinueRefusalAsync(previous, ct) is { } refusal)
+        {
+            return DispatchResult.NotContinuable(refusal);
+        }
+
+        var agent = await agents.FindAsync(previous.AgentUserId, ct);
+        if (agent is not { IsActive: true }
+            || !(await access.ListProjectMemberIdsAsync(previous.ProjectId, ct)).Contains(previous.AgentUserId, StringComparer.Ordinal))
+        {
+            return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
+        }
+
+        ItemRefinement? refinement = null;
+        if (previous.Kind == RunKind.Refine)
+        {
+            refinement = await db.Refinements.SingleOrDefaultAsync(
+                row => row.ItemId == previous.ItemId && row.LastRunId == previous.Id, ct);
+            if (refinement is null)
+            {
+                return DispatchResult.NotContinuable("The item's refinement has moved on since this run.");
+            }
+        }
+
+        var claim = previous.Kind == RunKind.Refine
+            ? await claims.ClaimInPlaceAsync(previous.ItemId, previous.AgentUserId, ct)
+            : await claims.ClaimForAsync(previous.ItemId, previous.AgentUserId, ct);
+        switch (claim.Outcome)
+        {
+            case WorkItemClaimOutcome.NotFound:
+                return DispatchResult.ItemNotFound();
+            case WorkItemClaimOutcome.Conflict:
+                return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
+        }
+
+        var now = clock.GetUtcNow();
+        var run = new Run
+        {
+            OrganizationId = organizationId,
+            ProjectId = previous.ProjectId,
+            ItemId = previous.ItemId,
+            ItemKey = previous.ItemKey,
+            PlaybookId = previous.PlaybookId,
+            Kind = previous.Kind,
+            AgentUserId = previous.AgentUserId,
+            // Only the runner that kept the workspace has the session.
+            RequestedRunnerId = previous.RunnerId,
+            RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
+            RuleId = actor.Kind == DispatchActorKind.Rule ? actor.RuleId : null,
+            Harness = previous.Harness,
+            PromptSnapshot = previous.PromptSnapshot,
+            PlaybookRevisionId = previous.PlaybookRevisionId,
+            BranchName = previous.BranchName,
+            WorkOnDefaultBranch = previous.WorkOnDefaultBranch,
+            MaxMinutes = previous.MaxMinutes,
+            QueuedAt = now,
+            ContinuesRunId = previous.Id,
+            AutoContinued = automatic,
+            AutoContinues = previous.AutoContinues + (automatic ? 1 : 0),
+        };
+        db.Runs.Add(run);
+        if (refinement is not null)
+        {
+            refinement.Status = RefinementStatus.Refining;
+            refinement.LastRunId = run.Id;
+            refinement.UpdatedAt = now;
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } unique)
+        {
+            db.ChangeTracker.Clear();
+            return unique.ConstraintName == "ux_runs_continues"
+                ? DispatchResult.NotContinuable("This run has already been continued.")
+                : DispatchResult.InProgress();
+        }
+
+        await realtime.PublishAsync(previous.ProjectId, "run.changed", new
+        {
+            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", agentId = run.AgentUserId,
+            kind = run.Kind == RunKind.Refine ? "refine" : "implement", continuesRunId = previous.Id,
+        }, ct);
+        AutomationMetrics.Started.Add(1);
+
+        return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>
+    /// Why <paramref name="run"/> cannot be continued, or null when it can: it must have ended
+    /// with a resumable session, and be the item's latest run - a newer run, a retry or an
+    /// earlier continue, has moved the item and the kept workspace on.
+    /// </summary>
+    public async Task<string?> ContinueRefusalAsync(Run run, CancellationToken ct)
+    {
+        if (run.Status is not (RunStatus.Failed or RunStatus.TimedOut))
+        {
+            return "Only a failed or timed-out run can be continued.";
+        }
+        if (!run.HasResumableSession)
+        {
+            return "This run has no harness session to resume. Start a fresh run instead.";
+        }
+        if (await db.Runs.AnyAsync(other => other.ItemId == run.ItemId && other.Id != run.Id
+                && (other.ContinuesRunId == run.Id || other.QueuedAt > run.QueuedAt), ct))
+        {
+            return "The item has a newer run; continue that one instead.";
+        }
+        return null;
     }
 
     /// <summary>

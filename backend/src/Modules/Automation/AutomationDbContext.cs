@@ -123,6 +123,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.OutcomeSummary).HasMaxLength(Run.MaxOutcomeSummaryLength);
             b.Property(x => x.PullRequestUrl).HasMaxLength(Run.MaxPullRequestUrlLength);
             b.Property(x => x.FailureReason).HasMaxLength(Run.MaxFailureReasonLength);
+            b.Property(x => x.SessionId).HasMaxLength(Run.MaxSessionIdLength);
             b.Property(x => x.CostUsd).HasPrecision(12, 2);
             b.Property(x => x.Status).HasConversion<short>();
             b.Property(x => x.Kind).HasConversion<short>();
@@ -136,6 +137,12 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             // runs ever" into "no two live runs": a finished run frees the item for the next.
             b.HasIndex(x => x.ItemId, "ux_runs_item_live").IsUnique().HasFilter("status < 3")
                 .HasDatabaseName("ux_runs_item_live");
+            // A failed run is continued at most once; a second continue is a newer run's to make.
+            b.HasIndex(x => x.ContinuesRunId, "ux_runs_continues").IsUnique()
+                .HasFilter("continues_run_id IS NOT NULL").HasDatabaseName("ux_runs_continues");
+            // The sweeper's auto-continue scan: only the few runs that are due carry a value.
+            b.HasIndex(x => x.AutoContinueDueAt, "ix_runs_auto_continue_due")
+                .HasFilter("auto_continue_due_at IS NOT NULL").HasDatabaseName("ix_runs_auto_continue_due");
 
             // finished_at is set exactly when the status says the run is over - the
             // sweeper's claim statement and the endpoints cannot disagree.
@@ -145,6 +152,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                 t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1)");
                 t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
                 t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
+                t.HasCheckConstraint("ck_runs_auto_continues", "auto_continues BETWEEN 0 AND 2");
                 // A run is dispatched by exactly one kind of actor. No FK from rule_id to
                 // rules: a deleted rule must not rewrite or block the history of what it ran.
                 t.HasCheckConstraint("ck_runs_requested_by_xor_rule",

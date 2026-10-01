@@ -25,7 +25,17 @@ public sealed record RunnerClaimRequest(IReadOnlyList<string>? Harnesses, int Sl
 public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
-    string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false);
+    string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
+    RunResumeView? Resume = null);
+
+/// <summary>
+/// Set on a continue run: the runner resumes <paramref name="SessionId"/> in the workspace it
+/// kept for <paramref name="ContinuesRunId"/>, telling the agent why that run stopped.
+/// </summary>
+public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
+
+/// <param name="SessionId">The harness session, sent once the runner knows it, so a run the sweeper ends can still be continued.</param>
+public sealed record RunnerRunHeartbeatRequest(string? SessionId);
 
 /// <param name="Source"><c>github</c> when the project has a binding, <c>local</c> when the runner is expected to find the working copy itself.</param>
 public sealed record RunRepoView(string Source, string? RepoFullName, string? CloneToken, string? LocalPathHint);
@@ -36,7 +46,7 @@ public sealed record RunnerLogRequest(IReadOnlyList<RunnerLogChunk>? Chunks);
 public sealed record RunnerLogChunk(int Seq, RunLogStream Stream, string? Text, DateTimeOffset? At);
 
 public sealed record RunnerFinishRequest(string? Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
-    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason);
+    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null);
 
 /// <summary>
 /// The half of the runner protocol that concerns runs: claim, release, started, log,
@@ -143,7 +153,8 @@ public static partial class RunProtocolEndpoints
 
             // A run sent to one runner is that runner's alone, unless the runner has since
             // been disabled or deleted: then any runner may take it rather than leave it
-            // queued for a machine that cannot come back.
+            // queued for a machine that cannot come back. A continue run never moves: no
+            // other machine has its session, and the sweeper fails it if its runner is gone.
             //
             // The lock lives inside this transaction, so the row stays ours until the
             // assignment is saved; SKIP LOCKED hands a second poller the next run instead
@@ -159,6 +170,7 @@ public static partial class RunProtocolEndpoints
                       AND (requested_runner_id IS NULL OR requested_runner_id = @runnerId
                            OR NOT EXISTS (SELECT 1 FROM automation.runners r
                                           WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
+                      AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
                     ORDER BY queued_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -244,6 +256,19 @@ public static partial class RunProtocolEndpoints
 
             // The public URL is Email:BaseUrl when an instance has one; otherwise the address
             // the runner reached us on is the best statement of where Aictiq lives.
+            RunResumeView? resume = null;
+            if (run.ContinuesRunId is { } continuesRunId)
+            {
+                var previous = await db.Runs.AsNoTracking()
+                    .Where(r => r.Id == continuesRunId)
+                    .Select(r => new { r.SessionId, r.FailureReason })
+                    .SingleOrDefaultAsync(ct);
+                if (previous?.SessionId is { } sessionId)
+                {
+                    resume = new RunResumeView(continuesRunId, sessionId, previous.FailureReason);
+                }
+            }
+
             var aictiqUrl = string.IsNullOrWhiteSpace(email.Value.BaseUrl)
                 ? $"{http.Request.Scheme}://{http.Request.Host}"
                 : email.Value.BaseUrl.TrimEnd('/');
@@ -255,7 +280,7 @@ public static partial class RunProtocolEndpoints
                 run.Harness, run.PromptSnapshot, run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
-                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch), false);
+                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume), false);
         }
     }
 
@@ -458,15 +483,21 @@ public static partial class RunProtocolEndpoints
     }
 
     private static async Task<IResult> HeartbeatAsync(
-        Guid runId, HttpContext http, AutomationDbContext db, TimeProvider clock, CancellationToken ct)
+        Guid runId, RunnerRunHeartbeatRequest? request, HttpContext http, AutomationDbContext db,
+        TimeProvider clock, CancellationToken ct)
     {
         var runnerId = RunnerId(http);
         var now = clock.GetUtcNow();
+        var sessionId = Blank(request?.SessionId);
+        if (sessionId is { Length: > Run.MaxSessionIdLength })
+        {
+            sessionId = null;
+        }
         // One conditional UPDATE rather than a tracked save: a heartbeat must never lose a
         // version race to a person's cancel, and the answer (cancel requested?) is read
         // from the row as this very statement left it.
         var beat = await db.Database.SqlQuery<bool>($"""
-            UPDATE automation.runs SET last_heartbeat_at = {now}
+            UPDATE automation.runs SET last_heartbeat_at = {now}, session_id = COALESCE({sessionId}, session_id)
             WHERE id = {runId} AND runner_id = {runnerId} AND status < 3
             RETURNING cancel_requested_at IS NOT NULL AS "Value"
             """).ToListAsync(ct);
@@ -541,11 +572,13 @@ public static partial class RunProtocolEndpoints
         run.InputTokens = request.InputTokens;
         run.OutputTokens = request.OutputTokens;
         run.FailureReason = failureReason;
+        run.SessionId = Blank(request.SessionId) ?? run.SessionId;
         run.Finish(
             outcome == RunOutcomes.Succeeded ? RunStatus.Succeeded
                 : outcome == RunOutcomes.Failed ? RunStatus.Failed
                 : RunStatus.Cancelled, // the only outcome left after validation
             outcome, clock.GetUtcNow());
+        run.ScheduleAutoContinue(run.FinishedAt!.Value);
         await RunCompletion.StageAsync(db, run, outcome, summary, pullRequestUrl, failureReason, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -655,6 +688,11 @@ public static partial class RunProtocolEndpoints
         if (request.CostUsd is < 0)
         {
             errors["costUsd"] = ["Cost cannot be negative."];
+        }
+
+        if (request.SessionId is { Length: > Run.MaxSessionIdLength })
+        {
+            errors["sessionId"] = ["Use 200 characters or fewer."];
         }
 
         if (request.InputTokens is < 0 || request.OutputTokens is < 0)
