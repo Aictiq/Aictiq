@@ -676,7 +676,7 @@ public sealed record RunView(
     long? InputTokens, long? OutputTokens, string? FailureReason, string? PromptSnapshot,
     uint Version, string? PlaybookName = null, string? RunnerName = null,
     Guid? RuleId = null, string? RuleName = null,
-    Guid? RequestedRunnerId = null, string? RequestedRunnerName = null);
+    Guid? RequestedRunnerId = null, string? RequestedRunnerName = null, string? Kind = null);
 
 public sealed record RunLogPage(IReadOnlyList<RunLogEntry> Items, bool Truncated);
 

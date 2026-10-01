@@ -43,6 +43,7 @@ import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useToast } from '@/composables/useToast'
 import { vNearEnd } from '@/lib/nearEnd'
 import { destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
+import { useCreateTicket } from '@/composables/useCreateTicket'
 import { opensOnCreate, typeLabels } from '@/lib/hierarchy'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
@@ -54,6 +55,7 @@ const organizations = useOrganizationsStore()
 const projects = useProjectsStore()
 const session = useSessionStore()
 const teams = useTeamsStore()
+const createTicket = useCreateTicket()
 const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
@@ -589,6 +591,15 @@ watch(
           </p>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
+          <button
+            v-if="projectKey && !projects.current?.isArchived"
+            type="button"
+            class="bg-primary text-primary-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm"
+            data-testid="board-create-ticket"
+            @click="createTicket.open(projectKey, { teamId: teamId || null })"
+          >
+            <Plus class="size-4" /> Create ticket
+          </button>
           <div
             v-if="board"
             class="text-muted-foreground flex items-center gap-1.5 text-xs"

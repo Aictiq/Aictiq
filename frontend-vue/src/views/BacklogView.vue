@@ -11,6 +11,7 @@ import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { flattenBacklog, rankMoveForDrop } from '@/lib/backlog'
 import { vNearEnd } from '@/lib/nearEnd'
+import { useCreateTicket } from '@/composables/useCreateTicket'
 import { allowsParent, childTypes, opensOnCreate, requiresParent, typeLabels } from '@/lib/hierarchy'
 import { useItemModal } from '@/composables/useItemModal'
 import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryParams'
@@ -20,6 +21,7 @@ import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { ConflictError } from '@/utils/api'
 
 const props = defineProps<{ slug: string; projectKey: string; teamId: string }>()
+const createTicket = useCreateTicket()
 const toast = useToast()
 const client = useQueryClient()
 useProjectRealtime(() => props.slug, () => props.projectKey)
@@ -220,9 +222,19 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
   <AppShell>
     <section class="grid w-full gap-6 px-5 py-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div class="min-w-0">
-        <div>
-          <h1 class="text-xl font-semibold">Backlog</h1>
-          <p class="text-muted-foreground text-sm">Plan, rank and shape your team’s upcoming work.</p>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 class="text-xl font-semibold">Backlog</h1>
+            <p class="text-muted-foreground text-sm">Plan, rank and shape your team’s upcoming work.</p>
+          </div>
+          <button
+            type="button"
+            class="bg-primary text-primary-foreground inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm"
+            data-testid="backlog-create-ticket"
+            @click="createTicket.open(props.projectKey, { teamId: props.teamId })"
+          >
+            <Plus class="size-4" /> Create ticket
+          </button>
         </div>
 
         <form class="border-border bg-card mt-5 flex flex-wrap items-center gap-2 rounded-lg border p-2" aria-label="Quick add" @submit.prevent="submitQuick">

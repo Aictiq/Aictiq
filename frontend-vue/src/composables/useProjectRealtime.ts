@@ -74,6 +74,12 @@ export function useProjectRealtime(
         predicate: (query) => query.queryKey.includes('runs') || query.queryKey.includes(event.runId),
       })
     })
+    // A refine run answers before it finishes: only the item's refinement panel refetches.
+    connection.on('refinement.changed', (event: { itemKey: string }) => {
+      void client.invalidateQueries({
+        predicate: (query) => query.queryKey.includes(event.itemKey) && query.queryKey.includes('refinement'),
+      })
+    })
     // A project key is unique per organization, not per instance: the slug says which
     // organization's project this page is showing.
     const join = () => connection?.invoke('JoinProject', toValue(projectKey), toValue(organizationSlug))

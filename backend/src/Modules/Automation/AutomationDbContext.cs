@@ -30,6 +30,8 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<RunLogChunk> RunLogChunks => Set<RunLogChunk>();
     public DbSet<Rule> Rules => Set<Rule>();
     public DbSet<RuleFiring> RuleFirings => Set<RuleFiring>();
+    public DbSet<ItemRefinement> Refinements => Set<ItemRefinement>();
+    public DbSet<ProjectRefinementSettings> RefinementSettings => Set<ProjectRefinementSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -123,6 +125,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.FailureReason).HasMaxLength(Run.MaxFailureReasonLength);
             b.Property(x => x.CostUsd).HasPrecision(12, 2);
             b.Property(x => x.Status).HasConversion<short>();
+            b.Property(x => x.Kind).HasConversion<short>();
 
             b.HasIndex(x => new { x.ProjectId, x.QueuedAt }).HasDatabaseName("ix_runs_project_queued");
             b.HasIndex(x => new { x.OrganizationId, x.Status, x.QueuedAt }).HasDatabaseName("ix_runs_organization_status_queued");
@@ -139,6 +142,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_runs_status", "status BETWEEN 0 AND 6");
+                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1)");
                 t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
                 t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
                 // A run is dispatched by exactly one kind of actor. No FK from rule_id to
@@ -201,6 +205,43 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                 // one in before its transaction commits.
                 t.HasCheckConstraint("ck_rule_firings_run_or_skip", "run_id IS NULL OR skip_reason IS NULL");
             });
+        });
+
+        modelBuilder.Entity<ItemRefinement>(b =>
+        {
+            b.ToTable("item_refinements");
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.ItemKey).HasMaxLength(Run.MaxItemKeyLength);
+            b.Property(x => x.Status).HasConversion<short>();
+            b.Property(x => x.Summary).HasMaxLength(ItemRefinement.MaxSummaryLength);
+            b.Property(x => x.RequestedBy).HasMaxLength(450);
+            b.Property(x => x.ConfirmedBy).HasMaxLength(450);
+            // One refinement per item: asking again picks up the same row and its answers.
+            b.HasIndex(x => x.ItemId).IsUnique().HasDatabaseName("ux_item_refinements_item");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_item_refinements_project_id");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_item_refinements_status", "status BETWEEN 0 AND 4");
+                t.HasCheckConstraint("ck_item_refinements_answers",
+                    "cardinality(answered_questions) = cardinality(answers)");
+                t.HasCheckConstraint("ck_item_refinements_confirmed",
+                    "(status = 4) = (confirmed_at IS NOT NULL)");
+            });
+        });
+
+        modelBuilder.Entity<ProjectRefinementSettings>(b =>
+        {
+            b.ToTable("refinement_settings");
+            b.Ignore(x => x.Id);
+            b.HasKey(x => x.ProjectId);
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.AgentId).HasMaxLength(Run.MaxActorLength);
+            b.Property(x => x.ProductDescription).HasMaxLength(ProjectRefinementSettings.MaxTextLength);
+            b.Property(x => x.WritingInstructions).HasMaxLength(ProjectRefinementSettings.MaxTextLength);
+            b.Property(x => x.NamingConventions).HasMaxLength(ProjectRefinementSettings.MaxTextLength);
+            b.Property(x => x.Platforms).HasMaxLength(ProjectRefinementSettings.MaxTextLength);
+            // A deleted playbook turns refinement off rather than blocking the delete.
+            b.HasOne<Playbook>().WithMany().HasForeignKey(x => x.PlaybookId).OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

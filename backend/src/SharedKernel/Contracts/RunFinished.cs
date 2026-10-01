@@ -32,4 +32,11 @@ public sealed record RunFinished(
     Guid? OnFailureStateId,
     string? Summary,
     string? PullRequestUrl,
-    string? FailureReason) : DomainEvent, IIntegrationEvent;
+    string? FailureReason) : DomainEvent, IIntegrationEvent
+{
+    /// <summary>
+    /// A refine run: it worked on the ticket rather than the work, so the item stays where it
+    /// is whatever the outcome - only the claim is released and the comment left.
+    /// </summary>
+    public bool Refinement { get; init; }
+}

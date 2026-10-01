@@ -30,6 +30,10 @@ public sealed class AutomationProjectDeletedHandler(
             .ToListAsync(cancellationToken);
         await db.Runs.Where(run => run.ProjectId == @event.ProjectId)
             .ExecuteDeleteAsync(cancellationToken);
+        await db.Refinements.Where(refinement => refinement.ProjectId == @event.ProjectId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await db.RefinementSettings.Where(settings => settings.ProjectId == @event.ProjectId)
+            .ExecuteDeleteAsync(cancellationToken);
         // Rules before playbooks: automation.rules.playbook_id is RESTRICT, and deleting
         // rules cascades their firings (fk_rule_firings_rules_rule_id) at the database level.
         await db.Rules.Where(rule => rule.ProjectId == @event.ProjectId)
@@ -41,6 +45,8 @@ public sealed class AutomationProjectDeletedHandler(
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.Rule, ruleIds, cancellationToken);
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.Playbook, playbookIds, cancellationToken);
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.ProjectFactorySettings,
+            [@event.ProjectId], cancellationToken);
+        await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.ProjectRefinementSettings,
             [@event.ProjectId], cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 

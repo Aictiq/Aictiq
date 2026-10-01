@@ -58,5 +58,6 @@ public static class AuditEntityTypes
     public const string RepoBinding = "RepoBinding";
     public const string Playbook = "Playbook";
     public const string ProjectFactorySettings = "ProjectFactorySettings";
+    public const string ProjectRefinementSettings = "ProjectRefinementSettings";
     public const string Rule = "Rule";
 }

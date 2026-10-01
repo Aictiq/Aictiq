@@ -13,6 +13,7 @@ import {
 } from '@/api/playbooks'
 import { listProjectMembers } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
+import RefinementSettingsForm from '@/components/settings/RefinementSettingsForm.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
@@ -330,5 +331,18 @@ async function save() {
         </Button>
       </div>
     </form>
+  </SettingsSection>
+  <SettingsSection
+    v-if="!loading && mayRead && !failed"
+    class="mt-8"
+    title="Ticket refinement"
+    description="Let an agent turn a short description into a complete ticket, using what it should know about this product."
+  >
+    <RefinementSettingsForm
+      :slug="project.slug.value"
+      :project-key="project.projectKey.value"
+      :agents="agents"
+      :may-manage="mayManage"
+    />
   </SettingsSection>
 </template>

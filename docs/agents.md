@@ -216,6 +216,7 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Talking | `add_comment`, `update_comment`, `list_comments` |
 | Linking | `link_item` |
 | Delegating | `start_run`, `get_run`, `list_runs` |
+| Refining | `submit_refinement` (refine runs only) |
 
 There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq://run/{id}`
 resources, which render the same loop, the item's Markdown and a run's status and log tail
@@ -230,6 +231,12 @@ needs `canOperateFactory` - an agent an administrator cleared it for gets
 whichever agent it runs as. `start_run` refuses with the same words as the REST surface
 (`item already claimed`, `conflict: run in progress`, `playbook not found or no access`), and
 its `log` (the last 50 lines) and `failureReason` are present only for factory operators.
+
+**Refining** is for [refine runs](factory.md#refine-tickets) only. After rewriting the
+ticket with `update_item`, the run's agent calls `submit_refinement(key, outcome, questions?,
+summary?)` once: `outcome` is `ready` when the ticket is complete, or `needs_input` with up to
+ten questions only a person can answer. Anyone else, including the run's agent outside a live
+refine run, gets `has no refinement in progress for this agent`.
 
 ---
 

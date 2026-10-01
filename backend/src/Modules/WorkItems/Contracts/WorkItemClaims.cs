@@ -34,7 +34,6 @@ internal sealed class WorkItemClaims(WorkItemsDbContext db, IConfiguration confi
             .OrderBy(s => s.Position).Select(s => (Guid?)s.Id).FirstOrDefaultAsync(cancellationToken);
         if (activeState is null) return new WorkItemClaimResult(WorkItemClaimOutcome.Conflict, item.Version, item.ClaimedBy);
 
-        var staleAfter = Math.Max(1, configuration.GetValue("Claims:StaleAfterMinutes", 30));
         var now = clock.GetUtcNow();
         // One UPDATE the database arbitrates: observing an unclaimed row and then
         // assigning it through EF would make a concurrent claim race possible. No version
@@ -45,12 +44,34 @@ internal sealed class WorkItemClaims(WorkItemsDbContext db, IConfiguration confi
             SET claimed_by = {agentUserId}, claimed_at = {now}, claim_heartbeat_at = {now},
                 assignee_id = {agentUserId}, state_id = {activeState.Value}, updated_at = {now}
             WHERE id = {item.Id}
-              AND (claimed_by IS NULL OR claim_heartbeat_at < {now - TimeSpan.FromMinutes(staleAfter)})
+              AND (claimed_by IS NULL OR claim_heartbeat_at < {now - StaleAfter()})
             """, cancellationToken);
+        return await ClaimedOrConflictAsync(itemId, agentUserId, affected, cancellationToken);
+    }
+
+    public async Task<WorkItemClaimResult> ClaimInPlaceAsync(Guid itemId, string agentUserId, CancellationToken cancellationToken = default)
+    {
+        var now = clock.GetUtcNow();
+        // The same compare-and-swap without the assignment and the state move.
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE work.items
+            SET claimed_by = {agentUserId}, claimed_at = {now}, claim_heartbeat_at = {now}, updated_at = {now}
+            WHERE id = {itemId}
+              AND (claimed_by IS NULL OR claim_heartbeat_at < {now - StaleAfter()})
+            """, cancellationToken);
+        return await ClaimedOrConflictAsync(itemId, agentUserId, affected, cancellationToken);
+    }
+
+    private TimeSpan StaleAfter() =>
+        TimeSpan.FromMinutes(Math.Max(1, configuration.GetValue("Claims:StaleAfterMinutes", 30)));
+
+    private async Task<WorkItemClaimResult> ClaimedOrConflictAsync(
+        Guid itemId, string agentUserId, int affected, CancellationToken cancellationToken)
+    {
         if (affected == 1)
         {
             db.ChangeTracker.Clear();
-            var claimed = await db.Items.FirstAsync(x => x.Id == item.Id, cancellationToken);
+            var claimed = await db.Items.FirstAsync(x => x.Id == itemId, cancellationToken);
             claimed.Changed(agentUserId, "claim");
             await db.SaveChangesAsync(cancellationToken);
             return new WorkItemClaimResult(WorkItemClaimOutcome.Claimed, claimed.Version, agentUserId);

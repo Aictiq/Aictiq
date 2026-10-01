@@ -81,6 +81,7 @@ export interface BacklogQuery {
 export interface CreateItem {
   type: WorkItemType
   title: string
+  descriptionMarkdown?: string
   parentId?: string | null
   teamId?: string | null
   stateId?: string | null
