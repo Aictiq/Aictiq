@@ -82,8 +82,10 @@ export async function executeRun(
   if (options.shutdown?.aborted) onShutdown()
 
   let workspace: Workspace | undefined
-  let sessionId: string | undefined
   const resume = run.resume ?? null
+  // A resumed run already has its session: a failure before the harness names it again must
+  // still keep the workspace for the next continue.
+  let sessionId: string | undefined = resume?.sessionId
   let revoked: RunnerHttpError | undefined
   let heartbeat: NodeJS.Timeout | undefined
   let beating: Promise<void> = Promise.resolve()
@@ -252,7 +254,7 @@ export async function executeRun(
         inputTokens = tally(inputTokens, parsed.inputTokens)
         outputTokens = tally(outputTokens, parsed.outputTokens)
         if (parsed.result !== undefined) lastResult = parsed.result
-        if (parsed.sessionId && !sessionId) {
+        if (parsed.sessionId && parsed.sessionId !== sessionId) {
           sessionId = parsed.sessionId
           event(`Harness session ${sessionId}`)
         }

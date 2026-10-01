@@ -381,6 +381,23 @@ describe('executeRun', () => {
       expect(calls.cleaned).toBe(1)
     })
 
+    it('keeps the workspace of a resumed run that fails before the harness names its session', async () => {
+      const retained: string[] = []
+      options.reattach = async (_run, prompt) => ({
+        ...stubWorkspace(),
+        prompt,
+        retain: (id) => retained.push(id),
+      })
+      options.prune = async () => []
+      options.adapters.fake = sessionAdapter(`process.exit(3)`, [])
+      const report = await executeRun(
+        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null } }),
+        options,
+      )
+      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-0' })
+      expect(retained).toEqual(['sess-0'])
+    })
+
     it('fails with session-unavailable when the kept workspace is gone', async () => {
       tracked()
       options.reattach = async () => {
