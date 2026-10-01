@@ -100,6 +100,8 @@ public sealed class ProjectSequence : TenantEntity
 {
     public Guid ProjectId { get; init; }
     public int NextNumber { get; set; }
+    /// <summary>Survives removal of every template so built-ins are only seeded once.</summary>
+    public bool TemplatesSeeded { get; set; }
 }
 
 public enum CsvImportStatus : short { Pending, Running, Completed, Failed }
