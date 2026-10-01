@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Bell, Menu, Monitor, Moon, Search, Sun } from '@lucide/vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { Menu, Monitor, Moon, Search, Sun } from '@lucide/vue'
+import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { useQueryClient } from '@tanstack/vue-query'
 
+import NotificationsPopover from '@/components/notifications/NotificationsPopover.vue'
 import KeyChip from '@/components/common/KeyChip.vue'
 import {
   DropdownMenu,
@@ -30,7 +31,6 @@ const session = useSessionStore()
 const ui = useUiStore()
 const client = useQueryClient()
 let notificationConnection: HubConnection | null = null
-const unreadCount = computed(() => session.user?.unreadCount ?? 0)
 
 // The badge is fed by the session payload; the hub only tells it when to refetch. A hub
 // that will not connect must therefore not break the header it lives in.
@@ -139,19 +139,7 @@ const crumbs = computed(() => ['Aictiq', currentTitle.value].filter(Boolean))
       </DropdownMenuContent>
     </DropdownMenu>
 
-    <RouterLink
-      to="/inbox"
-      data-tour="inbox-link"
-      class="text-muted-foreground hover:bg-accent hover:text-foreground relative grid size-9 flex-none place-items-center rounded-md"
-      aria-label="Inbox"
-    >
-      <Bell class="size-4" aria-hidden="true" />
-      <span
-        v-if="unreadCount"
-        class="bg-primary text-primary-foreground absolute -right-1 -top-1 min-w-4 rounded-full px-1 text-center text-[10px]"
-        >{{ unreadCount > 99 ? '99+' : unreadCount }}</span
-      >
-    </RouterLink>
+    <NotificationsPopover />
 
     <button
       type="button"

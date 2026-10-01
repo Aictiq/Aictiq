@@ -121,6 +121,15 @@ non-default port must also appear in `AICTIQ_URL`. Published-image configuration
 realtime scale-out and troubleshooting live in the repository's
 [`deploy/README.md`](../deploy/README.md).
 
+## Notifications
+
+The notification bell opens a popup with updates from work you follow. Unread updates are
+bold and count toward the bell badge. Click an update to open its item and mark it read,
+or choose **Mark all read** to clear the unread styling and badge. **View all notifications**
+opens the full inbox. Notification item links retain their original organization, even
+when you are working in another one. Run-completion updates open the run for factory
+operators and the related item for other members.
+
 ## Where to next
 
 - [Self-hosting](./self-host.md) - object storage (AWS S3, MinIO, R2), external

@@ -5,6 +5,7 @@ using Aictiq.Modules.Notifications;
 using Aictiq.Modules.Notifications.Delivery;
 using Aictiq.Modules.Notifications.Domain;
 using Aictiq.Modules.Notifications.Events;
+using Aictiq.Modules.Notifications.Endpoints;
 using Aictiq.Modules.Notifications.Templates;
 using Aictiq.Modules.Tenancy.Domain;
 using Aictiq.Modules.Tenancy.Endpoints;
@@ -117,6 +118,10 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
         runCommand.Parameters.AddWithValue("run", $"%{runId}%");
         var runEvent = JsonSerializer.Deserialize<WorkItemTransitioned>((string)(await runCommand.ExecuteScalarAsync(ct))!)!;
         await ActivatorUtilities.CreateInstance<TransitionNotificationHandler>(scope.ServiceProvider).HandleAsync(runEvent, ct);
+        var inbox = await context.Admin.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, ct);
+        var runNotification = Assert.Single(inbox!, n => n.RunId == runId);
+        Assert.Equal(organization.Id, runNotification.OrganizationId);
+        Assert.Equal(item.Key, runNotification.ItemKey);
         var runMail = await db.EmailOutbox.SingleAsync(m => m.Id != queued.Id && m.Id != legacy.Id, ct);
         Assert.Contains(outcome.Replace('_', ' '), runMail.BodyText);
         Assert.Contains(runId.ToString(), runMail.BodyText);

@@ -4087,6 +4087,25 @@ export interface components {
             inApp?: boolean;
             kind?: components["schemas"]["NotificationKind"];
         };
+        NotificationView: {
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            itemId: null | string;
+            itemKey: null | string;
+            kind: components["schemas"]["NotificationKind"];
+            message: string;
+            /** Format: uuid */
+            organizationId?: null | string;
+            /** Format: uuid */
+            projectId: null | string;
+            /** Format: date-time */
+            readAt: null | string;
+            /** Format: uuid */
+            runId?: null | string;
+        };
         /** @enum {unknown} */
         OrgRole: "owner" | "admin" | "member" | "guest" | null;
         /** @enum {unknown} */
@@ -9750,7 +9769,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["NotificationView"][];
+                };
             };
             /** @description The request is invalid. */
             400: {
