@@ -11,6 +11,8 @@ namespace Aictiq.IntegrationTests.WorkItems;
 [Trait("Category", "WorkItems")]
 public sealed class TemplatesAndBulkEditTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
+    protected override bool AppRole => true;
+
     [Fact]
     public async Task templates_include_one_default_per_seeded_type()
     {
@@ -18,6 +20,65 @@ public sealed class TemplatesAndBulkEditTests(PostgresFixture postgres, GarageFi
 
         Assert.Contains(templates!, template => template.Type == WorkItemType.Bug && template.IsDefault && template.DescriptionMarkdown.Contains("Steps to reproduce"));
         Assert.Contains(templates!, template => template.Type == WorkItemType.Story && template.IsDefault && template.DescriptionMarkdown.Contains("Acceptance criteria"));
+    }
+
+    [Fact]
+    public async Task renaming_a_seeded_template_persists_without_recreating_the_original()
+    {
+        var templates = await TemplatesAsync();
+        var story = Assert.Single(templates, template => template.Type == WorkItemType.Story);
+        var response = await Client.PatchAsJsonAsync($"{TemplatesPath()}{story.Id}",
+            new UpdateItemTemplateRequest("Team story", "## Team acceptance criteria", [], WorkItemPriority.High, true, story.Version),
+            ApiTestContext.Json, CancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var reloaded = await TemplatesAsync();
+        Assert.Equal(templates.Count, reloaded.Count);
+        Assert.DoesNotContain(reloaded, template => template.Name == "User story");
+        var renamed = Assert.Single(reloaded, template => template.Id == story.Id);
+        Assert.Equal("Team story", renamed.Name);
+        Assert.Equal("## Team acceptance criteria", renamed.DescriptionMarkdown);
+        Assert.Equal(WorkItemPriority.High, renamed.DefaultPriority);
+    }
+
+    [Fact]
+    public async Task deleting_a_seeded_template_persists_after_reloading()
+    {
+        var templates = await TemplatesAsync();
+        var bug = Assert.Single(templates, template => template.Type == WorkItemType.Bug);
+        var response = await Client.DeleteAsync($"{TemplatesPath()}{bug.Id}", CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var reloaded = await TemplatesAsync();
+        Assert.Equal(templates.Count - 1, reloaded.Count);
+        Assert.DoesNotContain(reloaded, template => template.Type == WorkItemType.Bug);
+    }
+
+    [Fact]
+    public async Task deleting_every_template_leaves_the_project_without_templates()
+    {
+        foreach (var template in await TemplatesAsync())
+        {
+            var response = await Client.DeleteAsync($"{TemplatesPath()}{template.Id}", CancellationToken);
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        }
+
+        Assert.Empty(await TemplatesAsync());
+        Assert.Empty(await TemplatesAsync());
+        // Initializing templates must not consume or reset an item number.
+        Assert.EndsWith("-1", (await CreateAsync(WorkItemType.Bug, "No template")).Key);
+    }
+
+    [Fact]
+    public async Task concurrent_initial_reads_seed_only_one_set_of_templates()
+    {
+        var lists = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => TemplatesAsync()));
+        foreach (var list in lists)
+        {
+            Assert.Equal(2, list.Count);
+            Assert.Single(list, template => template.Type == WorkItemType.Bug && template.IsDefault);
+            Assert.Single(list, template => template.Type == WorkItemType.Story && template.IsDefault);
+        }
     }
 
     [Fact]
@@ -70,6 +131,8 @@ public sealed class TemplatesAndBulkEditTests(PostgresFixture postgres, GarageFi
     }
 
     private string TemplatesPath() => $"/api/v1/orgs/work-items/projects/{Project.Key}/templates/";
+    private async Task<List<ItemTemplateView>> TemplatesAsync() =>
+        (await Client.GetFromJsonAsync<List<ItemTemplateView>>(TemplatesPath(), ApiTestContext.Json, CancellationToken))!;
     private string BulkPath() => $"/api/v1/orgs/work-items/projects/{Project.Key}/items/bulk";
     private async Task<WorkItemView> GetItemAsync(string key) =>
         (await Client.GetFromJsonAsync<WorkItemView>(ItemPath(key), ApiTestContext.Json, CancellationToken))!;

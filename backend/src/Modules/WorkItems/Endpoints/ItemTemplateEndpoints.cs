@@ -107,22 +107,35 @@ public static class ItemTemplateEndpoints
 
     internal static async Task EnsureBuiltInsAsync(WorkItemsDbContext db, Guid organizationId, Guid projectId, CancellationToken ct)
     {
-        var present = await db.ItemTemplates.Where(x => x.ProjectId == projectId &&
-                (x.Name == "Bug report" || x.Name == "User story"))
-            .Select(x => x.Name).ToHashSetAsync(ct);
-        if (present.Count == 2) return;
-        if (!present.Contains("Bug report")) db.ItemTemplates.Add(new ItemTemplate
+        if (await db.ProjectSequences.AnyAsync(x => x.ProjectId == projectId && x.TemplatesSeeded, ct)) return;
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        // Claim initialization atomically for both the GET gap-closer and outbox replay.
+        // The existing project row is already tenant-scoped and purged on project deletion.
+        var claimed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO work.project_sequences (project_id, organization_id, next_number, templates_seeded)
+            VALUES ({projectId}, {organizationId}, 1, true)
+            ON CONFLICT (project_id) DO UPDATE SET templates_seeded = true
+            WHERE work.project_sequences.organization_id = {organizationId}
+              AND NOT work.project_sequences.templates_seeded
+            """, ct);
+        if (claimed == 0) return;
+        if (await db.ItemTemplates.AnyAsync(x => x.ProjectId == projectId, ct))
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+        db.ItemTemplates.Add(new ItemTemplate
         {
             OrganizationId = organizationId, ProjectId = projectId, Type = WorkItemType.Bug, Name = "Bug report",
             DescriptionMarkdown = "## Steps to reproduce\n\n1. \n\n## Expected\n\n\n## Actual\n\n", IsDefault = true,
         });
-        if (!present.Contains("User story")) db.ItemTemplates.Add(new ItemTemplate
+        db.ItemTemplates.Add(new ItemTemplate
         {
             OrganizationId = organizationId, ProjectId = projectId, Type = WorkItemType.Story, Name = "User story",
             DescriptionMarkdown = "## As a … I want … so that …\n\n\n## Acceptance criteria\n\n- [ ] ", IsDefault = true,
         });
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException) { db.ChangeTracker.Clear(); }
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private static async Task<Dictionary<string, string[]>> ValidateAsync(WorkItemsDbContext db, Guid projectId,
