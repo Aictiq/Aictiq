@@ -73,6 +73,9 @@ const itemPage = computed(() => items.data.value ?? null)
 const savedViews = computed(() => views.data.value ?? [])
 const creating = ref(false)
 const title = ref('')
+// Items creates the standalone kinds; Epics, Features and Tasks are made where their
+// hierarchy lives (portfolio, backlog, a parent item).
+const createType = ref<'bug' | 'story'>('bug')
 const selected = ref(new Set<string>())
 const current = ref(0)
 useProjectRealtime(() => props.slug, () => props.projectKey)
@@ -130,7 +133,10 @@ function open(item: WorkItem) {
 }
 async function create() {
   if (!title.value.trim()) return
-  const created = await createItem(props.slug, props.projectKey, { type: 'bug', title: title.value.trim() })
+  const created = await createItem(props.slug, props.projectKey, {
+    type: createType.value,
+    title: title.value.trim(),
+  })
   title.value = ''
   creating.value = false
   await client.invalidateQueries({ queryKey: [props.slug, props.projectKey, 'items'] })
@@ -275,11 +281,19 @@ useCommands(() => [
         class="bg-background fixed inset-x-0 bottom-0 z-30 mx-auto grid max-w-lg grid-cols-[minmax(0,1fr)_auto] gap-2 border p-4 shadow-lg sm:flex"
         @submit.prevent="create"
       >
+        <select
+          v-model="createType"
+          aria-label="Item type"
+          class="border-input col-span-2 rounded border px-2 py-2 sm:col-span-1"
+        >
+          <option value="bug">Bug</option>
+          <option value="story">Story</option>
+        </select>
         <input
           v-model="title"
           autofocus
           class="border-input col-span-2 min-w-0 flex-1 rounded border px-3 py-2 sm:col-span-1"
-          placeholder="Bug title"
+          :placeholder="createType === 'bug' ? 'Bug title' : 'Story title'"
         />
         <button class="bg-primary text-primary-foreground rounded px-3 py-2">Create</button
         ><button type="button" class="rounded border px-3 py-2" @click="creating = false">
