@@ -202,10 +202,11 @@ public static class WorkItemEndpoints
         var defaultWorkflowId = await db.Workflows.Where(x => x.ProjectId == project.Id && x.IsDefault).Select(x => x.Id).SingleOrDefaultAsync(ct);
         if (defaultWorkflowId == Guid.Empty) return Results.Problem("The project workflow is still being initialized.", statusCode: StatusCodes.Status409Conflict);
         var state = request.StateId is { } id ? id : await db.WorkflowStates.Where(x => x.WorkflowId == defaultWorkflowId && x.IsInitial).Select(x => x.Id).SingleAsync(ct);
+        var teamId = request.TeamId ?? await DefaultTeamAsync(db, tenancy, request.Type, request.ParentId, project.Id, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await NextNumberAsync(db, tenant.OrganizationId!.Value, project.Id, ct);
         var now = clock.GetUtcNow(); var markdown = request.DescriptionMarkdown?.Trim() ?? "";
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = project.Id, ProjectKey = project.Key, Number = number, Type = request.Type, Title = request.Title!.Trim(), DescriptionMarkdown = markdown, DescriptionHtml = Render(markdown), StateId = state, Priority = request.Priority ?? WorkItemPriority.None, AssigneeId = request.AssigneeId, TeamId = request.TeamId, ParentId = request.ParentId, Rank = await ItemRanking.AfterLastAsync(db, project.Id, ct), Points = request.Points, EstimateHours = request.EstimateHours, RemainingHours = request.RemainingHours ?? (request.Type is WorkItemType.Task or WorkItemType.Bug ? request.EstimateHours : null), CompletedHours = request.CompletedHours, DueDate = request.DueDate, CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = project.Id, ProjectKey = project.Key, Number = number, Type = request.Type, Title = request.Title!.Trim(), DescriptionMarkdown = markdown, DescriptionHtml = Render(markdown), StateId = state, Priority = request.Priority ?? WorkItemPriority.None, AssigneeId = request.AssigneeId, TeamId = teamId, ParentId = request.ParentId, Rank = await ItemRanking.AfterLastAsync(db, project.Id, ct), Points = request.Points, EstimateHours = request.EstimateHours, RemainingHours = request.RemainingHours ?? (request.Type is WorkItemType.Task or WorkItemType.Bug ? request.EstimateHours : null), CompletedHours = request.CompletedHours, DueDate = request.DueDate, CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
         db.Items.Add(item);
         if (request.LabelIds is { Count: > 0 })
             foreach (var labelId in request.LabelIds.Distinct())
@@ -677,6 +678,18 @@ public static class WorkItemEndpoints
     /// <summary>Null is unassigned; anyone else has to be in the project's audience.</summary>
     internal static async Task<bool> AssignableAsync(IProjectAccess access, Guid projectId, string? assigneeId, CancellationToken ct) =>
         string.IsNullOrWhiteSpace(assigneeId) || (await access.ListProjectMemberIdsAsync(projectId, ct)).Contains(assigneeId, StringComparer.Ordinal);
+    /// <summary>
+    /// The team a new item lands on when its creator names none. Backlogs and boards are per
+    /// team, so an unteamed Story or Bug is invisible on both. A Task follows its parent; a
+    /// Story or Bug goes to the project's default team. Epics and Features span teams and stay
+    /// unteamed.
+    /// </summary>
+    internal static async Task<Guid?> DefaultTeamAsync(WorkItemsDbContext db, TenancyDbContext tenancy, WorkItemType type, Guid? parentId, Guid projectId, CancellationToken ct)
+    {
+        if (type is not (WorkItemType.Story or WorkItemType.Bug or WorkItemType.Task)) return null;
+        if (parentId is not null && await db.Items.AsNoTracking().Where(x => x.Id == parentId).Select(x => x.TeamId).FirstOrDefaultAsync(ct) is { } parentTeam) return parentTeam;
+        return await tenancy.Teams.AsNoTracking().Where(t => t.ProjectId == projectId && t.IsDefault).Select(t => (Guid?)t.Id).FirstOrDefaultAsync(ct);
+    }
     /// <summary>Null is "no team"; a team id must name a team of this project (the tenant filter already keeps it to this organization).</summary>
     internal static async Task<bool> TeamInProjectAsync(TenancyDbContext tenancy, Guid? teamId, Guid projectId, CancellationToken ct) =>
         teamId is null || await tenancy.Teams.AsNoTracking().AnyAsync(t => t.Id == teamId && t.ProjectId == projectId, ct);

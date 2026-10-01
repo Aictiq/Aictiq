@@ -454,11 +454,22 @@ function keyboardMove(event: KeyboardEvent, card: WorkItem) {
   }
 }
 
-const settings = ref<{ columns: BoardColumnConfig[]; swimlane: string; cardFields: string[] }>({
+const settings = ref<{
+  columns: BoardColumnConfig[]
+  swimlane: string
+  cardFields: string[]
+  types: WorkItemType[]
+}>({
   columns: [],
   swimlane: 'none',
   cardFields: [],
+  types: ['story', 'bug'],
 })
+// The kinds of card a board can carry; Tasks ride inside their parent on the taskboard.
+const boardTypes: { value: WorkItemType; label: string }[] = [
+  { value: 'story', label: 'Stories' },
+  { value: 'bug', label: 'Bugs' },
+]
 function editSettings() {
   const current = board.value
   if (!current) return
@@ -472,6 +483,7 @@ function editSettings() {
     })),
     swimlane: current.swimlane,
     cardFields: [...current.cardFields],
+    types: [...current.types],
   }
   settingsOpen.value = true
 }
@@ -1053,6 +1065,17 @@ watch(
             ><input v-model="settings.cardFields" type="checkbox" :value="field" />{{
               field
             }}</label
+          >
+        </fieldset>
+        <fieldset class="mt-4">
+          <legend class="text-sm">Show on board</legend>
+          <label v-for="type in boardTypes" :key="type.value" class="mr-4 inline-flex gap-1 text-sm"
+            ><input
+              v-model="settings.types"
+              type="checkbox"
+              :value="type.value"
+              :disabled="settings.types.length === 1 && settings.types[0] === type.value"
+            />{{ type.label }}</label
           >
         </fieldset>
         <div class="mt-5 flex items-center justify-between">

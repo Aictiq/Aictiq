@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Aictiq.Modules.Tenancy;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel;
@@ -30,7 +31,7 @@ public sealed record McpItem(string Key, string Title, WorkItemType Type, string
 /// </summary>
 [McpServerToolType]
 public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenant, ICurrentUser user,
-    IProjectAccess access, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration)
+    IProjectAccess access, TenancyDbContext tenancy, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration)
 {
     private const int MaxMcpTextAttachmentBytes = 64 * 1024;
     [McpServerTool(Name = "search_items", ReadOnly = true)]
@@ -241,10 +242,11 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         if (writable is null) throw new McpAnswerException($"project '{project}' not found or no access");
         var projectKey = writable.Key; Guid? projectId = writable.Id;
         var state = await db.WorkflowStates.Where(s => s.IsInitial && db.Workflows.Any(w => w.Id == s.WorkflowId && w.ProjectId == projectId)).Select(s => s.Id).FirstOrDefaultAsync(ct); if (state == Guid.Empty) throw new McpAnswerException($"project '{projectKey}' has no initial workflow state");
+        var type = parent is null ? WorkItemType.Bug : WorkItemType.Task;
+        var teamId = await WorkItemEndpoints.DefaultTeamAsync(db, tenancy, type, parent?.Id, projectId.Value, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await WorkItemEndpoints.NextNumberAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
-        var type = parent is null ? WorkItemType.Bug : WorkItemType.Task;
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, ParentId = parent?.Id, Rank = "m", CreatedBy = user.UserId!, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new { item.Key, item.Version };
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = user.UserId!, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new { item.Key, item.Version };
     }
     private async Task<WorkItem?> Visible(string key, CancellationToken ct) { var item = await WorkItemEndpoints.FindVisible(db, access, user, key, ct); return item; }
 

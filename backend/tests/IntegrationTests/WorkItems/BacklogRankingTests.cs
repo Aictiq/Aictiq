@@ -68,6 +68,33 @@ public sealed class BacklogRankingTests(PostgresFixture postgres, GarageFixture 
         Assert.Equal(HttpStatusCode.BadRequest, (await Client.GetAsync($"{path}?expand=sideways:5", CancellationToken)).StatusCode);
     }
 
+    [Fact]
+    public async Task an_item_created_without_a_team_lands_on_the_default_team_backlog_and_board()
+    {
+        var teams = (await Client.GetFromJsonAsync<List<TeamView>>($"/api/v1/orgs/work-items/projects/{Project.Key}/teams", ApiTestContext.Json, CancellationToken))!;
+        var team = teams.Single(x => x.IsDefault);
+        // What the Items page sends: a type and a title, nothing about teams.
+        var bug = await CreateAsync(WorkItemType.Bug, "Bug from Items");
+        var story = await CreateAsync(WorkItemType.Story, "Story from Items");
+        var epic = await CreateAsync(WorkItemType.Epic, "Epic spans teams");
+        var other = await Client.PostAsJsonAsync($"/api/v1/orgs/work-items/projects/{Project.Key}/teams", new CreateTeamRequest("Other", "OTH"), ApiTestContext.Json, CancellationToken);
+        Assert.True(other.IsSuccessStatusCode, await other.Content.ReadAsStringAsync(CancellationToken));
+        var otherTeam = (await other.Content.ReadFromJsonAsync<TeamView>(ApiTestContext.Json, CancellationToken))!;
+        var parent = await CreateInTeamAsync(WorkItemType.Story, "Other team's story", otherTeam.Id, null);
+        var task = await CreateAsync(WorkItemType.Task, "Task follows its parent", parent.Id);
+
+        Assert.Equal(team.Id, bug.TeamId); Assert.Equal(team.Id, story.TeamId);
+        Assert.Null(epic.TeamId);
+        Assert.Equal(otherTeam.Id, task.TeamId);
+
+        var backlog = (await Client.GetFromJsonAsync<TeamBacklogView>($"/api/v1/orgs/work-items/teams/{team.Id}/backlog", ApiTestContext.Json, CancellationToken))!;
+        Assert.Equal([bug.Key, story.Key], backlog.Backlog.Select(x => x.Key));
+        var board = await Client.GetAsync($"/api/v1/orgs/work-items/teams/{team.Id}/board", CancellationToken);
+        var body = await board.Content.ReadAsStringAsync(CancellationToken);
+        Assert.True(board.IsSuccessStatusCode, body);
+        Assert.Contains(bug.Key, body); Assert.Contains(story.Key, body);
+    }
+
     private async Task<WorkItemView> CreateInTeamAsync(WorkItemType type, string title, Guid teamId, Guid? parentId)
     {
         var response = await Client.PostAsJsonAsync($"/api/v1/orgs/work-items/projects/{Project.Key}/items/",
