@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   cancelRun,
+  continueRun,
   dispatchRun,
   getRun,
   getRunLog,
@@ -14,6 +15,8 @@ import {
 import {
   applyLogPage,
   canCancelRun,
+  canRetryRun,
+  chainTotals,
   emptyLogState,
   formatCost,
   formatTokens,
@@ -59,6 +62,16 @@ afterEach(() => {
 })
 
 describe('the run endpoints', () => {
+  it('continues a run by posting to its continue endpoint', async () => {
+    const fetchMock = stubFetch({})
+
+    await continueRun('acme', 'r-1')
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(String(url)).toBe('/api/v1/orgs/acme/runs/r-1/continue')
+    expect(init!.method).toBe('POST')
+  })
+
   it('dispatches to the item with a JSON body', async () => {
     const fetchMock = stubFetch({})
 
@@ -405,6 +418,49 @@ describe('lib/runs', () => {
         rate: null,
         total: 0,
       })
+    })
+  })
+})
+
+describe('continuing and retrying runs', () => {
+  const failed = {
+    status: 'failed' as const,
+    kind: 'implement' as const,
+    superseded: false,
+    continuedByRunId: null,
+  }
+
+  it('offers Retry on the item’s latest failed or timed-out implement run', () => {
+    expect(canRetryRun(failed)).toBe(true)
+    expect(canRetryRun({ ...failed, status: 'timedOut' })).toBe(true)
+    expect(canRetryRun({ ...failed, status: 'cancelled' })).toBe(false)
+    expect(canRetryRun({ ...failed, status: 'succeeded' })).toBe(false)
+    expect(canRetryRun({ ...failed, superseded: true })).toBe(false)
+    expect(canRetryRun({ ...failed, continuedByRunId: 'r-2' })).toBe(false)
+    // A refinement is asked for again from the item, not retried from here.
+    expect(canRetryRun({ ...failed, kind: 'refine' })).toBe(false)
+  })
+
+  it('adds up a chain’s cost and tokens, and says nothing when no run reported any', () => {
+    const link = (costUsd: number | null, inputTokens: number | null, outputTokens: number | null) => ({
+      id: 'r',
+      status: 'failed' as const,
+      autoContinued: false,
+      queuedAt: '2026-10-01T00:00:00Z',
+      finishedAt: null,
+      costUsd,
+      inputTokens,
+      outputTokens,
+    })
+    expect(chainTotals([link(0.4, 1000, 100), link(0.1, null, 20)])).toEqual({
+      costUsd: 0.5,
+      inputTokens: 1000,
+      outputTokens: 120,
+    })
+    expect(chainTotals([link(null, null, null)])).toEqual({
+      costUsd: null,
+      inputTokens: null,
+      outputTokens: null,
     })
   })
 })

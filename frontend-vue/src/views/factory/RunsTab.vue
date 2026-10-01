@@ -252,6 +252,20 @@ watch(
             <span v-if="requesterLabel(run)" class="text-muted-foreground shrink-0 text-xs italic">
               {{ requesterLabel(run) }}
             </span>
+            <span
+              v-if="run.continuesRunId"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-row-continues"
+            >
+              {{ run.autoContinued ? 'auto-continue' : 'continue' }}
+            </span>
+            <span
+              v-if="run.continuedByRunId"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-row-continued"
+            >
+              → continued
+            </span>
             <span class="ml-auto flex items-center gap-3">
               <a
                 v-if="run.pullRequestUrl"

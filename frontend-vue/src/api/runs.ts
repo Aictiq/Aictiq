@@ -70,6 +70,34 @@ export interface Run {
   promptSnapshot: string | null
   /** xmin. */
   version: number
+  /** An implement run delivers code; a refine run rewrites the ticket. */
+  kind?: 'implement' | 'refine'
+  /** The harness session a continue run resumes. Operators only, single-run read only. */
+  sessionId?: string | null
+  /** The failed run this one continues; null for a run that started fresh. */
+  continuesRunId?: string | null
+  /** The run that continued this one, once there is one. */
+  continuedByRunId?: string | null
+  /** Queued by the server after a transient failure rather than by a person. */
+  autoContinued?: boolean
+  /** Single-run read: the run can be continued now (Continue). */
+  continuable?: boolean
+  /** Single-run read: the item has a newer run, so neither Continue nor Retry applies. */
+  superseded?: boolean
+  /** Single-run read: the runs from the first failure to the last continue, oldest first. */
+  chain?: RunChainLink[] | null
+}
+
+/** One run of a continue chain, with what it cost on its own. */
+export interface RunChainLink {
+  id: string
+  status: RunStatus
+  autoContinued: boolean
+  queuedAt: string
+  finishedAt: string | null
+  costUsd: number | null
+  inputTokens: number | null
+  outputTokens: number | null
 }
 
 export type RunLogStream = 'stdout' | 'stderr' | 'event'
@@ -137,3 +165,11 @@ export const getRunLog = (slug: string, runId: string, after = -1, pageSize = 50
  */
 export const cancelRun = (slug: string, runId: string) =>
   apiFetch<void>(`${runsBase(slug)}/${runId}/cancel`, { method: 'POST' })
+
+/**
+ * Continues a failed or timed-out run: a new run resumes its harness session in the workspace
+ * its runner kept. It counts as a run, and is refused like a dispatch (409) when the item is
+ * claimed, the organization is read-only, or the run cannot be continued.
+ */
+export const continueRun = (slug: string, runId: string) =>
+  apiFetch<Run>(`${runsBase(slug)}/${runId}/continue`, { method: 'POST' })

@@ -1,4 +1,4 @@
-import type { Run, RunLogPage, RunLogLine, RunStatus } from '@/api/runs'
+import type { Run, RunChainLink, RunLogPage, RunLogLine, RunStatus } from '@/api/runs'
 
 /**
  * Run presentation rules, kept out of the components because they decide what a
@@ -143,6 +143,39 @@ export function runRequesterLabel(
   if (run.requestedBy) return null
   if (!run.ruleId) return null
   return run.ruleName ? `Rule: ${run.ruleName}` : 'Rule (deleted)'
+}
+
+/**
+ * Whether a finished run offers Retry - a fresh run with the same playbook and agent. Only for
+ * an implement run that ended without finishing and is still the item's latest; a run that can
+ * be continued offers Continue first, and Retry beside it.
+ */
+export function canRetryRun(
+  run: Pick<Run, 'status' | 'kind' | 'superseded' | 'continuedByRunId'>,
+): boolean {
+  return (
+    (run.status === 'failed' || run.status === 'timedOut') &&
+    run.kind !== 'refine' &&
+    !run.superseded &&
+    !run.continuedByRunId
+  )
+}
+
+/** A continue chain's cost and tokens added up; null where no run reported any. */
+export function chainTotals(chain: RunChainLink[]): {
+  costUsd: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+} {
+  const sum = (values: (number | null)[]) =>
+    values.some((value) => value !== null)
+      ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
+      : null
+  return {
+    costUsd: sum(chain.map((link) => link.costUsd)),
+    inputTokens: sum(chain.map((link) => link.inputTokens)),
+    outputTokens: sum(chain.map((link) => link.outputTokens)),
+  }
 }
 
 /** What the run detail says while nothing has picked the run up yet. */
