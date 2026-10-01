@@ -96,7 +96,7 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
             b.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("ix_csv_import_jobs_status_created_at");
             b.HasIndex(x => x.ProjectId);
         });
-        modelBuilder.Entity<ProjectSequence>(b => { b.ToTable("project_sequences"); b.Ignore(x => x.Id); b.HasKey(x => x.ProjectId); });
+        modelBuilder.Entity<ProjectSequence>(b => { b.ToTable("project_sequences"); b.Ignore(x => x.Id); b.HasKey(x => x.ProjectId); b.Property(x => x.TemplatesSeeded).HasDefaultValue(false); });
         modelBuilder.Entity<ItemTemplate>(b =>
         {
             b.ToTable("item_templates");

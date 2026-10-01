@@ -412,6 +412,16 @@ to open the checkout only for what the ticket's wording depends on, so the perso
 not left waiting through a full reading of the codebase. If you edit the playbook, keep its
 instructions about looking at the code just as bounded.
 
+The **Create ticket** dialog offers templates for the selected type. It selects the type's
+default and prefills the description, priority and labels. Choosing another template or type
+replaces an untouched prefill; text you have edited is preserved. **No template** clears an
+untouched prefill and removes the priority and label defaults. Types without templates start
+with an empty description.
+
+Project admins manage templates under **Project settings → Templates**. The built-in Bug
+report and User story templates are seeded once; renaming or deleting them persists, even
+when every template is deleted. Members, guests and archived projects see the list read-only.
+
 Then, from **Create ticket** on the Items, Backlog or Board page (or the command palette):
 
 1. Choose the type, describe the ticket in your own words, and paste or drop screenshots and

@@ -10,7 +10,9 @@ import {
 } from '@/api/attachments'
 import { createItem, type WorkItem, type WorkItemType } from '@/api/items'
 import { getRefinementSettings, refineItem } from '@/api/refinement'
+import { listItemTemplates, type ItemTemplate } from '@/api/templates'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
+import TemplatePicker from '@/components/common/TemplatePicker.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -55,6 +57,9 @@ const types: { value: WorkItemType; label: string }[] = [
 const type = ref<WorkItemType>(props.defaultType)
 const title = ref('')
 const description = ref('')
+const templateId = ref<string | null>(null)
+const appliedDescription = ref('')
+const selectedTemplate = ref<ItemTemplate | null>(null)
 const submitting = ref<'create' | 'refine' | null>(null)
 const error = ref<string | null>(null)
 const editor = ref<{ uploading: boolean } | null>(null)
@@ -65,6 +70,29 @@ const settings = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'refinement-settings']),
   queryFn: () => getRefinementSettings(props.slug, props.projectKey),
   enabled: computed(() => props.open),
+})
+const templates = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'item-templates']),
+  queryFn: () => listItemTemplates(props.slug, props.projectKey),
+  enabled: computed(() => props.open),
+})
+
+function applyTemplate(template: ItemTemplate | null) {
+  templateId.value = template?.id ?? null
+  selectedTemplate.value = template
+  // Only replace empty text or the untouched prefill, never a person's edits.
+  if (!description.value.trim() || description.value === appliedDescription.value) {
+    description.value = template?.descriptionMarkdown ?? ''
+    appliedDescription.value = description.value
+  }
+}
+
+watch([type, () => templates.isSuccess.value], () => {
+  if (!props.open) return
+  applyTemplate(
+    templates.data.value?.find((template) => template.type === type.value && template.isDefault) ??
+      null,
+  )
 })
 const canRefine = computed(
   () => organizations.current?.canOperateFactory === true && settings.data.value?.enabled === true,
@@ -79,9 +107,16 @@ watch(
     type.value = props.defaultType
     title.value = ''
     description.value = ''
+    appliedDescription.value = ''
+    applyTemplate(
+      templates.data.value?.find(
+        (template) => template.type === type.value && template.isDefault,
+      ) ?? null,
+    )
     error.value = null
     pending.clear()
   },
+  { immediate: true },
 )
 
 async function upload(file: File) {
@@ -102,6 +137,8 @@ async function submit(refine: boolean) {
       title: title.value.trim() || draftTitle(description.value),
       descriptionMarkdown: description.value,
       teamId: props.teamId,
+      priority: selectedTemplate.value?.defaultPriority ?? undefined,
+      labelIds: selectedTemplate.value?.defaultLabelIds,
     })
   } catch (caught) {
     submitting.value = null
@@ -171,6 +208,14 @@ async function submit(refine: boolean) {
             />
           </div>
         </div>
+        <TemplatePicker
+          v-if="templates.data.value?.some((template) => template.type === type)"
+          v-model="templateId"
+          :templates="templates.data.value ?? []"
+          :type="type"
+          :disabled="busy"
+          @select="applyTemplate"
+        />
         <div class="space-y-1.5">
           <label class="text-sm font-medium">Description</label>
           <MarkdownEditor

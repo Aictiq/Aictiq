@@ -85,6 +85,8 @@ export interface CreateItem {
   parentId?: string | null
   teamId?: string | null
   stateId?: string | null
+  priority?: WorkItemPriority
+  labelIds?: string[]
 }
 
 export const listProjectItems = (

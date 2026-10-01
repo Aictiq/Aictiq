@@ -52,7 +52,7 @@ The tenant boundary: who exists, where they belong and what they may do.
 | --- | --- |
 | `workflows`, `workflow_states`, `workflow_transitions` | per-project workflow; states carry a category (Proposed, Active, Resolved, Completed, Removed) |
 | `items` | key, type (Epic, Feature, Story, Task, Bug), state, priority, assignee, team, sprint, parent, lexorank, estimates, claim fields, generated `tsvector` |
-| `project_sequences` | the item number, incremented atomically in the insert's transaction |
+| `project_sequences` | the item number, incremented atomically in the insert's transaction, and the durable `templates_seeded` marker that prevents deleted or renamed built-ins from being seeded again |
 | `labels`, `item_labels` | per-project labels |
 | `comments`, `comment_revisions` | revisions are append-only |
 | `item_history` | append-only field-level history; survives archival and retention |
