@@ -115,14 +115,18 @@ function stubFetch() {
   )
 }
 
-async function mountDetail() {
+async function mountDetail(itemKey = 'PROJ-1') {
   stubFetch()
   const pinia = createPinia()
   setActivePinia(pinia)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/o/:slug/p/:projectKey/items/:itemKey', component: { template: '<div />' } },
+      {
+        path: '/o/:slug/p/:projectKey/items/:itemKey',
+        name: 'item-detail',
+        component: { template: '<div />' },
+      },
       { path: '/', component: { template: '<div />' } },
     ],
   })
@@ -147,9 +151,14 @@ async function mountDetail() {
   })
 
   const wrapper = mount(ItemDetail, {
-    props: { slug: 'acme', projectKey: 'PROJ', itemKey: 'PROJ-1' },
+    props: { slug: 'acme', projectKey: 'PROJ', itemKey },
     global: {
-      plugins: [pinia, router, VueQueryPlugin],
+      plugins: [
+        pinia,
+        router,
+        // As in main.ts: a 404 is final, not retried.
+        [VueQueryPlugin, { queryClientConfig: { defaultOptions: { queries: { retry: false } } } }],
+      ],
       stubs: { RouterLink: RouterLinkStub, Teleport: true },
     },
   })
@@ -238,5 +247,56 @@ describe('the save toast helpers', () => {
       expect.objectContaining({ duration: 2000 }),
     )
     expect(toast.error).toHaveBeenCalledWith('Capacity could not be saved.')
+  })
+})
+
+describe('copying from the item', () => {
+  let writeText: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  })
+
+  it('copies a shareable link to the item and says so', async () => {
+    const wrapper = await mountDetail()
+    await wrapper.find('button[aria-label="Copy link"]').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/o/acme/p/PROJ/items/PROJ-1`)
+    expect(toast.success).toHaveBeenCalledWith('Link copied', expect.anything())
+  })
+
+  it('explains each copy button on hover', async () => {
+    const wrapper = await mountDetail()
+
+    expect(wrapper.find('button[aria-label="Copy link"]').attributes('title')).toBe(
+      'Copy a link to this item',
+    )
+    expect(wrapper.find('button[aria-label="Copy branch name"]').attributes('title')).toBe(
+      'Copy a git branch name for this item',
+    )
+    expect(wrapper.find('button[aria-label="Copy commit prefix"]').attributes('title')).toBe(
+      'Copy a commit message prefix (PROJ-1: )',
+    )
+  })
+
+  it('reports a clipboard the browser refused', async () => {
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    const wrapper = await mountDetail()
+    await wrapper.find('button[aria-label="Copy link"]').trigger('click')
+    await flushPromises()
+
+    expect(toast.error).toHaveBeenCalledWith('Could not copy to the clipboard.')
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+})
+
+describe('following a link to an item', () => {
+  it('says the item cannot be opened when the API hides it, instead of loading forever', async () => {
+    const wrapper = await mountDetail('PROJ-404')
+
+    expect(wrapper.text()).toContain('PROJ-404 could not be opened.')
+    expect(wrapper.text()).toContain('It does not exist, or you do not have access to it.')
+    expect(wrapper.text()).not.toContain('Loading item')
   })
 })
