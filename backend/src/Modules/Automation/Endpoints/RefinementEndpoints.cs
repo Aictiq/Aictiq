@@ -46,8 +46,8 @@ public sealed record RefinementView(
 ///
 /// The run is an ordinary factory run, dispatched through <see cref="RunDispatcher"/>, so the
 /// same doors apply: asking needs project Member on a writable project and the factory
-/// operator flag. Reading where a refinement stands is item history, open to anyone who can
-/// see the item, like a run's status.
+/// operator flag. Refinement details, confirmation and project refinement settings also
+/// belong to factory operators.
 /// </summary>
 public static class RefinementEndpoints
 {
@@ -82,20 +82,21 @@ public static class RefinementEndpoints
     {
         var settings = api.MapGroup("/orgs/{orgSlug}/projects/{projectKey}/refinement-settings")
             .WithTags("Ticket refinement").RequireAuthorization();
-        settings.MapGet("/", GetSettingsAsync).RequireProjectRole(ProjectRole.Member).RequireScope(Scopes.Read);
-        settings.MapPut("/", PutSettingsAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
-        settings.MapPost("/starter-playbook", StarterAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
+        settings.MapGet("/", GetSettingsAsync).RequireProjectRole(ProjectRole.Member).RequireFactoryOperator().RequireScope(Scopes.Read);
+        settings.MapPut("/", PutSettingsAsync).RequireProjectRole(ProjectRole.Admin).RequireFactoryOperator().RequireProjectWritable().RequireScope(Scopes.Write);
+        settings.MapPost("/starter-playbook", StarterAsync).RequireProjectRole(ProjectRole.Admin).RequireFactoryOperator().RequireProjectWritable().RequireScope(Scopes.Write);
 
         var item = api.MapGroup("/orgs/{orgSlug}/items/{itemKey}/refinement")
             .WithTags("Ticket refinement").RequireAuthorization();
         item.MapGet("/", GetAsync)
-            .RequireOrgRole(OrgRole.Guest).RequireRunItemProject(ProjectRole.Guest).RequireScope(Scopes.Read);
+            .RequireOrgRole(OrgRole.Guest).RequireRunItemProject(ProjectRole.Guest)
+            .RequireFactoryOperator().RequireScope(Scopes.Read);
         item.MapPost("/", RefineAsync)
             .RequireOrgRole(OrgRole.Member).RequireRunItemProject(ProjectRole.Member, writable: true)
             .RequireFactoryOperator().RequireScope(Scopes.Write);
         item.MapPost("/confirm", ConfirmAsync)
             .RequireOrgRole(OrgRole.Member).RequireRunItemProject(ProjectRole.Member, writable: true)
-            .RequireScope(Scopes.Write);
+            .RequireFactoryOperator().RequireScope(Scopes.Write);
         return api;
     }
 

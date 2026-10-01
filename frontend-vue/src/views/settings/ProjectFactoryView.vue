@@ -29,7 +29,9 @@ const project = useProjectScope()
 const toast = useToast()
 const organizations = useOrganizationsStore()
 const canOperateFactory = computed(
-  () => organizations.organizations.find((o) => o.slug === project.slug.value)?.canOperateFactory ?? false,
+  () =>
+    organizations.organizations.find((o) => o.slug === project.slug.value)?.canOperateFactory ??
+    false,
 )
 
 const settings = ref<FactorySettings | null>(null)
@@ -333,7 +335,7 @@ async function save() {
     </form>
   </SettingsSection>
   <SettingsSection
-    v-if="!loading && mayRead && !failed"
+    v-if="!loading && mayRead && canOperateFactory && !failed"
     class="mt-8"
     title="Ticket refinement"
     description="Let an agent turn a short description into a complete ticket, using what it should know about this product."

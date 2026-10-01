@@ -440,7 +440,8 @@ delivery), and leaves no item branch behind for the implement run that may follo
 ends, Aictiq releases the claim and leaves the item where it is, whatever the playbook's
 success and failure states say. A run that ends without calling `submit_refinement` marks the
 refinement failed, so it can be tried again. Starting one needs the same **Can start AI work**
-permission as **Hand to agent**; anyone who can see the item can see where its refinement stands.
+permission as **Hand to agent**. Refinement details, confirmation and project refinement
+settings require that permission too; stakeholders do not see or change ticket refinement.
 
 ## Retention
 

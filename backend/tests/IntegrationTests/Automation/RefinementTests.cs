@@ -5,6 +5,7 @@ using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Domain;
 using Aictiq.Modules.Automation.Endpoints;
 using Aictiq.Modules.Tenancy.Domain;
+using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel;
@@ -247,24 +248,69 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Fact]
-    public async Task stakeholders_see_a_refinement_but_cannot_start_one()
+    public async Task stakeholders_cannot_read_or_change_refinement_even_as_project_admins()
     {
         await EnableAsync();
+        var settings = (await Owner.GetFromJsonAsync<RefinementSettingsView>(
+            $"{ProjectBase}/refinement-settings/", ApiTestContext.Json, Ct))!;
         await RefineAsync(ItemKey);
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await ClaimAsync(runner);
+        await using (var agent = await ConnectAsync(claimed.AgentToken))
+        {
+            await agent.CallToolAsync("submit_refinement",
+                new Dictionary<string, object?> { ["key"] = ItemKey, ["outcome"] = "ready" }, cancellationToken: Ct);
+        }
+        var ready = await GetRefinementAsync(ItemKey);
+        Assert.Equal(RefinementStatus.Ready, ready.Status);
 
         var stakeholder = await Context.RegisterAsync($"refine-stakeholder-{Guid.NewGuid():N}@test.local", "Sam", "Stake");
         await AddMemberAsync(stakeholder.User.Id, OrgRole.Member, canOperateFactory: false);
+        (await Owner.PutAsJsonAsync($"{ProjectBase}/members/{stakeholder.User.Id}",
+            new UpdateProjectMemberRequest(ProjectRole.Admin), ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
         using var client = Context.ClientFor(stakeholder);
 
         var read = await client.GetAsync($"{ItemRefinement(ItemKey)}/", Ct);
-        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, read.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(read));
+
+        var confirm = await client.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/confirm",
+            new ConfirmRefinementRequest(ready.Version), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, confirm.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(confirm));
+        Assert.Equivalent(ready, await GetRefinementAsync(ItemKey));
+
+        var readSettings = await client.GetAsync($"{ProjectBase}/refinement-settings/", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, readSettings.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(readSettings));
+        var saveSettings = await client.PutAsJsonAsync($"{ProjectBase}/refinement-settings/",
+            new UpdateRefinementSettingsRequest(null, null, null, null, null, null, null, settings.Version),
+            ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, saveSettings.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(saveSettings));
+        var starter = await client.PostAsync($"{ProjectBase}/refinement-settings/starter-playbook", null, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, starter.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(starter));
+        Assert.Equal(settings, await Owner.GetFromJsonAsync<RefinementSettingsView>(
+            $"{ProjectBase}/refinement-settings/", ApiTestContext.Json, Ct));
 
         var other = await CreateItemAsync("Another thing");
         var refused = await client.PostAsJsonAsync($"{ItemRefinement(other.Key)}/", new RefineItemRequest(), ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Equal(ProblemTypes.FactoryNotPermitted, await ProblemTypeAsync(refused));
 
-        // An item that was never refined answers no content, not a missing resource.
-        Assert.Equal(HttpStatusCode.NoContent, (await client.GetAsync($"{ItemRefinement(other.Key)}/", Ct)).StatusCode);
+        // Operators still get no content for a never-refined item; stakeholders cannot read it.
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"{ItemRefinement(other.Key)}/", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Owner.GetAsync($"{ItemRefinement(other.Key)}/", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v1/orgs/{Slug}/items/{ItemKey}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task refinement_does_not_reveal_a_project_to_an_outsider()
+    {
+        using var stranger = Context.ClientFor(await Context.RegisterAsync($"refine-stranger-{Guid.NewGuid():N}@test.local"));
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"{ItemRefinement(ItemKey)}/", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"{ProjectBase}/refinement-settings/", Ct)).StatusCode);
     }
 
     [Fact]
