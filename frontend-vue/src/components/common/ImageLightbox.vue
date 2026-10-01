@@ -40,7 +40,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick))
         class="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/80 duration-100"
       />
       <DialogContent
-        class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 p-6 outline-none"
+        class="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-3 p-6 outline-none [&>*]:cursor-auto"
         @click.self="image = null"
       >
         <DialogTitle class="sr-only">{{ image?.alt || 'Image' }}</DialogTitle>

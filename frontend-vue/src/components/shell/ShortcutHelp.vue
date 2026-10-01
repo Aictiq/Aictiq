@@ -47,7 +47,7 @@ const groups = [
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-[3px]"
+    class="fixed inset-0 z-60 flex cursor-pointer items-center justify-center bg-black/60 backdrop-blur-[3px]"
     @click="open = false"
   >
     <div
@@ -56,7 +56,7 @@ const groups = [
       aria-modal="true"
       aria-labelledby="shortcut-help-title"
       tabindex="-1"
-      class="bg-popover border-border w-[520px] max-w-[92vw] overflow-hidden rounded-lg border shadow-2xl"
+      class="bg-popover border-border w-[520px] max-w-[92vw] cursor-auto overflow-hidden rounded-lg border shadow-2xl"
       @click.stop
     >
       <div class="border-border flex items-center justify-between border-b px-4 py-3">
