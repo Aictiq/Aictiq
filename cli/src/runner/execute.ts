@@ -106,7 +106,7 @@ export async function executeRun(
     // goes stale if nobody refreshes it while the workspace is being cloned.
     const beat = async () => {
       try {
-        const { cancelRequested } = await client.runHeartbeat(run.runId)
+        const { cancelRequested } = await client.runHeartbeat(run.runId, sessionId)
         if (cancelRequested) {
           event('Cancel requested; stopping the harness')
           stop('cancelled')

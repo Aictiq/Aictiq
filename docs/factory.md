@@ -359,6 +359,28 @@ the run still finishes and the skipped transition is recorded in item history.
 Anyone who can see the item can see the run's status and linked pull request. Only a factory
 operator can start or cancel runs or read the prompt snapshot, log, and failure reason.
 
+### Continue a failed run
+
+The runner records each run's harness session (Claude Code's session, Codex's thread,
+OpenCode's session). When a run fails or times out after its harness started, the runner keeps
+its checkout, so the run can pick up where the agent stopped instead of starting over:
+
+- **Continue** on the run page queues a new run on the same runner. The harness resumes the
+  same session in the kept checkout, with the agent's earlier edits still there, and is told why
+  the previous attempt stopped.
+- **Retry** starts a fresh run with the same playbook and agent from a new checkout. A run that
+  failed before its harness started, such as `workspace-failed`, offers only Retry.
+- A rate limit, an overloaded or unreachable model API, or a harness crash
+  (`harness-rate-limited`, `harness-transient`, `harness-crashed`) is continued automatically,
+  after 1 minute and then 5 minutes, at most twice per failed run. A cancel, a time limit, or any
+  other failure is never continued automatically; Continue stays available on the run page.
+
+A continue run is a run: it counts toward plan limits and billing, and it is refused like any
+other dispatch while the organization is read-only or the item is claimed. Only the item's
+latest run can be continued. The run page links each run in the chain and adds up its cost and
+tokens. If the runner is offline or no longer has the workspace, the continue run fails with
+`session-unavailable`; use Retry.
+
 ## 6. Add rules when manual runs are reliable
 
 Under **Factory → Rules**, a project Admin can express: “when an item enters this state,
@@ -464,8 +486,12 @@ A run log is also capped at 8 MiB by default (`Automation:MaxLogBytes`), indepen
 retention; a capped log remains visibly marked as truncated.
 
 Runner workspaces live under `~/.local/share/aictiq/runner/<run-id>/` by default and are
-removed after each run. `aictiq runner start --keep-workspaces` is a debugging option, not a
-retention policy; clean retained checkouts yourself because they contain repository data.
+removed after each run, except for a run that failed with a session to continue. The runner
+keeps such a workspace for 24 hours, at most 5 at a time (the oldest go first), and removes it
+when the run is continued or the item's next run succeeds. A kept checkout can hold uncommitted
+work and a push token; it stays in the run directory, which only the runner's user can read.
+`aictiq runner start --keep-workspaces` is a debugging option, not a retention policy; it keeps
+every workspace and sweeps none, so clean them yourself because they contain repository data.
 Attachment files live in the same run directory under `attachments/`, outside the checkout;
 they are provisioned with the per-run agent token and are never added to its branch.
 
@@ -477,7 +503,9 @@ they are provisioned with the per-run agent token and are never added to its bra
 | `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
 | `no-remote` | A direct-delivery run's Runner-local checkout has no `origin` remote. The agent works in an isolated clone that is removed after the run, so without a remote its commits would be lost. | Add the remote (`git remote add origin <url>`) in the mapped checkout, or switch the playbook's **Delivery** to **Branch and pull request**, which works in a local-only repository. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
-| `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then start a new run. |
+| `harness-rate-limited`, `harness-transient`, `harness-crashed` | The harness hit a rate limit, the model API was overloaded or unreachable, or the harness died on its own. | Aictiq continues the run automatically up to twice. After that, use **Continue** once the limit resets, or **Retry**. |
+| `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (continued, older than 24 hours, or removed). | Use **Retry** to start a fresh run. |
+| `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then **Continue** the run (each continue gets the full limit again) or start a new one. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
 | Runner exits with code 5 | Its `jrn_` secret was disabled, deleted, or rotated. Retrying cannot repair the credential. | Register or rotate the runner in Aictiq, then run `aictiq runner register` with the newly shown secret. |
 | The run cannot open a pull request | The harness can edit locally but the service account cannot push or use `gh`. | Verify the repository remote, Git/SSH or GitHub App permissions, and `gh auth status` as the runner account. Do not put a long-lived personal token in the playbook. |
