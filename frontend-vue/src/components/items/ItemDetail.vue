@@ -718,6 +718,26 @@ watch(
 async function copy(value: string) {
   await navigator.clipboard.writeText(value)
 }
+async function copyWithToast(value: string, message: string) {
+  try {
+    await copy(value)
+    toast.success(message)
+  } catch (error) {
+    toast.error(error, 'Could not copy to the clipboard.')
+  }
+}
+// The item's own page is its shareable address: it opens the same item from anywhere, a
+// signed-out visitor is sent through login and back, and the API still decides access.
+// Built from the route, not the current URL, so a link copied from the board dialog
+// lands on the item rather than on the board.
+function itemUrl() {
+  const { href } = router.resolve({
+    name: 'item-detail',
+    params: { slug: props.slug, projectKey: props.projectKey, itemKey: props.itemKey },
+  })
+  return new URL(href, window.location.origin).toString()
+}
+const copyLink = () => copyWithToast(itemUrl(), 'Link copied')
 // The key's own copy button answers with a check for a moment, so a click that put the
 // key on the clipboard looks different from one that missed.
 const keyCopied = ref(false)
@@ -1439,15 +1459,30 @@ function logged(updated: TimeTrackingItem) {
       <div class="rounded-md border p-3">
         <p class="font-label">Copy</p>
         <div class="mt-2 flex flex-wrap gap-2">
-          <button class="border rounded p-1.5" @click="copy(currentItem.key)">
-            <Copy class="size-4" /></button
-          ><button
+          <button
+            type="button"
             class="border rounded p-1.5"
-            @click="copy(branchName(currentItem.key, currentItem.title))"
+            aria-label="Copy link"
+            title="Copy a link to this item"
+            @click="copyLink"
           >
-            <GitBranch class="size-4" /></button
-          ><button class="border rounded p-1.5" @click="copy(`${currentItem.key}: `)">
-            <Check class="size-4" />
+            <Copy class="size-4" aria-hidden="true" /></button
+          ><button
+            type="button"
+            class="border rounded p-1.5"
+            aria-label="Copy branch name"
+            title="Copy a git branch name for this item"
+            @click="copyWithToast(branchName(currentItem.key, currentItem.title), 'Branch name copied')"
+          >
+            <GitBranch class="size-4" aria-hidden="true" /></button
+          ><button
+            type="button"
+            class="border rounded p-1.5"
+            aria-label="Copy commit prefix"
+            :title="`Copy a commit message prefix (${currentItem.key}: )`"
+            @click="copyWithToast(`${currentItem.key}: `, 'Commit prefix copied')"
+          >
+            <Check class="size-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -1530,6 +1565,18 @@ function logged(updated: TimeTrackingItem) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  </div>
+  <!-- A shared link can reach someone the item is hidden from: the API answers 404 either
+       way, so the page says so instead of loading forever. -->
+  <div v-else-if="item.isError.value" class="p-8" role="alert">
+    <p class="font-medium">{{ itemKey }} could not be opened.</p>
+    <p class="text-muted-foreground mt-1 text-sm">
+      {{
+        toApiError(item.error.value).status === 404
+          ? 'It does not exist, or you do not have access to it.'
+          : toApiError(item.error.value).title
+      }}
+    </p>
   </div>
   <p v-else class="p-8">Loading item…</p>
 </template>
