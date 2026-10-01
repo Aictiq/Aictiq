@@ -94,6 +94,9 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
         Assert.Contains("A pet-sitting marketplace.", claimed.Prompt);
         Assert.Contains("[APP - ...]", claimed.Prompt);
         Assert.Contains("# Playbook: Refine", claimed.Prompt);
+        // The budget that keeps a refine run from reading the codebase while a person waits.
+        Assert.Contains("Work quickly", claimed.Prompt);
+        Assert.Contains("Stop as soon as you can write the ticket", claimed.Prompt);
         Assert.DoesNotContain("open a pull request when the work is reviewable", claimed.Prompt);
 
         // A second request while it refines is refused, not queued behind it.

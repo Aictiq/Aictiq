@@ -406,7 +406,11 @@ holds the project context every refine run receives in front of its prompt:
 | Supported platforms and devices | So a bug report names the platform, or the agent asks for it. |
 | Refined tickets go to | The workflow state, and so the board column, a confirmed ticket moves to. |
 
-Refine runs execute as the chosen agent, or the project's default agent.
+Refine runs execute as the chosen agent, or the project's default agent. A refine run is meant
+to be short: Aictiq's own prompt tells the agent to work from the item and its attachments and
+to open the checkout only for what the ticket's wording depends on, so the person who asked is
+not left waiting through a full reading of the codebase. If you edit the playbook, keep its
+instructions about looking at the code just as bounded.
 
 Then, from **Create ticket** on the Items, Backlog or Board page (or the command palette):
 

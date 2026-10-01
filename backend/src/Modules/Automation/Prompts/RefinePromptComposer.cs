@@ -18,6 +18,11 @@ public sealed record RefineContext(
 /// the checkout is there so the agent can see how the product works today and what a change
 /// would touch, and the result is the item's own title and description plus one
 /// <c>submit_refinement</c> call that tells Aictiq whether the ticket is ready or what to ask.
+///
+/// It also spends the prompt's last section on how fast to work. A refine run is the one kind
+/// of run a person waits on in front of the dialog, and an agent handed a checkout with no
+/// budget reads its way through the codebase as if it were implementing: the budget here is
+/// what keeps refining a matter of minutes.
 /// </summary>
 public static class RefinePromptComposer
 {
@@ -32,14 +37,20 @@ public static class RefinePromptComposer
         text.AppendLine($"""
             You are {agentDisplayName}, a software agent refining item {itemKey} in project {projectName} ({projectKey}).
             This is a refinement run. A person described the ticket briefly in its title and description, possibly with screenshots or files attached; turn that into a complete, implementation-ready ticket of the item's type, or ask what only they can tell you.
-            Do not change code, create branches, commit, push or open a pull request. The checkout is there so you can check how things work today and what the change might break.
+            Do not change code, create branches, commit, push or open a pull request.
             Do not transition the item yourself - it stays where it is until a person confirms the ticket.
 
             How to finish:
-            1. Read the item with get_item("{itemKey}") and look at every attachment with get_attachment. Use get_project("{projectKey}") for the project's item templates for this type.
+            1. Read the item with get_item("{itemKey}"), look at every attachment with get_attachment, and get the project's item templates for this type with get_project("{projectKey}"). Ask for all of them at once.
             2. Decide whether you have enough to write the ticket. Never invent requirements: when something essential is unclear and neither the description, the attachments nor the code answers it, ask.
             3. Rewrite the item with update_item: a clear title that follows the naming conventions below, and a description with the sections the playbook asks for this item type. Keep what the person wrote that still holds.
             4. Call submit_refinement exactly once, last: outcome "ready" with a one-line summary when the ticket is complete, or outcome "needs_input" with only the questions that block it (at most {ItemRefinement.MaxQuestions}). Do not ask what a screenshot or the code already answers.
+
+            Work quickly - someone is waiting on this, and refining a ticket is worth minutes, not an investigation:
+            - The item and its attachments are usually the whole input. The checkout is there for what the ticket's wording depends on and nothing else: what the screen or setting is called today, whether the behaviour already exists, what the change would touch.
+            - When you do look, search for that answer instead of reading your way to it. Grep for a name and read the lines around the hits; do not print whole files, and skip tests, migrations and generated code.
+            - Send searches that do not depend on each other in one batch, not one per turn.
+            - Stop as soon as you can write the ticket. Knowing the code in full is the implement run's job: a ticket that names the right behaviour and leaves the design open is finished.
             """);
         text.AppendLine();
 
