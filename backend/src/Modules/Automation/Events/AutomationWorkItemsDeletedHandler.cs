@@ -35,6 +35,8 @@ public sealed class AutomationWorkItemsDeletedHandler(
         // item itself is gone, so its firing history no longer names anything real.
         await db.RuleFirings.Where(firing => @event.ItemIds.Contains(firing.ItemId))
             .ExecuteDeleteAsync(cancellationToken);
+        await db.Refinements.Where(refinement => @event.ItemIds.Contains(refinement.ItemId))
+            .ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         foreach (var token in liveTokens)

@@ -60,6 +60,7 @@ public static class AutomationModule
         api.MapRunEndpoints();
         api.MapRunProtocolEndpoints();
         api.MapRuleEndpoints();
+        api.MapRefinementEndpoints();
         return api;
     }
 }

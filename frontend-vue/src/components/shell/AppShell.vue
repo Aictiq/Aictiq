@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getSubscription } from '@/api/billing'
 import { getLatestGitHubRelease, getReleaseMetadata, isNewerRelease } from '@/api/meta'
 import ImageLightbox from '@/components/common/ImageLightbox.vue'
+import CreateTicketDialog from '@/components/items/CreateTicketDialog.vue'
 import ItemDetailDialog from '@/components/items/ItemDetailDialog.vue'
 import AppHeader from '@/components/shell/AppHeader.vue'
 import PaymentBanner from '@/components/shell/PaymentBanner.vue'
@@ -16,6 +17,8 @@ import CreateOrganizationDialog from '@/components/shell/CreateOrganizationDialo
 import ShortcutHelp from '@/components/shell/ShortcutHelp.vue'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { useCommands } from '@/composables/useCommands'
+import { useCreateTicket } from '@/composables/useCreateTicket'
+import { useItemModal } from '@/composables/useItemModal'
 import { useLogout } from '@/composables/useLogout'
 import { useOrganizationSwitch } from '@/composables/useOrganizationSwitch'
 import { useShortcut } from '@/composables/useShortcuts'
@@ -134,7 +137,22 @@ const updateAvailable = computed(() => {
   return current !== undefined && latest !== undefined && isNewerRelease(current, latest)
 })
 
+const createTicket = useCreateTicket()
+const itemModal = useItemModal()
+
 useCommands(() => [
+  ...(projects.current && !projects.current.isArchived
+    ? [
+        {
+          id: 'items.create-ticket',
+          group: 'Items',
+          label: `Create ticket in ${projects.current.key}`,
+          icon: '+',
+          keywords: 'new item story bug epic refine ai',
+          run: () => createTicket.open(projects.current!.key),
+        },
+      ]
+    : []),
   {
     id: 'nav.my-work',
     group: 'Navigation',
@@ -334,6 +352,15 @@ useShortcut('mod+b', toggleNavigation, { allowInInput: true })
     </div>
 
     <ItemDetailDialog />
+    <CreateTicketDialog
+      v-if="organizations.currentSlug && createTicket.state.projectKey"
+      v-model:open="createTicket.state.open"
+      :slug="organizations.currentSlug"
+      :project-key="createTicket.state.projectKey"
+      :team-id="createTicket.state.teamId"
+      :default-type="createTicket.state.type"
+      @created="(item) => itemModal.open(item.key)"
+    />
     <ImageLightbox />
 
     <CommandPalette />

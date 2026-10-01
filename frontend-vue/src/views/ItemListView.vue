@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus } from '@lucide/vue'
 import type { SortingState } from '@tanstack/vue-table'
-import { createItem, listProjectItems, type WorkItem } from '@/api/items'
+import { listProjectItems, type WorkItem } from '@/api/items'
 import { createSavedView, listSavedViews } from '@/api/views'
 import DataTable from '@/components/common/DataTable.vue'
 import ClaimGlyph from '@/components/common/ClaimGlyph.vue'
@@ -14,6 +14,7 @@ import StateBadge from '@/components/common/StateBadge.vue'
 import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { useCommands } from '@/composables/useCommands'
+import { useCreateTicket } from '@/composables/useCreateTicket'
 import { useItemModal } from '@/composables/useItemModal'
 import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryParams'
 import { reduceListKeyboard } from '@/lib/item-list-keyboard'
@@ -71,11 +72,8 @@ const views = useQuery({
 })
 const itemPage = computed(() => items.data.value ?? null)
 const savedViews = computed(() => views.data.value ?? [])
-const creating = ref(false)
-const title = ref('')
-// Items creates the standalone kinds; Epics, Features and Tasks are made where their
-// hierarchy lives (portfolio, backlog, a parent item).
-const createType = ref<'bug' | 'story'>('bug')
+const createTicket = useCreateTicket()
+const create = () => createTicket.open(props.projectKey)
 const selected = ref(new Set<string>())
 const current = ref(0)
 useProjectRealtime(() => props.slug, () => props.projectKey)
@@ -131,17 +129,6 @@ const itemModal = useItemModal()
 function open(item: WorkItem) {
   itemModal.open(item.key)
 }
-async function create() {
-  if (!title.value.trim()) return
-  const created = await createItem(props.slug, props.projectKey, {
-    type: createType.value,
-    title: title.value.trim(),
-  })
-  title.value = ''
-  creating.value = false
-  await client.invalidateQueries({ queryKey: [props.slug, props.projectKey, 'items'] })
-  open(created)
-}
 async function saveView() {
   const name = window.prompt('Name this view')
   if (!name?.trim()) return
@@ -162,7 +149,9 @@ function onKeydown(event: KeyboardEvent) {
   if (
     event.target instanceof HTMLInputElement ||
     event.target instanceof HTMLTextAreaElement ||
-    itemModal.openKey.value
+    (event.target instanceof HTMLElement && event.target.isContentEditable) ||
+    itemModal.openKey.value ||
+    createTicket.state.open
   )
     return
   const listed = items.data.value?.items ?? []
@@ -184,7 +173,7 @@ function onKeydown(event: KeyboardEvent) {
     if (focused) open(focused)
   } else if (event.key === 'c') {
     event.preventDefault()
-    creating.value = true
+    create()
   }
 }
 window.addEventListener('keydown', onKeydown)
@@ -195,9 +184,7 @@ useCommands(() => [
     label: 'Create item',
     group: 'Items',
     shortcut: 'c',
-    run: () => {
-      creating.value = true
-    },
+    run: create,
   },
 ])
 </script>
@@ -212,9 +199,10 @@ useCommands(() => [
         </div>
         <button
           class="bg-primary text-primary-foreground inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm"
-          @click="creating = true"
+          data-testid="items-create-ticket"
+          @click="create"
         >
-          <Plus class="size-4" /> Create
+          <Plus class="size-4" /> Create ticket
         </button>
       </div>
 
@@ -276,30 +264,6 @@ useCommands(() => [
           Next
         </button>
       </div>
-      <form
-        v-if="creating"
-        class="bg-background fixed inset-x-0 bottom-0 z-30 mx-auto grid max-w-lg grid-cols-[minmax(0,1fr)_auto] gap-2 border p-4 shadow-lg sm:flex"
-        @submit.prevent="create"
-      >
-        <select
-          v-model="createType"
-          aria-label="Item type"
-          class="border-input col-span-2 rounded border px-2 py-2 sm:col-span-1"
-        >
-          <option value="bug">Bug</option>
-          <option value="story">Story</option>
-        </select>
-        <input
-          v-model="title"
-          autofocus
-          class="border-input col-span-2 min-w-0 flex-1 rounded border px-3 py-2 sm:col-span-1"
-          :placeholder="createType === 'bug' ? 'Bug title' : 'Story title'"
-        />
-        <button class="bg-primary text-primary-foreground rounded px-3 py-2">Create</button
-        ><button type="button" class="rounded border px-3 py-2" @click="creating = false">
-          Cancel
-        </button>
-      </form>
     </section>
   </AppShell>
 </template>

@@ -104,9 +104,15 @@ public sealed class RunDispatcher(
     /// requester to check readability against - its author was checked when the rule was
     /// written, so only the page's existence and content matter here.
     /// </param>
+    /// <param name="refine">
+    /// Set for a refine run: the item is claimed where it stands rather than moved to Active
+    /// and assigned, the prompt is <see cref="RefinePromptComposer"/>'s, and the run works in
+    /// an isolated clone of the default branch, so it leaves no item branch behind for the
+    /// implement run that may follow.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
-        DispatchActor actor, CancellationToken ct)
+        DispatchActor actor, CancellationToken ct, RefineContext? refine = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
 
@@ -165,7 +171,9 @@ public sealed class RunDispatcher(
             return DispatchResult.PlaybookNotFound();
         }
 
-        var claim = await claims.ClaimForAsync(item.Id, agentUserId, ct);
+        var claim = refine is null
+            ? await claims.ClaimForAsync(item.Id, agentUserId, ct)
+            : await claims.ClaimInPlaceAsync(item.Id, agentUserId, ct);
         switch (claim.Outcome)
         {
             case WorkItemClaimOutcome.NotFound:
@@ -174,12 +182,17 @@ public sealed class RunDispatcher(
                 return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
         }
 
-        var branch = playbook.WorkOnDefaultBranch
+        var onDefaultBranch = refine is not null || playbook.WorkOnDefaultBranch;
+        var branch = onDefaultBranch
             ? settings?.DefaultBranch ?? "main"
             : BranchNames.For(item.Key, item.Title);
-        var prompt = RunPromptComposer.Compose(
-            agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-            branch, playbook.Name, content.Markdown, playbook.WorkOnDefaultBranch);
+        var prompt = refine is null
+            ? RunPromptComposer.Compose(
+                agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
+                branch, playbook.Name, content.Markdown, playbook.WorkOnDefaultBranch)
+            : RefinePromptComposer.Compose(
+                agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
+                playbook.Name, content.Markdown, refine);
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -189,6 +202,7 @@ public sealed class RunDispatcher(
             ItemId = item.Id,
             ItemKey = item.Key,
             PlaybookId = playbook.Id,
+            Kind = refine is null ? RunKind.Implement : RunKind.Refine,
             AgentUserId = agentUserId,
             RequestedRunnerId = runnerId,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
@@ -197,7 +211,7 @@ public sealed class RunDispatcher(
             PromptSnapshot = prompt,
             PlaybookRevisionId = content.RevisionId,
             BranchName = branch,
-            WorkOnDefaultBranch = playbook.WorkOnDefaultBranch,
+            WorkOnDefaultBranch = onDefaultBranch,
             MaxMinutes = Math.Clamp(playbook.MaxMinutes, 5, 720),
             QueuedAt = now,
         };
@@ -216,6 +230,7 @@ public sealed class RunDispatcher(
         await realtime.PublishAsync(project.Id, "run.changed", new
         {
             runId = run.Id, itemId = item.Id, itemKey = item.Key, status = "queued", agentId = agentUserId,
+            kind = refine is null ? "implement" : "refine",
         }, ct);
         AutomationMetrics.Started.Add(1);
 

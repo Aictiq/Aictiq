@@ -21,6 +21,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="RequestedBy">Who dispatched the run, or null when <paramref name="RuleId"/> did instead.</param>
 /// <param name="RuleId">The automation rule that dispatched the run, or null for a person.</param>
 /// <param name="RuleName">The rule's name, or null once the rule that started this run has been deleted.</param>
+/// <param name="Kind">An implement run delivers code; a refine run rewrites the ticket.</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -29,7 +30,7 @@ public sealed record RunView(
     Guid? PlaybookRevisionId, int MaxMinutes, DateTimeOffset QueuedAt, DateTimeOffset? AssignedAt,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, DateTimeOffset? LastHeartbeatAt, bool CancelRequested,
     string? OutcomeSummary, string? PullRequestUrl, int? ExitCode, decimal? CostUsd, long? InputTokens,
-    long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version);
+    long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement);
 
 /// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
 public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId, Guid? RunnerId = null);
@@ -408,7 +409,7 @@ public static class RunEndpoints
             run.InputTokens, run.OutputTokens,
             includeDetails ? run.FailureReason : null,
             includeDetails ? run.PromptSnapshot : null,
-            run.Version);
+            run.Version, run.Kind);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)
@@ -424,7 +425,7 @@ public static class RunEndpoints
     /// leaving the project where <see cref="AuthorizationFilters.ResolvedProject"/> and
     /// <see cref="AuthorizationFilters.ProjectWriteRefusalAsync"/> find it.
     /// </summary>
-    private static TBuilder RequireRunItemProject<TBuilder>(this TBuilder builder, ProjectRole required, bool writable = false)
+    internal static TBuilder RequireRunItemProject<TBuilder>(this TBuilder builder, ProjectRole required, bool writable = false)
         where TBuilder : IEndpointConventionBuilder =>
         builder.AddEndpointFilterFactory((_, next) => async context =>
         {

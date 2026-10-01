@@ -386,6 +386,48 @@ results, notifications, the MCP tools and the agent activity feed too. Use the *
 should operate the factory; only a Member's **Can start AI work** flag is optional-Owners and
 Admins always can, and Guests never can.
 
+## 8. Refine tickets
+
+A refine run turns a short description into a complete, implementation-ready ticket. It is an
+ordinary run on your runner with a different job: it reads the item, its screenshots and
+files, and the code, then rewrites the item's title and description, or asks the questions it
+cannot answer itself. It never commits, pushes or opens a pull request.
+
+To turn it on, open **Project settings → Factory → Ticket refinement** and choose
+**Create Refine playbook** (or pick an existing playbook). The starter's instructions say how
+a Story, Bug, Epic and Task are written up; edit them like any playbook. The same section
+holds the project context every refine run receives in front of its prompt:
+
+| Field | Use it for |
+| --- | --- |
+| Product description | What the product is, who uses it, the parts tickets usually touch. |
+| Ticket-writing instructions | Tone, required sections, how acceptance criteria are phrased. |
+| Naming conventions | Title prefixes such as `[DS - ...]` or `[IDA - ...]`. |
+| Supported platforms and devices | So a bug report names the platform, or the agent asks for it. |
+| Refined tickets go to | The workflow state, and so the board column, a confirmed ticket moves to. |
+
+Refine runs execute as the chosen agent, or the project's default agent.
+
+Then, from **Create ticket** on the Items, Backlog or Board page (or the command palette):
+
+1. Choose the type, describe the ticket in your own words, and paste or drop screenshots and
+   files into the description. A title is optional.
+2. Choose **Refine ticket**. Aictiq files the item in its initial state and opens it; a
+   panel above the description follows the run.
+3. When the agent needs input, the panel lists its questions. Answer the ones you can and
+   choose **Answer and refine**: the answers travel into the next run's prompt.
+4. When the ticket is ready, review it, edit anything, and choose **Confirm ticket**. The
+   item moves to the configured state. **Ask for changes** sends a note back for another pass.
+
+**Create** still files a ticket exactly as written, and any existing item can be refined from
+its own page. A refine run claims the item without moving or assigning it, works in an isolated
+clone of the default branch (so the runner checkout needs an `origin` remote, as for direct
+delivery), and leaves no item branch behind for the implement run that may follow. When it
+ends, Aictiq releases the claim and leaves the item where it is, whatever the playbook's
+success and failure states say. A run that ends without calling `submit_refinement` marks the
+refinement failed, so it can be tried again. Starting one needs the same **Can start AI work**
+permission as **Hand to agent**; anyone who can see the item can see where its refinement stands.
+
 ## Retention
 
 Run records stay as item history, with outcome summaries, failure reasons, prompt

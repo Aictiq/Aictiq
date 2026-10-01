@@ -34,12 +34,12 @@ public sealed class RunFinishedHandler(
         var now = clock.GetUtcNow();
         var actorId = @event.AgentId;
 
-        var requestedTarget = @event.Outcome switch
+        var requestedTarget = @event.Refinement ? null : @event.Outcome switch
         {
             RunOutcomes.Succeeded => @event.OnSuccessStateId,
             _ => @event.OnFailureStateId,
         };
-        if (@event.Outcome == RunOutcomes.Succeeded && requestedTarget is null)
+        if (@event.Outcome == RunOutcomes.Succeeded && requestedTarget is null && !@event.Refinement)
         {
             // No playbook success state named: fall back to the workflow's
             // lowest-position Resolved state, as PullRequestReferencedItemHandler does.
@@ -106,15 +106,16 @@ public sealed class RunFinishedHandler(
             }
         }
 
+        var noun = @event.Refinement ? "Refinement run" : "Run";
         var markdown = @event.Outcome switch
         {
             RunOutcomes.Succeeded => string.IsNullOrWhiteSpace(@event.Summary)
-                ? $"Run {@event.RunId} succeeded · [View log](/runs/{@event.RunId})"
-                : $"Run {@event.RunId} succeeded · {@event.Summary} · [View log](/runs/{@event.RunId})",
+                ? $"{noun} {@event.RunId} succeeded · [View log](/runs/{@event.RunId})"
+                : $"{noun} {@event.RunId} succeeded · {@event.Summary} · [View log](/runs/{@event.RunId})",
             RunOutcomes.Cancelled => string.IsNullOrWhiteSpace(@event.Summary)
-                ? $"Run {@event.RunId} was cancelled · [View log](/runs/{@event.RunId})"
-                : $"Run {@event.RunId} was cancelled · {@event.Summary} · [View log](/runs/{@event.RunId})",
-            _ => $"Run {@event.RunId} failed · {@event.FailureReason} · [View log](/runs/{@event.RunId})",
+                ? $"{noun} {@event.RunId} was cancelled · [View log](/runs/{@event.RunId})"
+                : $"{noun} {@event.RunId} was cancelled · {@event.Summary} · [View log](/runs/{@event.RunId})",
+            _ => $"{noun} {@event.RunId} failed · {@event.FailureReason} · [View log](/runs/{@event.RunId})",
         };
         var comment = new Comment
         {

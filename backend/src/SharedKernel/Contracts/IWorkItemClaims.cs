@@ -33,12 +33,24 @@ public interface IWorkItemClaims
 {
     Task<WorkItemClaimResult> ClaimForAsync(
         Guid itemId, string agentUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same claim without the assignment or the move to an Active state: a refine run
+    /// works on the ticket, not on the work it describes, so the item stays where the
+    /// person filed it and keeps its assignee.
+    /// </summary>
+    Task<WorkItemClaimResult> ClaimInPlaceAsync(
+        Guid itemId, string agentUserId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>No WorkItems module means there is nothing to claim; fail closed.</summary>
 public sealed class NullWorkItemClaims : IWorkItemClaims
 {
     public Task<WorkItemClaimResult> ClaimForAsync(
+        Guid itemId, string agentUserId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new WorkItemClaimResult(WorkItemClaimOutcome.NotFound, 0, null));
+
+    public Task<WorkItemClaimResult> ClaimInPlaceAsync(
         Guid itemId, string agentUserId, CancellationToken cancellationToken = default) =>
         Task.FromResult(new WorkItemClaimResult(WorkItemClaimOutcome.NotFound, 0, null));
 }

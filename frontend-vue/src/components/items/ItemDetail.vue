@@ -42,6 +42,7 @@ import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import TimeTrackingPopover from '@/components/common/TimeTrackingPopover.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
+import RefinementPanel from '@/components/items/RefinementPanel.vue'
 import StartRunDialog from '@/components/factory/StartRunDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -864,6 +865,13 @@ function logged(updated: TimeTrackingItem) {
         :live-run="claimRun"
         :run-log-to="claimRunLogTo"
         @release="release"
+      />
+      <RefinementPanel
+        :slug="slug"
+        :project-key="projectKey"
+        :item="currentItem"
+        :dirty="isDirty"
+        :busy="liveRun !== null"
       />
       <div class="mt-5">
         <label class="font-label">Description</label

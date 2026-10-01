@@ -56,6 +56,9 @@ public sealed class Run : TenantEntity
 
     public Guid PlaybookId { get; init; }
 
+    /// <summary>An implement run delivers code; a refine run rewrites the ticket and leaves the item where it is.</summary>
+    public RunKind Kind { get; init; }
+
     /// <summary>The agent account the run executes as. Its per-run token is minted on assignment.</summary>
     public required string AgentUserId { get; init; }
 
