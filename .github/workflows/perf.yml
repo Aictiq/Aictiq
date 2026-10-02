@@ -67,10 +67,12 @@ jobs:
           AICTIQ_IMAGE_PULL_POLICY=never
           AICTIQ_SUBNET=10.89.7.0/24
           CADDY_IP=10.89.7.10
-          # The nightly drives ~20 req/s from one runner address; the shipped global
-          # guard (300/min per address) would 429 it into a fake pass. MCP limits stay
-          # stock - perf/mcp.js paces itself under the 60/min tool budget.
+          # The nightly drives ~20 req/s from one runner address as one user; the shipped
+          # global guard (300/min per address) and search budget (120/min per user) would
+          # 429 most of it. MCP limits stay stock - perf/mcp.js paces itself under the
+          # 60/min tool budget.
           RATE_LIMITING_GLOBAL_PER_MINUTE=9000
+          RATE_LIMITING_SEARCH_PER_MINUTE=9000
           EOF
 
       - name: Build images from this branch

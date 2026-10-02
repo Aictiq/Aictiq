@@ -101,8 +101,14 @@ public static class PerfSeeder
                 var planned = new Sprint { OrganizationId = organization.Id, TeamId = team.Id, Name = $"Sprint {index * 3 + 3}", Goal = "Scale the dataset", StartsOn = today.AddDays(8), EndsOn = today.AddDays(22), State = SprintState.Planned, AutoCreateNext = true, CreatedAt = now.AddDays(-2) };
                 work.Labels.AddRange(labels);
                 work.Sprints.AddRange(completed, active, planned);
-                work.ProjectSequences.Add(new ProjectSequence { OrganizationId = organization.Id, ProjectId = project.Id, NextNumber = ItemsPerProject + 1 });
                 await work.SaveChangesAsync(cancellationToken);
+                // Workers' ProjectCreated handler claims this row for template seeding, so it
+                // may already exist; an insert would race it.
+                await work.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO work.project_sequences (project_id, organization_id, next_number)
+                    VALUES ({project.Id}, {organization.Id}, {ItemsPerProject + 1})
+                    ON CONFLICT (project_id) DO UPDATE SET next_number = EXCLUDED.next_number
+                    """, cancellationToken);
                 work.ChangeTracker.Clear();
 
                 var items = BuildItems(organization.Id, project, team, completed, active, planned, users, states, now, random);
