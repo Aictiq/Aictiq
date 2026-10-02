@@ -42,6 +42,8 @@ public static class WorkItemsModule
         // NotFound so a missing WorkItems module fails closed; this module owns the real CAS.
         services.RemoveAll<IWorkItemClaims>();
         services.AddScoped<IWorkItemClaims, WorkItemClaims>();
+        services.RemoveAll<IWorkItemComments>();
+        services.AddScoped<IWorkItemComments, WorkItemComments>();
         services.AddScoped<IItemWatchers, WorkItemWatchers>();
         services.AddScoped<IWorkItemSnapshotSource, WorkItemSnapshotSource>();
         return services;
@@ -57,6 +59,7 @@ public static class WorkItemsModule
         services.AddScoped<IDomainEventHandler<CommitReferencedItem>, CommitReferencedItemHandler>();
         services.AddScoped<IDomainEventHandler<PullRequestReferencedItem>, PullRequestReferencedItemHandler>();
         services.AddScoped<IDomainEventHandler<RunFinished>, RunFinishedHandler>();
+        services.AddScoped<IDomainEventHandler<RunMentionRefused>, RunMentionRefusedHandler>();
         services.AddScoped<IDomainEventHandler<ItemChanged>, ItemChangedRealtimeHandler>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<StaleClaimReleaseService>();

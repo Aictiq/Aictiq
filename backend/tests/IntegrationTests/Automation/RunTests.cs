@@ -680,7 +680,8 @@ public sealed record RunView(
     Guid? RequestedRunnerId = null, string? RequestedRunnerName = null, string? Kind = null,
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
-    DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null);
+    DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
+    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null);
 
 public sealed record RunChainLink(
     Guid Id, string Status, bool AutoContinued, DateTimeOffset QueuedAt, DateTimeOffset? FinishedAt,
@@ -699,9 +700,13 @@ public sealed record RunnerRunClaimed(
     string OrganizationSlug, string Harness, string Prompt, Guid PlaybookRevisionId,
     RunnerRunRepo Repo, string DefaultBranch, string BranchName, int MaxMinutes,
     string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
-    RunResumeView? Resume = null);
+    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null);
 
 public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
+
+public sealed record RunFollowUpView(
+    Guid PreviousRunId, string? SessionId, string PreviousBranchName, string? PullRequestUrl,
+    string NewBranchName, string Instruction, string? RequestedByName, Guid CommentId);
 
 public sealed record RunnerHeartbeatView(bool CancelRequested);
 
@@ -712,6 +717,6 @@ public sealed record RunnerLogChunk(long Seq, string Stream, string Text, DateTi
 public sealed record RunnerFinishRequest(
     string Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
     decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null,
-    string? WorkspacePath = null);
+    string? WorkspacePath = null, string? BranchName = null);
 
 public sealed record RunnerRunHeartbeatRequest(string? SessionId, string? WorkspacePath = null);

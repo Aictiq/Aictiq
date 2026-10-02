@@ -36,6 +36,9 @@ public enum DispatchOutcome
 
 public enum DispatchActorKind { User, Rule }
 
+/// <summary>A comment's request for a run: which comment, its words, and who wrote them.</summary>
+public sealed record MentionDispatch(Guid CommentId, string Instruction, string RequesterName);
+
 /// <summary>
 /// Who is asking for a run: a person, through REST or MCP, or an automation rule
 ///, through <c>Events/RuleFiringHandler</c>. Never a faked user - the run row
@@ -120,9 +123,16 @@ public sealed class RunDispatcher(
     /// When the run may start, or null for now. It must be in the future; the item is claimed
     /// straight away all the same, so nobody starts a second run on it while this one waits.
     /// </param>
+    /// <param name="mention">
+    /// Set when a comment asked for the run by mentioning the agent. When the agent has an
+    /// earlier implement run on the item the run is a follow-up of it: the same playbook and
+    /// branch, pinned to the runner that holds its session, which the runner resumes. Otherwise
+    /// it is an ordinary implement run with the comment's request added to its prompt.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
-        DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null)
+        DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null,
+        MentionDispatch? mention = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
 
@@ -142,6 +152,30 @@ public sealed class RunDispatcher(
             return DispatchResult.ItemNotFound();
         }
 
+        var settings = await db.ProjectSettings.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
+
+        // A refine run is never followed up: a mention after one starts the first implement run.
+        var mentionedAgent = agentId ?? settings?.DefaultAgentId;
+        var previous = mention is null || mentionedAgent is null ? null : await db.Runs.AsNoTracking()
+            .Where(run => run.ItemId == item.Id && run.AgentUserId == mentionedAgent
+                && run.Kind == RunKind.Implement && run.RunnerId != null && run.Status >= RunStatus.Succeeded)
+            .OrderByDescending(run => run.QueuedAt)
+            .FirstOrDefaultAsync(ct);
+        if (previous is not null)
+        {
+            // The earlier run's playbook while it exists, so the harness - and with it the
+            // session - is the same one; the project's default once it is gone.
+            playbookId = await db.Playbooks.AnyAsync(row => row.Id == previous.PlaybookId && row.ProjectId == project.Id, ct)
+                ? previous.PlaybookId
+                : null;
+            // Its runner holds the session and the kept checkout, so the run waits for it - unless
+            // it can never come back, when any runner may take it and starts a fresh session.
+            runnerId = await db.Runners.AnyAsync(r => r.Id == previous.RunnerId && r.DeletedAt == null && r.DisabledAt == null, ct)
+                ? previous.RunnerId
+                : null;
+        }
+
         var playbook = await FindPlaybookAsync(playbookId, project.Id, ct);
         if (playbook is null)
         {
@@ -150,8 +184,6 @@ public sealed class RunDispatcher(
                 : DispatchResult.PlaybookNotFound();
         }
 
-        var settings = await db.ProjectSettings.AsNoTracking()
-            .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
         var agentUserId = agentId ?? settings?.DefaultAgentId;
         if (agentUserId is null)
         {
@@ -169,7 +201,7 @@ public sealed class RunDispatcher(
             return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
         }
 
-        if (runnerId is { } requestedRunner
+        if (previous is null && runnerId is { } requestedRunner
             && await RunnerErrorAsync(requestedRunner, playbook.Harness, ct) is { } runnerError)
         {
             return DispatchResult.Invalid("runnerId", runnerError);
@@ -197,14 +229,18 @@ public sealed class RunDispatcher(
                 return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
         }
 
-        var onDefaultBranch = refine is not null || playbook.WorkOnDefaultBranch;
+        // A follow-up delivers where the earlier run did, so its pull request is the one it updates.
+        var onDefaultBranch = refine is not null || (previous?.WorkOnDefaultBranch ?? playbook.WorkOnDefaultBranch);
         var branch = onDefaultBranch
             ? settings?.DefaultBranch ?? "main"
-            : BranchNames.For(item.Key, item.Title);
+            : previous?.BranchName ?? BranchNames.For(item.Key, item.Title);
+        var mentionPrompt = mention is null
+            ? null
+            : new MentionPrompt(mention.RequesterName, mention.CommentId, mention.Instruction, previous?.Id, previous?.PullRequestUrl);
         var prompt = refine is null
             ? RunPromptComposer.Compose(
                 agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                branch, playbook.Name, content.Markdown, playbook.WorkOnDefaultBranch)
+                branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt)
             : RefinePromptComposer.Compose(
                 agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
                 playbook.Name, content.Markdown, refine);
@@ -230,6 +266,9 @@ public sealed class RunDispatcher(
             MaxMinutes = Math.Clamp(playbook.MaxMinutes, 5, 720),
             QueuedAt = now,
             ScheduledFor = scheduledFor?.ToUniversalTime(),
+            TriggerCommentId = mention?.CommentId,
+            Instruction = mention?.Instruction,
+            FollowsUpRunId = previous?.Id,
         };
         db.Runs.Add(run);
         try
@@ -247,6 +286,7 @@ public sealed class RunDispatcher(
         {
             runId = run.Id, itemId = item.Id, itemKey = item.Key, status = "queued", agentId = agentUserId,
             kind = refine is null ? "implement" : "refine", scheduledFor = run.ScheduledFor,
+            followsUpRunId = run.FollowsUpRunId, triggerCommentId = run.TriggerCommentId,
         }, ct);
         AutomationMetrics.Started.Add(1);
 
@@ -329,6 +369,10 @@ public sealed class RunDispatcher(
             ContinuesRunId = previous.Id,
             AutoContinued = automatic,
             AutoContinues = previous.AutoContinues + (automatic ? 1 : 0),
+            // Still the answer to the comment that asked, so it replies in the same thread.
+            TriggerCommentId = previous.TriggerCommentId,
+            Instruction = previous.Instruction,
+            FollowsUpRunId = previous.FollowsUpRunId,
         };
         db.Runs.Add(run);
         if (refinement is not null)

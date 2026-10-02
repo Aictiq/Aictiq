@@ -16,6 +16,22 @@ public static partial class BranchNames
         return $"{itemKey.ToLowerInvariant()}-{(string.IsNullOrEmpty(slug) ? "work" : slug[..Math.Min(40, slug.Length)])}";
     }
 
+    /// <summary>
+    /// The branch a follow-up starts when the pull request of <paramref name="branch"/> was merged
+    /// or closed: the same name with its number counted up - <c>acme-123-fix</c> becomes
+    /// <c>acme-123-fix-2</c>, and that one <c>acme-123-fix-3</c>.
+    /// </summary>
+    public static string Next(string branch)
+    {
+        var numbered = Numbered().Match(branch);
+        return numbered.Success && int.TryParse(numbered.Groups["n"].Value, out var n) && n < 1000
+            ? $"{numbered.Groups["stem"].Value}-{n + 1}"
+            : $"{branch}-2";
+    }
+
     [GeneratedRegex("[^a-z0-9]+")]
     private static partial Regex NonSlug();
+
+    [GeneratedRegex(@"^(?<stem>.+)-(?<n>[2-9]|[1-9][0-9]{1,2})$")]
+    private static partial Regex Numbered();
 }

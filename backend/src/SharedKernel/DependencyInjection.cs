@@ -65,6 +65,8 @@ public static class DependencyInjection
         // dispatcher gets "not found" rather than a pretend success. The WorkItems
         // module replaces this with the real compare-and-swap.
         services.TryAddScoped<IWorkItemClaims, NullWorkItemClaims>();
+        // Nor a comment to read for the agent a comment mentions.
+        services.TryAddScoped<IWorkItemComments, NullWorkItemComments>();
         // No Integrations module means no bindings and no clone tokens.
         services.TryAddScoped<IRepositoryCredentials, NullRepositoryCredentials>();
 

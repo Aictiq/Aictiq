@@ -52,6 +52,15 @@ public sealed class Run : TenantEntity
 
     public const int MaxWorkspacePathLength = 1024;
 
+    /// <summary>A comment's own limit: the instruction is the comment's whole text.</summary>
+    public const int MaxInstructionLength = 20_000;
+
+    /// <summary>
+    /// The failure a follow-up run reports when the earlier run's pull request or branch is
+    /// gone from git: the runner stops before the harness starts, and the agent says why.
+    /// </summary>
+    public const string FollowUpTargetMissing = "follow-up-target-missing";
+
     /// <summary>How many times one failed run - and the runs continuing it - is continued automatically.</summary>
     public const int MaxAutoContinues = 2;
 
@@ -111,9 +120,11 @@ public sealed class Run : TenantEntity
     /// <summary>
     /// Stored rather than recomposed: the item's title can change while the run is in
     /// flight, and a runner told to <c>git checkout</c> a branch that renamed underneath
-    /// it would lose its work.
+    /// it would lose its work. A follow-up run is the one exception that changes it: it is
+    /// dispatched on the earlier run's branch, and the runner reports the fresh branch it
+    /// started instead when that run's pull request was merged or closed.
     /// </summary>
-    public required string BranchName { get; init; }
+    public required string BranchName { get; set; }
 
     /// <summary>Snapshot of the playbook delivery mode, unaffected by later edits.</summary>
     public bool WorkOnDefaultBranch { get; init; }
@@ -183,7 +194,25 @@ public sealed class Run : TenantEntity
     /// </summary>
     public DateTimeOffset? AutoContinueDueAt { get; set; }
 
+    /// <summary>
+    /// The comment that asked for this run by mentioning its agent, or null for a run a person
+    /// started from the item or a rule dispatched. The outcome is the agent's reply in its thread.
+    /// </summary>
+    public Guid? TriggerCommentId { get; init; }
+
+    /// <summary>
+    /// The earlier implement run of the same agent on the item that this one follows up, or
+    /// null. A follow-up goes to that run's runner, resumes its session where the runner kept
+    /// it, and delivers on its branch - or on a fresh one, when its pull request has closed.
+    /// </summary>
+    public Guid? FollowsUpRunId { get; init; }
+
+    /// <summary>What the person asked for, verbatim; set exactly when <see cref="TriggerCommentId"/> is.</summary>
+    public string? Instruction { get; init; }
+
     public uint Version { get; set; }
+
+    public bool IsFollowUp => FollowsUpRunId is not null;
 
     public bool IsLive => Status < RunStatus.Succeeded;
 

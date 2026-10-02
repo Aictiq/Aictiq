@@ -9,6 +9,7 @@ using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Email;
 using Aictiq.SharedKernel.Tenancy;
+using Aictiq.SharedKernel.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -28,7 +29,7 @@ public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, G
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
     string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
-    RunResumeView? Resume = null);
+    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null);
 
 /// <summary>
 /// Set on a continue run: the runner resumes <paramref name="SessionId"/> in the workspace it
@@ -36,6 +37,21 @@ public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, G
 /// </summary>
 public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
 
+/// <summary>
+/// Set on a follow-up run: a comment asked the agent to carry on with its earlier run's work.
+/// The runner resumes <paramref name="SessionId"/> in the workspace it kept for
+/// <paramref name="PreviousRunId"/> when it still has it, and starts fresh on the same branch
+/// when not. Before the harness starts it checks <paramref name="PullRequestUrl"/>: open, the
+/// run pushes to <paramref name="PreviousBranchName"/>; merged or closed, it starts
+/// <paramref name="NewBranchName"/> from the default branch; gone, it stops with
+/// <c>follow-up-target-missing</c>.
+/// </summary>
+/// <param name="SessionId">The earlier run's harness session, or null when it reported none or used another harness.</param>
+/// <param name="Instruction">What the person wrote, for the message a resumed session is sent.</param>
+/// <param name="RequestedByName">The person's display name.</param>
+public sealed record RunFollowUpView(
+    Guid PreviousRunId, string? SessionId, string PreviousBranchName, string? PullRequestUrl,
+    string NewBranchName, string Instruction, string? RequestedByName, Guid CommentId);
 /// <param name="SessionId">The harness session, sent once the runner knows it, so a run the sweeper ends can still be continued.</param>
 /// <param name="WorkspacePath">The absolute path of the run's checkout on the runner, sent with the session.</param>
 public sealed record RunnerRunHeartbeatRequest(string? SessionId, string? WorkspacePath = null);
@@ -50,7 +66,7 @@ public sealed record RunnerLogChunk(int Seq, RunLogStream Stream, string? Text, 
 
 public sealed record RunnerFinishRequest(string? Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
     decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null,
-    string? WorkspacePath = null);
+    string? WorkspacePath = null, string? BranchName = null);
 
 /// <summary>
 /// The half of the runner protocol that concerns runs: claim, release, started, log,
@@ -87,7 +103,8 @@ public static partial class RunProtocolEndpoints
         RunnerClaimRequest? request, HttpContext http, AutomationDbContext db, ICurrentTenant tenant,
         IAgentIdentities agents, IOrganizationLookup organizations, IRepositoryCredentials repoCredentials,
         IRealtimePublisher realtime, IOrganizationBillingState billing, IOptions<AutomationOptions> options,
-        IOptions<EmailOptions> email, TimeProvider clock, ILoggerFactory loggers, CancellationToken ct)
+        IOptions<EmailOptions> email, IUserDirectory directory, TimeProvider clock, ILoggerFactory loggers,
+        CancellationToken ct)
     {
         var logger = loggers.CreateLogger(typeof(RunProtocolEndpoints));
         if (ClaimErrors(request) is { Count: > 0 } errors)
@@ -276,6 +293,28 @@ public static partial class RunProtocolEndpoints
                 }
             }
 
+            // A continue of a follow-up resumes its own failed session above; only a follow-up's
+            // first run needs the earlier run's.
+            RunFollowUpView? followUp = null;
+            if (resume is null && run.FollowsUpRunId is { } previousRunId)
+            {
+                var previous = await db.Runs.AsNoTracking()
+                    .Where(r => r.Id == previousRunId)
+                    .Select(r => new { r.SessionId, r.Harness, r.RunnerId, r.PullRequestUrl, r.FailureReason })
+                    .SingleOrDefaultAsync(ct);
+                var requester = run.RequestedBy is { } requestedBy
+                    ? (await directory.GetAsync([requestedBy], ct)).GetValueOrDefault(requestedBy)?.DisplayName
+                    : null;
+                // Another harness cannot read the session, and another machine does not have it.
+                var sessionId = previous is { SessionId: { } session } && previous.Harness == run.Harness
+                    && previous.RunnerId == runnerId && previous.FailureReason != Run.SessionUnavailable
+                        ? session
+                        : null;
+                followUp = new RunFollowUpView(
+                    previousRunId, sessionId, run.BranchName, run.WorkOnDefaultBranch ? null : previous?.PullRequestUrl,
+                    BranchNames.Next(run.BranchName), run.Instruction ?? "", requester, run.TriggerCommentId!.Value);
+            }
+
             var aictiqUrl = string.IsNullOrWhiteSpace(email.Value.BaseUrl)
                 ? $"{http.Request.Scheme}://{http.Request.Host}"
                 : email.Value.BaseUrl.TrimEnd('/');
@@ -287,7 +326,7 @@ public static partial class RunProtocolEndpoints
                 run.Harness, run.PromptSnapshot, run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
-                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume), false);
+                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp), false);
         }
     }
 
@@ -610,6 +649,18 @@ public static partial class RunProtocolEndpoints
         run.FailureReason = failureReason;
         run.SessionId = Blank(request.SessionId) ?? run.SessionId;
         run.WorkspacePath = WorkspacePath(request.WorkspacePath) ?? run.WorkspacePath;
+        if (Blank(request.BranchName) is { } branchName && branchName != run.BranchName)
+        {
+            // Only the one switch a follow-up may make: to the fresh branch it was offered,
+            // after the earlier pull request closed.
+            if (!run.IsFollowUp || run.WorkOnDefaultBranch || branchName != BranchNames.Next(run.BranchName))
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]> { ["branchName"] = ["Only a follow-up run may report the new branch it was offered."] },
+                    type: ProblemTypes.Validation);
+            }
+            run.BranchName = branchName;
+        }
         run.Finish(
             outcome == RunOutcomes.Succeeded ? RunStatus.Succeeded
                 : outcome == RunOutcomes.Failed ? RunStatus.Failed

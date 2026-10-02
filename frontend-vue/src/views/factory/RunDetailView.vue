@@ -327,6 +327,28 @@ const tokens = computed(() => {
             <dt class="inline">Session&nbsp;</dt>
             <dd class="text-foreground inline font-mono">{{ run.sessionId }}</dd>
           </div>
+          <div v-if="run.triggerCommentId" data-testid="run-trigger-comment">
+            <dt class="inline">{{ run.followsUpRunId ? 'Follows up' : 'Asked for' }}&nbsp;</dt>
+            <dd class="inline">
+              <template v-if="run.followsUpRunId">
+                <RouterLink
+                  :to="`/o/${slug}/factory/runs/${run.followsUpRunId}`"
+                  class="text-primary underline underline-offset-2"
+                  >the earlier run</RouterLink
+                >, as asked
+              </template>
+              in
+              <RouterLink
+                :to="{ path: itemPath, hash: `#comment-${run.triggerCommentId}` }"
+                class="text-primary underline underline-offset-2"
+                >a comment</RouterLink
+              >
+            </dd>
+          </div>
+          <div v-if="run.branchName && !run.continuesRunId" data-testid="run-branch">
+            <dt class="inline">Branch&nbsp;</dt>
+            <dd class="text-foreground inline font-mono">{{ run.branchName }}</dd>
+          </div>
           <div v-if="run.continuesRunId" data-testid="run-continues">
             <dt class="inline">{{ run.autoContinued ? 'Auto-continues' : 'Continues' }}&nbsp;</dt>
             <dd class="inline">

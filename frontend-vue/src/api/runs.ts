@@ -74,6 +74,12 @@ export interface Run {
   workspacePath?: string | null
   /** The failed run this one continues; null for a run that started fresh. */
   continuesRunId?: string | null
+  /** The comment that asked for this run by mentioning its agent; null for a run started any other way. */
+  triggerCommentId?: string | null
+  /** The agent's earlier run on the item that this one follows up, on the same branch and session. */
+  followsUpRunId?: string | null
+  /** The branch the run delivers on. */
+  branchName?: string | null
   /** The run that continued this one, once there is one. */
   continuedByRunId?: string | null
   /** Queued by the server after a transient failure rather than by a person. */

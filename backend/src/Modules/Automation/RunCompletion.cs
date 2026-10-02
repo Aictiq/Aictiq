@@ -28,7 +28,7 @@ internal static class RunCompletion
         db.Set<OutboxMessage>().Add(OutboxMessage.From(new RunFinished(
             run.OrganizationId, run.ProjectId, run.ItemId, run.ItemKey, run.Id, run.AgentUserId,
             outcome, playbook?.OnSuccessStateId, playbook?.OnFailureStateId,
-            summary, pullRequestUrl, failureReason) { Refinement = refine }));
+            summary, pullRequestUrl, failureReason) { Refinement = refine, TriggerCommentId = run.TriggerCommentId }));
 
         if (refine)
         {

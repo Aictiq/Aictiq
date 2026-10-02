@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -427,6 +427,183 @@ describe('executeRun', () => {
         options,
       )
       expect(report).toMatchObject({ outcome: 'failed', failureReason: 'session-unavailable' })
+    })
+
+    describe('follow-ups', () => {
+      const env = {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@example.com',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@example.com',
+      }
+      const git = (cwd: string, ...args: string[]) =>
+        execFileSync('git', args, { cwd, env, stdio: 'pipe' }).toString()
+      const branch = 'aictiq/acme-42'
+      const pullRequest = 'https://github.com/acme/app/pull/7'
+
+      /** An origin with the earlier run's branch pushed, and a local clone holding only main. */
+      const repository = () => {
+        const base = mkdtempSync(join(tmpdir(), 'aictiq-repo-'))
+        const origin = join(base, 'origin.git')
+        const clone = join(base, 'clone')
+        git(base, 'init', '--bare', '-b', 'main', origin)
+        git(base, 'clone', origin, clone)
+        writeFileSync(join(clone, 'README.md'), 'hi\n')
+        git(clone, 'add', '.')
+        git(clone, 'commit', '-m', 'init')
+        git(clone, 'push', 'origin', 'main')
+        git(clone, 'checkout', '-b', branch)
+        writeFileSync(join(clone, 'fix.txt'), 'first attempt\n')
+        git(clone, 'add', '.')
+        git(clone, 'commit', '-m', 'first attempt')
+        git(clone, 'push', 'origin', branch)
+        git(clone, 'checkout', 'main')
+        git(clone, 'branch', '-D', branch)
+        options.workspace.repositories = { ACME: clone }
+        options.workspace.env = env
+        return { base, origin, clone }
+      }
+      const followUpRun = (sessionId: string | null = 'sess-1') =>
+        claimedRun({
+          followUp: {
+            previousRunId: 'run-1',
+            sessionId,
+            previousBranchName: branch,
+            pullRequestUrl: pullRequest,
+            newBranchName: 'aictiq/acme-42-follow-up',
+            instruction: 'Rename the flag.',
+            requestedByName: 'Ana',
+            commentId: 'comment-1',
+          },
+        })
+      const printsCheckout = `
+        import { execFileSync } from 'node:child_process'
+        const head = (args) => execFileSync('git', args).toString().trim()
+        console.log('on ' + head(['branch', '--show-current']) + ' at ' + head(['rev-parse', 'HEAD']))
+        console.log('RESULT done')
+      `
+      let lookedUp: string[]
+      beforeEach(() => {
+        lookedUp = []
+        options.findPullRequest = async (_checkout, branch) => {
+          lookedUp.push(branch)
+          return null
+        }
+        options.prune = async () => []
+      })
+
+      it('resumes the earlier session on its branch while the pull request is open', async () => {
+        const { base, origin } = repository()
+        const runDir = join(base, 'kept')
+        git(base, 'clone', origin, join(runDir, 'repo'))
+        git(join(runDir, 'repo'), 'checkout', branch)
+        const retained: string[] = []
+        let reattachedFor: string | undefined
+        options.reattach = async (run, prompt) => {
+          reattachedFor = run.resume?.continuesRunId
+          writeFileSync(join(runDir, 'prompt.md'), prompt)
+          return {
+            ...stubWorkspace(),
+            runDir,
+            checkout: join(runDir, 'repo'),
+            promptFile: join(runDir, 'prompt.md'),
+            prompt,
+            retain: (id) => retained.push(id),
+          }
+        }
+        options.pullRequestState = async () => 'open'
+        const contexts: InvocationContext[] = []
+        options.adapters.fake = sessionAdapter(printsCheckout, contexts)
+
+        const report = await executeRun(followUpRun(), options)
+        expect(report).toMatchObject({ outcome: 'succeeded', sessionId: 'sess-1' })
+        expect(report).not.toHaveProperty('branchName')
+        expect(reattachedFor).toBe('run-1')
+        expect(contexts[0]).toMatchObject({ resumeSessionId: 'sess-1' })
+        expect(contexts[0]!.prompt).toContain('Ana asked for a follow-up')
+        expect(contexts[0]!.prompt).toContain('> Rename the flag.')
+        expect(contexts[0]!.prompt).toContain(`Keep working on branch \`${branch}\``)
+        expect(readFileSync(join(runDir, 'prompt.md'), 'utf8')).toBe(contexts[0]!.prompt)
+        expect(logLines().map((c) => c.text)).toContain(
+          `Pull request ${pullRequest} is open; continuing on branch ${branch}`,
+        )
+        expect(lookedUp).toEqual([branch])
+        expect(retained).toEqual(['sess-1'])
+      })
+
+      it('starts a fresh session on the pushed branch when the workspace is gone', async () => {
+        const { origin } = repository()
+        delete options.provision
+        options.reattach = async () => {
+          throw new RunFailure('session-unavailable', 'This runner no longer has the workspace.')
+        }
+        const pruned: unknown[] = []
+        options.prune = async (_root, filter) => {
+          pruned.push(filter?.item ?? null)
+          return []
+        }
+        options.pullRequestState = async () => 'open'
+        const contexts: InvocationContext[] = []
+        options.adapters.fake = sessionAdapter(printsCheckout, contexts)
+
+        const report = await executeRun(followUpRun(), options)
+        expect(report).toMatchObject({ outcome: 'succeeded' })
+        expect(report).not.toHaveProperty('sessionId')
+        expect(contexts[0]!.resumeSessionId).toBeUndefined()
+        expect(contexts[0]!.prompt.startsWith('Implement ACME-42')).toBe(true)
+        expect(contexts[0]!.prompt).toContain('## Follow-up branch')
+        const tip = git(origin, 'rev-parse', branch).trim()
+        const lines = logLines().map((c) => c.text)
+        expect(lines).toContain(`on ${branch} at ${tip}`)
+        expect(lines).toContain(
+          'This runner no longer has the workspace of run run-1; starting a fresh session',
+        )
+        expect(pruned[0]).toEqual({ organizationSlug: 'acme', itemKey: 'ACME-42' })
+      })
+
+      it('starts a new branch from main once the pull request was merged', async () => {
+        const { origin, clone } = repository()
+        delete options.provision
+        options.pullRequestState = async () => 'merged'
+        const contexts: InvocationContext[] = []
+        options.adapters.fake = sessionAdapter(printsCheckout, contexts)
+
+        const report = await executeRun(followUpRun(null), options)
+        expect(report).toMatchObject({
+          outcome: 'succeeded',
+          branchName: 'aictiq/acme-42-follow-up',
+        })
+        expect(instance.to('/finish')[0]!.body).toMatchObject({
+          branchName: 'aictiq/acme-42-follow-up',
+        })
+        expect(contexts[0]!.prompt).toContain('not the branch named above')
+        const main = git(origin, 'rev-parse', 'main').trim()
+        expect(logLines().map((c) => c.text)).toContain(`on aictiq/acme-42-follow-up at ${main}`)
+        expect(lookedUp).toEqual(['aictiq/acme-42-follow-up'])
+        // The empty branch provisioning made for the old name is gone again.
+        expect(git(clone, 'branch', '--list', branch).trim()).toBe('')
+      })
+
+      it('fails with follow-up-target-missing without starting the harness', async () => {
+        repository()
+        delete options.provision
+        options.pullRequestState = async () => 'missing'
+        const contexts: InvocationContext[] = []
+        options.adapters.fake = sessionAdapter(printsCheckout, contexts)
+
+        const report = await executeRun(followUpRun(null), options)
+        const summary = `I didn't start: the pull request ${pullRequest} from run run-1 can no longer be found.`
+        expect(report).toMatchObject({
+          outcome: 'failed',
+          failureReason: 'follow-up-target-missing',
+          summary,
+        })
+        expect(instance.to('/finish')[0]!.body).toMatchObject({ summary })
+        expect(contexts).toHaveLength(0)
+      })
     })
   })
 })

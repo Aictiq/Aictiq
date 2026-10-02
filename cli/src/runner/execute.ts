@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
 import { stripVTControlCharacters } from 'node:util'
 import { RunnerHttpError, RunnerNetworkError } from './client.js'
 import type { RunnerClient } from './client.js'
@@ -8,6 +9,13 @@ import type { SupervisedProcess } from './process.js'
 import { RunFailure } from './types.js'
 import type { ClaimedRun, FinishReport, HarnessAdapter, RunnerHello } from './types.js'
 import { continuePrompt } from './harness/failure.js'
+import {
+  applyFollowUpTarget,
+  followUpBranchNote,
+  followUpPrompt,
+  resolveFollowUpTarget,
+} from './followup.js'
+import type { FollowUpTarget, PullRequestStateLookup } from './followup.js'
 import { pruneKeptWorkspaces, provisionWorkspace, reattachWorkspace } from './workspace.js'
 import type { Workspace, WorkspaceOptions } from './workspace.js'
 
@@ -28,7 +36,7 @@ export interface ExecuteOptions {
   /** Runner-side messages for the operator's terminal (never sent to the instance). */
   local?: (message: string) => void
   provision?: (run: ClaimedRun, options: WorkspaceOptions) => Promise<Workspace>
-  /** Finds the workspace a failed run kept, for a run that continues it. */
+  /** Finds the workspace an earlier run kept, for a run that continues or follows it up. */
   reattach?: (run: ClaimedRun, prompt: string, options: WorkspaceOptions) => Promise<Workspace>
   /** Removes kept workspaces past their time or limit, or stale for `item`. */
   prune?: typeof pruneKeptWorkspaces
@@ -37,6 +45,8 @@ export interface ExecuteOptions {
     branch: string,
     env: NodeJS.ProcessEnv,
   ) => Promise<string | null>
+  /** Asks GitHub whether a follow-up's earlier pull request is still open. */
+  pullRequestState?: PullRequestStateLookup
   heartbeatMs?: number
   graceMs?: number
   flushIntervalMs?: number
@@ -83,9 +93,12 @@ export async function executeRun(
 
   let workspace: Workspace | undefined
   const resume = run.resume ?? null
-  // A resumed run already has its session: a failure before the harness names it again must
-  // still keep the workspace for the next continue.
-  let sessionId: string | undefined = resume?.sessionId
+  const followUp = run.followUp ?? null
+  // The session the harness resumes: a continue's always, a follow-up's only once its workspace
+  // was found. A resumed run already has its session: a failure before the harness names it
+  // again must still keep the workspace for the next continue.
+  let resumeSessionId: string | undefined = resume?.sessionId
+  let sessionId: string | undefined = resumeSessionId
   let revoked: RunnerHttpError | undefined
   let heartbeat: NodeJS.Timeout | undefined
   let beating: Promise<void> = Promise.resolve()
@@ -172,6 +185,14 @@ export async function executeRun(
       },
       signal: abort.signal,
     }
+    const fresh = async () => {
+      if (run.repo.source === 'local' && !run.workOnDefaultBranch) {
+        // A failed run's kept worktree holds the item's branch, and git checks a branch out
+        // in one worktree only. This fresh run supersedes it.
+        await prune({ item: run })
+      }
+      return (options.provision ?? provisionWorkspace)(run, workspaceOptions)
+    }
     try {
       if (resume) {
         event(`Continuing run ${resume.continuesRunId} (session ${resume.sessionId})`)
@@ -180,13 +201,35 @@ export async function executeRun(
           continuePrompt(resume.failureReason),
           workspaceOptions,
         )
-      } else {
-        if (run.repo.source === 'local' && !run.workOnDefaultBranch) {
-          // A failed run's kept worktree holds the item's branch, and git checks a branch out
-          // in one worktree only. This fresh run supersedes it.
-          await prune({ item: run })
+      } else if (followUp?.sessionId) {
+        event(`Following up run ${followUp.previousRunId} (session ${followUp.sessionId})`)
+        try {
+          // The prompt waits for the branch decision below, which needs the checkout.
+          workspace = await (options.reattach ?? reattachWorkspace)(
+            {
+              ...run,
+              resume: {
+                continuesRunId: followUp.previousRunId,
+                sessionId: followUp.sessionId,
+                failureReason: null,
+              },
+            },
+            '',
+            workspaceOptions,
+          )
+          resumeSessionId = followUp.sessionId
+          sessionId = resumeSessionId
+        } catch (error) {
+          if (!(error instanceof RunFailure) || error.reason !== 'session-unavailable') throw error
+          // The prompt carries the whole request, so a fresh session loses only the earlier
+          // conversation, not the follow-up.
+          event(
+            `This runner no longer has the workspace of run ${followUp.previousRunId}; starting a fresh session`,
+          )
+          workspace = await fresh()
         }
-        workspace = await (options.provision ?? provisionWorkspace)(run, workspaceOptions)
+      } else {
+        workspace = await fresh()
       }
     } catch (error) {
       if (stopReason) return stopped(null, [])
@@ -199,6 +242,49 @@ export async function executeRun(
     }
     if (stopReason) return stopped(null, [])
 
+    // The branch the work is delivered on: a follow-up may start a new one.
+    let deliveryBranch = run.branchName
+    let target: FollowUpTarget | undefined
+    if (followUp) {
+      const gitEnv = { ...(options.workspace.env ?? process.env), ...workspace.env }
+      const createdBranch = resumeSessionId === undefined && workspace.createdBranch === true
+      try {
+        target = await resolveFollowUpTarget(workspace.checkout, followUp, gitEnv, {
+          createdBranch,
+          ...(options.pullRequestState ? { pullRequestState: options.pullRequestState } : {}),
+        })
+        await applyFollowUpTarget(
+          workspace.checkout,
+          followUp,
+          target,
+          run.defaultBranch,
+          gitEnv,
+          event,
+          { createdBranch },
+        )
+      } catch (error) {
+        if (stopReason) return stopped(null, [])
+        if (error instanceof RunFailure) {
+          event(error.message)
+          return failed(error.reason, error.message)
+        }
+        event(`Preparing the follow-up branch failed: ${message(error)}`)
+        return failed('workspace-failed', message(error))
+      }
+      if (target.kind === 'missing') {
+        event(target.detail)
+        return failed('follow-up-target-missing', target.detail)
+      }
+      deliveryBranch = target.branch
+      const prompt =
+        resumeSessionId !== undefined
+          ? followUpPrompt(followUp, target)
+          : `${workspace.prompt}${followUpBranchNote(target)}`
+      writeFileSync(workspace.promptFile, prompt, { mode: 0o600 })
+      workspace = { ...workspace, prompt, branch: deliveryBranch }
+    }
+    if (stopReason) return stopped(null, [])
+
     const invocation = adapter.invocation({
       prompt: workspace.prompt,
       promptFile: workspace.promptFile,
@@ -206,7 +292,7 @@ export async function executeRun(
       attachmentsDir: workspace.attachmentsDir,
       mcpConfigFile: workspace.mcpConfigFile,
       mcpServer: options.workspace.mcpServer,
-      ...(resume ? { resumeSessionId: resume.sessionId } : {}),
+      ...(resumeSessionId !== undefined ? { resumeSessionId } : {}),
     })
     const env: NodeJS.ProcessEnv = {
       ...inheritedEnv(process.env),
@@ -244,7 +330,11 @@ export async function executeRun(
         // are plain text.
         const line = stripVTControlCharacters(raw)
         if (!run.workOnDefaultBranch) {
-          for (const match of line.matchAll(PullRequestUrl)) pullRequestUrl = match[0]
+          for (const match of line.matchAll(PullRequestUrl)) {
+            // A follow-up on a new branch may well mention the merged pull request it follows.
+            if (target?.kind === 'new' && match[0] === followUp?.pullRequestUrl) continue
+            pullRequestUrl = match[0]
+          }
         }
         if (stream === 'stderr') {
           log.push('stderr', line)
@@ -276,16 +366,17 @@ export async function executeRun(
     const usage = { costUsd, inputTokens, outputTokens, exitCode }
     if (stopReason) return stopped(exitCode, lastLines, usage)
 
-    const verdict = adapter.outcome(exitCode, lastLines, lastResult, resume !== null)
+    const verdict = adapter.outcome(exitCode, lastLines, lastResult, resumeSessionId !== undefined)
     if (verdict.outcome === 'succeeded' && !run.workOnDefaultBranch && !pullRequestUrl) {
       pullRequestUrl = await (options.findPullRequest ?? findPullRequest)(
         workspace.checkout,
-        run.branchName,
+        deliveryBranch,
         env,
       )
     }
     if (pullRequestUrl) event(`Pull request: ${pullRequestUrl}`)
     return {
+      ...(deliveryBranch !== run.branchName ? { branchName: deliveryBranch } : {}),
       outcome: verdict.outcome,
       exitCode,
       summary: truncate(verdict.summary, MaxSummary),
