@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
-import { Bot, Check, Copy, GitBranch, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
+import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
   attachmentAccept,
   attachmentUrl,
@@ -14,6 +14,7 @@ import { createComment, listComments, type WorkItemComment } from '@/api/comment
 import { itemHistory } from '@/api/history'
 import {
   deleteItem,
+  duplicateItem,
   getItem,
   itemDeletePreview,
   listItemChildren,
@@ -585,6 +586,24 @@ async function save() {
 }
 async function saveAndClose() {
   if (await save()) emit('close')
+}
+// The copy opens straight away so its "Copy of" title can be edited; the original stays as
+// it was. Shown to whoever may delete, which is everyone who may create items here.
+const duplicating = ref(false)
+async function duplicate() {
+  const current = item.data.value
+  if (!current || duplicating.value) return
+  duplicating.value = true
+  try {
+    const created = await duplicateItem(props.slug, current.key)
+    toast.success(`${created.key} created.`, `A copy of ${current.key}.`)
+    await invalidateLists(current)
+    openChild(created.key)
+  } catch (error) {
+    toast.error(error, `${current.key} could not be duplicated.`)
+  } finally {
+    duplicating.value = false
+  }
 }
 function openChild(key: string) {
   if (props.modal) itemModal.open(key)
@@ -1524,7 +1543,7 @@ function logged(updated: TimeTrackingItem) {
             title="Copy a link to this item"
             @click="copyLink"
           >
-            <Copy class="size-4" aria-hidden="true" /></button
+            <Link class="size-4" aria-hidden="true" /></button
           ><button
             type="button"
             class="border rounded p-1.5"
@@ -1543,6 +1562,18 @@ function logged(updated: TimeTrackingItem) {
             <Check class="size-4" aria-hidden="true" />
           </button>
         </div>
+      </div>
+      <div v-if="mayDelete" class="rounded-md border p-3">
+        <button
+          type="button"
+          class="hover:bg-accent inline-flex w-full items-center gap-2 rounded px-1.5 py-1 text-sm disabled:opacity-50"
+          title="Create a copy of this item and its subtasks in the first workflow state"
+          :disabled="duplicating"
+          @click="duplicate"
+        >
+          <CopyPlus class="size-4" aria-hidden="true" />
+          {{ duplicating ? 'Duplicating…' : 'Duplicate item' }}
+        </button>
       </div>
       <div v-if="mayDelete" class="border-destructive/30 rounded-md border p-3">
         <button

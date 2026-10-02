@@ -9,12 +9,15 @@ import { createSavedView, listSavedViews } from '@/api/views'
 import DataTable from '@/components/common/DataTable.vue'
 import ClaimGlyph from '@/components/common/ClaimGlyph.vue'
 import KeyChip from '@/components/common/KeyChip.vue'
-import PriorityIcon from '@/components/common/PriorityIcon.vue'
-import StateBadge from '@/components/common/StateBadge.vue'
+import AssigneeSelect from '@/components/items/AssigneeSelect.vue'
 import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
+import ItemRowActions from '@/components/items/ItemRowActions.vue'
+import PrioritySelect from '@/components/items/PrioritySelect.vue'
+import StateSelect from '@/components/items/StateSelect.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { useCommands } from '@/composables/useCommands'
 import { useCreateTicket } from '@/composables/useCreateTicket'
+import { useInlineItemEdits } from '@/composables/useInlineItemEdits'
 import { useItemModal } from '@/composables/useItemModal'
 import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryParams'
 import { reduceListKeyboard } from '@/lib/item-list-keyboard'
@@ -77,6 +80,11 @@ const create = () => createTicket.open(props.projectKey)
 const selected = ref(new Set<string>())
 const current = ref(0)
 useProjectRealtime(() => props.slug, () => props.projectKey)
+const edits = useInlineItemEdits({
+  slug: () => props.slug,
+  projectKey: () => props.projectKey,
+  listKey: () => [props.slug, props.projectKey, 'items'],
+})
 const columns = [
   // The claim glyph rides with the key rather than taking a column of its own: most items
   // are not claimed, and an almost-always-empty column costs every row its width.
@@ -97,10 +105,14 @@ const columns = [
     accessorKey: 'stateCategory',
     header: 'State',
     cell: ({ row }: { row: { original: WorkItem } }) =>
-      h(StateBadge, {
-        name: row.original.stateCategory,
-        category: row.original.stateCategory as
-          'proposed' | 'active' | 'resolved' | 'completed' | 'removed',
+      h(StateSelect, {
+        modelValue: row.original.stateId,
+        states: edits.statesFor(row.original),
+        fallbackName: row.original.stateCategory,
+        label: `State of ${row.original.key}`,
+        disabled: !edits.canEdit.value || edits.isBusy(row.original),
+        collapse: true,
+        onChange: (stateId: string) => edits.changeState(row.original, stateId),
       }),
   },
   {
@@ -109,13 +121,48 @@ const columns = [
     // Most urgent first on the first click, like every tracker people already know.
     sortDescFirst: true,
     cell: ({ row }: { row: { original: WorkItem } }) =>
-      h(PriorityIcon, { priority: row.original.priority }),
+      h(PrioritySelect, {
+        modelValue: row.original.priority,
+        label: `Priority of ${row.original.key}`,
+        disabled: !edits.canEdit.value || edits.isBusy(row.original),
+        collapse: true,
+        onChange: (priority: WorkItem['priority']) =>
+          edits.changePriority(row.original, priority),
+      }),
+  },
+  {
+    id: 'assignee',
+    header: 'Assignee',
+    enableSorting: false,
+    cell: ({ row }: { row: { original: WorkItem } }) =>
+      h(AssigneeSelect, {
+        modelValue: row.original.assigneeId,
+        members: edits.members.value,
+        label: `Assignee for ${row.original.key}`,
+        disabled:
+          !edits.canEdit.value || edits.isBusy(row.original) || edits.membersLoading.value,
+        collapse: true,
+        onChange: (assigneeId: string | null) => edits.changeAssignee(row.original, assigneeId),
+      }),
   },
   {
     accessorKey: 'remainingHours',
     header: 'Remaining',
     cell: ({ row }: { row: { original: WorkItem } }) =>
       row.original.remainingHours == null ? '-' : `${row.original.remainingHours}h`,
+  },
+  {
+    id: 'actions',
+    header: () => h('span', { class: 'sr-only' }, 'Actions'),
+    enableSorting: false,
+    cell: ({ row }: { row: { original: WorkItem } }) =>
+      h(ItemRowActions, {
+        itemKey: row.original.key,
+        busy: edits.isBusy(row.original),
+        canDuplicate: edits.canEdit.value,
+        onCopyLink: () => edits.copyLink(row.original),
+        onDuplicate: () => edits.duplicate(row.original),
+      }),
   },
 ]
 function replaceQuery(next: Record<string, string | number | undefined>) {

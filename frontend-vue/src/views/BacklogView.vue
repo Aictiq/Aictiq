@@ -7,12 +7,17 @@ import { RouterLink } from 'vue-router'
 import { createItem, getTeamBacklog, moveItem, type BacklogSection, type WorkItem, type WorkItemType } from '@/api/items'
 import { getSprintCapacity, getTeamVelocity, listSprints, type Sprint } from '@/api/sprints'
 import ItemTypeIcon from '@/components/common/ItemTypeIcon.vue'
+import AssigneeSelect from '@/components/items/AssigneeSelect.vue'
 import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
+import ItemRowActions from '@/components/items/ItemRowActions.vue'
+import PrioritySelect from '@/components/items/PrioritySelect.vue'
+import StateSelect from '@/components/items/StateSelect.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { flattenBacklog, rankMoveForDrop } from '@/lib/backlog'
 import { vNearEnd } from '@/lib/nearEnd'
 import { useCreateTicket } from '@/composables/useCreateTicket'
 import { allowsParent, childTypes, opensOnCreate, requiresParent, typeLabels } from '@/lib/hierarchy'
+import { useInlineItemEdits } from '@/composables/useInlineItemEdits'
 import { useItemModal } from '@/composables/useItemModal'
 import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryParams'
 import { useShortcut } from '@/composables/useShortcuts'
@@ -28,6 +33,20 @@ useProjectRealtime(() => props.slug, () => props.projectKey)
 const collapsed = ref(new Set<string>())
 const selected = ref(new Set<string>())
 const dragging = ref<Set<string> | null>(null)
+const edits = useInlineItemEdits({
+  slug: () => props.slug,
+  projectKey: () => props.projectKey,
+  listKey: () => [props.slug, props.teamId, 'items', 'backlog'],
+  related: () => [
+    [props.slug, props.teamId, 'sprint', 'sprints'],
+    [props.slug, props.teamId, 'velocity'],
+    [props.slug, activeSprint.value?.id, 'capacity'],
+  ],
+})
+// One template for the header and every row, so the columns line up. On narrow screens the
+// row controls fold down to their icon or avatar and keep the title its room.
+const rowGrid =
+  'grid-cols-[minmax(0,1fr)_1.25rem_1.25rem_1.75rem_2.5rem_3rem_3.25rem] sm:grid-cols-[minmax(0,1fr)_7.5rem_6.5rem_8.5rem_3.5rem_4.5rem_3.5rem]'
 
 const SECTION_PAGE = 50
 // The server's per-section cap (MaxBacklogTake).
@@ -270,14 +289,15 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
         <p v-else-if="backlog.isPending.value" class="text-muted-foreground mt-6 text-sm">Loading backlog…</p>
 
         <section v-for="section in sections" :key="section.id" class="border-border mt-5 overflow-hidden rounded-lg border" :aria-label="section.title">
-          <header class="bg-muted/40 text-muted-foreground grid grid-cols-[minmax(0,1fr)_4.5rem_5rem] gap-2 border-b px-3 py-2 text-xs font-medium">
+          <header class="bg-muted/40 text-muted-foreground grid gap-2 border-b px-3 py-2 text-xs font-medium" :class="rowGrid">
             <span class="text-foreground flex items-baseline gap-2"><strong class="text-sm">{{ section.title }}</strong><span class="text-muted-foreground font-normal">{{ section.hint }} · {{ section.count }}</span></span>
-            <span>Points</span><span>Remaining</span>
+            <span><span class="hidden sm:inline">State</span></span><span><span class="hidden sm:inline">Priority</span></span><span><span class="hidden sm:inline">Assignee</span></span>
+            <span>Points</span><span class="truncate">Remaining</span><span class="sr-only">Actions</span>
           </header>
           <template v-for="row in flattenBacklog(section.items, collapsed)" :key="row.item.id">
             <div
-              class="hover:bg-accent/60 group grid cursor-pointer grid-cols-[minmax(0,1fr)_4.5rem_5rem] items-center gap-2 border-b px-3 py-1.5 text-sm"
-              :class="selected.has(row.item.key) && 'bg-accent'" :data-backlog-row="row.item.key" draggable="true" tabindex="0"
+              class="hover:bg-accent/60 group grid cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-sm"
+              :class="[rowGrid, selected.has(row.item.key) && 'bg-accent']" :data-backlog-row="row.item.key" draggable="true" tabindex="0"
               @click="toggleSelection(row.item.key, $event)" @keydown="keyboardReorder($event, row.item, section)"
               @dragstart="startDrag(row.item)" @dragover.prevent @drop.prevent="dropOn(row.item, section, $event.altKey)"
             >
@@ -296,8 +316,28 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
                   :aria-label="`Add child to ${row.item.key}`" @click.stop="startChild(row.item)"
                 ><Plus class="size-3.5" /></button>
               </div>
+              <StateSelect
+                :model-value="row.item.stateId" :states="edits.statesFor(row.item)" :fallback-name="row.item.stateCategory"
+                :label="`State of ${row.item.key}`" :disabled="!edits.canEdit.value || edits.isBusy(row.item)" collapse
+                @change="edits.changeState(row.item, $event)"
+              />
+              <PrioritySelect
+                :model-value="row.item.priority" :label="`Priority of ${row.item.key}`"
+                :disabled="!edits.canEdit.value || edits.isBusy(row.item)" collapse
+                @change="edits.changePriority(row.item, $event)"
+              />
+              <AssigneeSelect
+                :model-value="row.item.assigneeId" :members="edits.members.value" :label="`Assignee for ${row.item.key}`"
+                :disabled="!edits.canEdit.value || edits.isBusy(row.item) || edits.membersLoading.value" collapse
+                @change="edits.changeAssignee(row.item, $event)"
+              />
               <span class="text-muted-foreground">{{ estimate(row.item) ?? '-' }}</span>
               <span class="text-muted-foreground">{{ remaining(row.item) ?? '-' }}</span>
+              <ItemRowActions
+                :item-key="row.item.key" :busy="edits.isBusy(row.item)" :can-duplicate="edits.canEdit.value"
+                class="opacity-60 group-hover:opacity-100 focus-within:opacity-100"
+                @copy-link="edits.copyLink(row.item)" @duplicate="edits.duplicate(row.item)"
+              />
             </div>
             <form
               v-if="childDraft?.parent.id === row.item.id" class="bg-muted/30 flex items-center gap-2 border-b px-3 py-2"

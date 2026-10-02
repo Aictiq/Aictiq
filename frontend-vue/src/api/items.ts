@@ -122,6 +122,11 @@ export const getTeamBacklog = (slug: string, teamId: string, options: BacklogQue
 export const createItem = (slug: string, projectKey: string, item: CreateItem) =>
   apiFetch<WorkItem>(`/orgs/${slug}/projects/${projectKey}/items/`, { method: 'POST', body: item })
 
+/** Copies an item and its direct children into the initial state under a new key; the
+ * title gains a "Copy of " prefix. Comments, history, assignee and dates are not copied. */
+export const duplicateItem = (slug: string, key: string) =>
+  apiFetch<WorkItem>(`/orgs/${slug}/items/${key}/duplicate`, { method: 'POST' })
+
 export const getItem = (slug: string, key: string) =>
   apiFetch<WorkItem>(`/orgs/${slug}/items/${key}`)
 /** Direct children only. The hierarchy is deliberately not flattened: a Story's Tasks
