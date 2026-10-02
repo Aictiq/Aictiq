@@ -81,6 +81,7 @@ public static class RunEndpoints
         var runs = api.MapGroup("/orgs/{orgSlug}/runs")
             .WithTags("Factory runs").RequireAuthorization();
         runs.MapGet("/", ListAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
+        runs.MapGet("/stats", StatsAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapGet("/{runId:guid}", GetAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapGet("/{runId:guid}/log", LogAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapPost("/{runId:guid}/cancel", CancelAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
@@ -140,50 +141,19 @@ public static class RunEndpoints
     }
 
     private static async Task<IResult> ListAsync(
-        string? project, string? agent, string? status, string? item,
+        [AsParameters] RunFilter filter,
         AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
         IProjectAccess access, IUserDirectory directory,
         int page = 1, int pageSize = 25, CancellationToken ct = default)
     {
-        var organizationId = tenant.OrganizationId!.Value;
-        RunStatus? statusFilter = null;
-        if (!string.IsNullOrWhiteSpace(status))
+        var filtered = await RunFilters.ApplyAsync(filter, db, tenant.OrganizationId!.Value, user.UserId!, access, ct);
+        if (filtered.Refusal is { } refusal)
         {
-            if (!Enum.TryParse<RunStatus>(status.Trim(), ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
-            {
-                return Validation("status", "Unknown run status.");
-            }
-            statusFilter = parsed;
+            return refusal;
         }
-
-        var visible = (await access.ListVisibleProjectIdsAsync(user.UserId!, organizationId, ct)).ToList();
-        if (!string.IsNullOrWhiteSpace(project))
-        {
-            var resolved = await access.FindProjectAsync(organizationId, project.Trim(), ct);
-            // A list stays a list: a project the caller cannot see is an empty page, not a 404.
-            if (resolved is null || await access.GetProjectRoleAsync(user.UserId!, resolved.Id, ct) is null)
-            {
-                return Results.Ok(new PagedResult<RunView>([], 1, 1, 0));
-            }
-            visible = [resolved.Id];
-        }
-        if (visible.Count == 0)
+        if (filtered.Runs is not { } query)
         {
             return Results.Ok(new PagedResult<RunView>([], 1, 1, 0));
-        }
-
-        var query = db.Runs.AsNoTracking().Where(run => visible.Contains(run.ProjectId));
-        if (!string.IsNullOrWhiteSpace(agent))
-        {
-            query = query.Where(run => run.AgentUserId == agent.Trim());
-        }
-        if (statusFilter is { } state)
-        {
-            query = query.Where(run => run.Status == state);
-        }
-        if (!string.IsNullOrWhiteSpace(item))
-        {
-            query = query.Where(run => run.ItemKey == item.Trim());
         }
 
         var normalizedPage = Math.Max(1, page);
@@ -199,6 +169,46 @@ public static class RunEndpoints
             runs.Select(run => ToView(run, people, includeDetails: false, names)
                 with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
+    }
+
+    /// <summary>
+    /// The runs list's statistics: the same filters and the same visibility, aggregated over
+    /// every matching run rather than a page of them. Days are counted in <paramref name="tz"/>,
+    /// the caller's IANA time zone, so "today" ends at their midnight.
+    /// </summary>
+    private static async Task<IResult> StatsAsync(
+        [AsParameters] RunFilter filter,
+        AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
+        IProjectAccess access, IUserDirectory directory,
+        string? groupBy = null, string? tz = null, CancellationToken ct = default)
+    {
+        var grouping = RunStatsGrouping.Agent;
+        if (!string.IsNullOrWhiteSpace(groupBy)
+            && (!Enum.TryParse(groupBy.Trim(), ignoreCase: true, out grouping) || !Enum.IsDefined(grouping)))
+        {
+            return Validation("groupBy", "Group by agent, project, playbook or runner.");
+        }
+        var timeZone = string.IsNullOrWhiteSpace(tz) ? "UTC" : tz.Trim();
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _))
+        {
+            return Validation("tz", "Unknown time zone.");
+        }
+
+        var organizationId = tenant.OrganizationId!.Value;
+        var filtered = await RunFilters.ApplyAsync(filter, db, organizationId, user.UserId!, access, ct);
+        if (filtered.Refusal is { } refusal)
+        {
+            return refusal;
+        }
+        var isOperator = await access.CanOperateFactoryAsync(user.UserId!, organizationId, ct);
+        if (filtered.Scope is not { } scope)
+        {
+            return Results.Ok(RunStatsView.Empty(grouping, isOperator));
+        }
+        // A filter that matches nothing still offers the playbooks and runners to pick from.
+        return Results.Ok(await RunStatistics.ComputeAsync(
+            filtered.Runs ?? scope.Where(_ => false), scope, grouping, timeZone, isOperator,
+            db, directory, access, ct));
     }
 
     private static async Task<IResult> GetAsync(
