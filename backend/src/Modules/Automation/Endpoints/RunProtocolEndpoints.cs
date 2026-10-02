@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aictiq.Modules.Automation.Auth;
 using Aictiq.Modules.Automation.Domain;
@@ -489,9 +490,9 @@ public static partial class RunProtocolEndpoints
     }
 
     private static async Task<IResult> HeartbeatAsync(
-        Guid runId, RunnerRunHeartbeatRequest? request, HttpContext http, AutomationDbContext db,
-        TimeProvider clock, CancellationToken ct)
+        Guid runId, HttpContext http, AutomationDbContext db, TimeProvider clock, CancellationToken ct)
     {
+        var request = await ReadHeartbeatAsync(http.Request, ct);
         var runnerId = RunnerId(http);
         var now = clock.GetUtcNow();
         var sessionId = Blank(request?.SessionId);
@@ -517,6 +518,32 @@ public static partial class RunProtocolEndpoints
 
         var exists = await db.Runs.AsNoTracking().AnyAsync(r => r.Id == runId && r.RunnerId == runnerId, ct);
         return exists ? Conflict("This run is already finished.") : NotFound();
+    }
+
+    /// <summary>
+    /// The body is read here rather than bound: a bound JSON body gives the endpoint
+    /// Content-Type metadata, and a runner beats without a body (and so without a
+    /// Content-Type) until its harness names a session. Routing then prefers the API's
+    /// catch-all 404 fallback, which accepts any request, and the runner reads the 404 as
+    /// its run having been closed.
+    /// </summary>
+    private static async Task<RunnerRunHeartbeatRequest?> ReadHeartbeatAsync(
+        HttpRequest request, CancellationToken ct)
+    {
+        if (request.ContentLength is 0 || !request.HasJsonContentType())
+        {
+            return null;
+        }
+
+        try
+        {
+            return await request.ReadFromJsonAsync<RunnerRunHeartbeatRequest>(ct);
+        }
+        catch (JsonException)
+        {
+            // The session is optional on a heartbeat; an unreadable one must not stop the beat.
+            return null;
+        }
     }
 
     private static async Task<IResult> FinishAsync(

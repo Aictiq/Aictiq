@@ -5,6 +5,8 @@ using Aictiq.Modules.Automation.Workers;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Paging;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aictiq.IntegrationTests.Automation;
@@ -256,6 +258,18 @@ public sealed class RunContinuationTests(PostgresFixture postgres, GarageFixture
         Assert.Equal("timedOut", timedOut.Status, ignoreCase: true);
         Assert.Equal("sess-beat", timedOut.SessionId);
         Assert.True(timedOut.Continuable);
+    }
+
+    [Fact]
+    public void the_run_heartbeat_does_not_require_a_json_content_type()
+    {
+        // Runners beat without a body until the harness names a session. A route that declares
+        // a JSON body loses those requests to the API's 404 fallback wherever the SPA is
+        // served, which this host does not, so the bodyless beat above cannot catch it.
+        var heartbeat = Context.Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(endpoint => endpoint.RoutePattern.RawText?.EndsWith("/runner/runs/{runId:guid}/heartbeat") == true);
+        Assert.Null(heartbeat.Metadata.GetMetadata<IAcceptsMetadata>());
     }
 
     [Fact]
