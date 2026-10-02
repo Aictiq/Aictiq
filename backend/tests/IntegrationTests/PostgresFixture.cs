@@ -30,6 +30,10 @@ public sealed class PostgresFixture : IAsyncLifetime
         // The other half of the same problem: the default of 100 is a production-shaped
         // number, and this container serves the whole suite at once.
         .WithCommand("-c", "max_connections=400")
+        // Parallel queries put their shared memory in /dev/shm, which Docker caps at 64 MB.
+        // With the whole suite on one server that fills up, and a migration fails with
+        // 53100: could not resize shared memory segment ... No space left on device.
+        .WithCreateParameterModifier(parameters => (parameters.HostConfig ??= new()).ShmSize = 512L * 1024 * 1024)
         .Build();
 
     public async ValueTask InitializeAsync() => await _container.StartAsync();
