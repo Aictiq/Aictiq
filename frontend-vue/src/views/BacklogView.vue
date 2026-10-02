@@ -46,7 +46,7 @@ const edits = useInlineItemEdits({
 // One template for the header and every row, so the columns line up. On narrow screens the
 // row controls fold down to their icon or avatar and keep the title its room.
 const rowGrid =
-  'grid-cols-[minmax(0,1fr)_1.25rem_1.25rem_1.75rem_2.5rem_3rem_3.25rem] sm:grid-cols-[minmax(0,1fr)_7.5rem_6.5rem_8.5rem_3.5rem_4.5rem_3.5rem]'
+  'grid-cols-[minmax(0,1fr)_1.25rem_1.25rem_1.75rem_2.5rem_3rem_3.25rem] sm:grid-cols-[minmax(0,1fr)_7.5rem_7.5rem_9rem_3.5rem_4.5rem_3.5rem]'
 
 const SECTION_PAGE = 50
 // The server's per-section cap (MaxBacklogTake).
@@ -317,17 +317,17 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
                 ><Plus class="size-3.5" /></button>
               </div>
               <StateSelect
-                :model-value="row.item.stateId" :states="edits.statesFor(row.item)" :fallback-name="row.item.stateCategory"
+                class="w-full" :model-value="row.item.stateId" :states="edits.statesFor(row.item)" :fallback-name="row.item.stateCategory"
                 :label="`State of ${row.item.key}`" :disabled="!edits.canEdit.value || edits.isBusy(row.item)" collapse
                 @change="edits.changeState(row.item, $event)"
               />
               <PrioritySelect
-                :model-value="row.item.priority" :label="`Priority of ${row.item.key}`"
+                class="w-full" :model-value="row.item.priority" :label="`Priority of ${row.item.key}`"
                 :disabled="!edits.canEdit.value || edits.isBusy(row.item)" collapse
                 @change="edits.changePriority(row.item, $event)"
               />
               <AssigneeSelect
-                :model-value="row.item.assigneeId" :members="edits.members.value" :label="`Assignee for ${row.item.key}`"
+                class="w-full" :model-value="row.item.assigneeId" :members="edits.members.value" :label="`Assignee for ${row.item.key}`"
                 :disabled="!edits.canEdit.value || edits.isBusy(row.item) || edits.membersLoading.value" collapse
                 @change="edits.changeAssignee(row.item, $event)"
               />
