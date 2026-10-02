@@ -83,4 +83,18 @@ public sealed class CommentReaction : TenantEntity
     public required string UserId { get; init; }
     public required string Emoji { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    /// <summary>Keep the first addition after removal so toggling cannot notify twice.</summary>
+    public DateTimeOffset? RemovedAt { get; set; }
+
+    public static readonly IReadOnlyList<string> AllowedEmoji = Array.AsReadOnly(new[] { "👍", "👎", "❤️", "🎉", "👀", "✅" });
+
+    public void Added(Comment comment, WorkItem item, DateTimeOffset now)
+    {
+        Raise(new CommentReactionAdded(OrganizationId, item.ProjectId, item.Id, CommentId,
+            comment.AuthorId, UserId, Emoji)
+        {
+            OccurredAt = now, ProjectKey = item.ProjectKey, ItemKey = item.Key,
+            ItemTitle = item.Title, Excerpt = Comment.Excerpt(comment.BodyMarkdown)
+        });
+    }
 }

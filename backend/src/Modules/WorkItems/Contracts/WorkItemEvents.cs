@@ -74,3 +74,14 @@ public sealed record SprintScopeChanged(Guid OrganizationId, Guid SprintId, Guid
 public sealed record SprintStarted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent;
 public sealed record SprintCompleted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent;
 public sealed record ClaimReleased(Guid OrganizationId, Guid ProjectId, Guid ItemId, string Key) : DomainEvent, IIntegrationEvent;
+
+/// <summary>The first addition of this user's emoji to this comment, never a re-addition.</summary>
+public sealed record CommentReactionAdded(
+    Guid OrganizationId, Guid ProjectId, Guid ItemId, Guid CommentId,
+    string CommentAuthorId, string ActorId, string Emoji) : DomainEvent, IIntegrationEvent
+{
+    public string? ProjectKey { get; init; }
+    public string? ItemKey { get; init; }
+    public string? ItemTitle { get; init; }
+    public string? Excerpt { get; init; }
+}

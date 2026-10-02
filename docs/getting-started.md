@@ -121,6 +121,20 @@ non-default port must also appear in `AICTIQ_URL`. Published-image configuration
 realtime scale-out and troubleshooting live in the repository's
 [`deploy/README.md`](../deploy/README.md).
 
+## React to a comment
+
+On an item's comment thread, choose **React** next to **Reply**, then select
+👍 👎 ❤️ 🎉 👀 or ✅. Each used emoji appears below the comment with its count.
+Your reactions are highlighted; click a chip again to remove yours. Hover over a
+chip to see who reacted. Replies have the same controls, and you can use several
+different emojis on one comment. Archived projects show existing reactions without
+allowing changes.
+
+The comment author receives an Inbox update and email for your first use of an emoji.
+Reacting to your own comment, removing a reaction, or adding it back sends no further
+notification. Change the **Reacted** row in **Settings → Notifications** to mute these
+updates.
+
 ## Notifications
 
 The notification bell opens a popup with updates from work you follow. Unread updates are

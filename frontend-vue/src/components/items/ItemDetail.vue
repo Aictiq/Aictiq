@@ -43,6 +43,7 @@ import TimeTrackingPopover from '@/components/common/TimeTrackingPopover.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import RefinementPanel from '@/components/items/RefinementPanel.vue'
+import CommentReactions from '@/components/items/CommentReactions.vue'
 import StartRunDialog from '@/components/factory/StartRunDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -178,6 +179,9 @@ const project = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'project']),
   queryFn: () => getProject(props.slug, props.projectKey),
 })
+const mayComment = computed(
+  () => hasProjectRole(project.data.value?.role, 'guest') && !project.data.value?.isArchived,
+)
 const projectMembers = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'project-members']),
   queryFn: () => listProjectMembers(props.slug, props.projectKey),
@@ -1020,7 +1024,7 @@ function logged(updated: TimeTrackingItem) {
         </button>
       </nav>
       <section v-if="tab === 'comments'" class="mt-4 space-y-4">
-        <form class="space-y-2" @submit.prevent="addComment">
+        <form v-if="mayComment" class="space-y-2" @submit.prevent="addComment">
           <MarkdownEditor
             ref="commentEditor"
             v-model="comment"
@@ -1082,15 +1086,22 @@ function logged(updated: TimeTrackingItem) {
             </p>
             <template v-else>
               <Markdown :source="entry.bodyMarkdown" class="mt-1" />
-              <button
-                v-if="!thread.root.deletedAt && !project.data.value?.isArchived"
-                type="button"
-                class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
-                :aria-label="`Reply to ${entry.author.displayName}`"
-                @click="startReply(entry)"
+              <CommentReactions
+                :slug="slug"
+                :item-key="itemKey"
+                :comment="entry"
+                :can-react="mayComment && entry.canReact !== false"
               >
-                <Reply class="size-3.5" aria-hidden="true" /> Reply
-              </button>
+                <button
+                  v-if="!thread.root.deletedAt && mayComment"
+                  type="button"
+                  class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
+                  :aria-label="`Reply to ${entry.author.displayName}`"
+                  @click="startReply(entry)"
+                >
+                  <Reply class="size-3.5" aria-hidden="true" /> Reply
+                </button>
+              </CommentReactions>
             </template>
           </article>
           <form

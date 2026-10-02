@@ -316,6 +316,169 @@
         ],
         "type": "object"
       },
+      "CommentAuthorView": {
+        "properties": {
+          "avatarKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isAgent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "avatarKey",
+          "isAgent"
+        ],
+        "type": "object"
+      },
+      "CommentReactionView": {
+        "properties": {
+          "count": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "emoji": {
+            "type": "string"
+          },
+          "reactedByMe": {
+            "type": "boolean"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/CommentAuthorView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "emoji",
+          "count",
+          "reactedByMe",
+          "users"
+        ],
+        "type": "object"
+      },
+      "CommentRevisionView": {
+        "properties": {
+          "bodyHtml": {
+            "type": "string"
+          },
+          "bodyMarkdown": {
+            "type": "string"
+          },
+          "editedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "editedBy": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bodyMarkdown",
+          "bodyHtml",
+          "editedBy",
+          "editedAt"
+        ],
+        "type": "object"
+      },
+      "CommentView": {
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/CommentAuthorView"
+          },
+          "bodyHtml": {
+            "type": "string"
+          },
+          "bodyMarkdown": {
+            "type": "string"
+          },
+          "canReact": {
+            "default": false,
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "editedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "parentCommentId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reactions": {
+            "items": {
+              "$ref": "#/components/schemas/CommentReactionView"
+            },
+            "type": "array"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/CommentRevisionView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "bodyMarkdown",
+          "bodyHtml",
+          "createdAt",
+          "editedAt",
+          "deletedAt",
+          "mentions",
+          "reactions",
+          "revisions"
+        ],
+        "type": "object"
+      },
       "CommitAttachmentRequest": {
         "properties": {
           "commentId": {
@@ -1548,7 +1711,8 @@
           "sprintCompleted",
           "wikiMentioned",
           "inviteAccepted",
-          "replied"
+          "replied",
+          "reacted"
         ]
       },
       "NotificationPreferenceView": {
@@ -1643,6 +1807,55 @@
           "guest",
           null
         ]
+      },
+      "PagedResultOfCommentView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommentView"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "pageSize": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "totalPages": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "totalCount"
+        ],
+        "type": "object"
       },
       "ProjectRole": {
         "enum": [
@@ -30038,6 +30251,13 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCommentView"
+                }
+              }
+            },
             "description": "OK"
           },
           "400": {
@@ -30379,6 +30599,16 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
+            "description": "Created"
           },
           "400": {
             "content": {
@@ -31070,6 +31300,13 @@
         },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
             "description": "OK"
           },
           "400": {
