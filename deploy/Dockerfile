@@ -9,7 +9,9 @@ WORKDIR /src/frontend-vue
 # scripts; it is part of the reproducible dependency input, not an optional workspace
 # convenience.
 COPY frontend-vue/package.json frontend-vue/pnpm-lock.yaml frontend-vue/pnpm-workspace.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
+# Node 25+ no longer bundles corepack, so install it first. pnpm itself stays pinned by
+# the packageManager field in package.json.
+RUN npm install -g corepack@latest && corepack enable && pnpm install --frozen-lockfile
 
 COPY frontend-vue/ ./
 RUN pnpm run build
