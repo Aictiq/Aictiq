@@ -177,6 +177,23 @@ describe('RunDetailView continue and retry', () => {
     expect(wrapper.find('[data-testid="run-chain"]').exists()).toBe(false)
   })
 
+  it('links a follow-up to the earlier run and the comment that asked for it', async () => {
+    const { wrapper } = await mountRun({
+      ...failed,
+      continuesRunId: null,
+      chain: null,
+      triggerCommentId: 'c-9',
+      followsUpRunId: 'r-0',
+      branchName: 'proj-1-fix-2',
+    })
+
+    const trigger = wrapper.find('[data-testid="run-trigger-comment"]')
+    expect(trigger.text()).toContain('Follows up')
+    const links = trigger.findAll('a').map((link) => link.attributes('href'))
+    expect(links).toEqual(['/o/acme/factory/runs/r-0', '/o/acme/p/PROJ/items/PROJ-1#comment-c-9'])
+    expect(wrapper.find('[data-testid="run-branch"]').text()).toContain('proj-1-fix-2')
+  })
+
   it('offers neither once the run was continued, and links the next run', async () => {
     const { wrapper } = await mountRun({ ...failed, continuable: false, continuedByRunId: 'r-3' })
 

@@ -1028,6 +1028,13 @@ function logged(updated: TimeTrackingItem) {
             <span v-if="runRequesterLabel(entry)" class="text-muted-foreground shrink-0 text-xs italic">
               {{ runRequesterLabel(entry) }}
             </span>
+            <RouterLink
+              v-if="entry.triggerCommentId"
+              :to="{ hash: `#comment-${entry.triggerCommentId}` }"
+              class="text-muted-foreground hover:text-foreground shrink-0 text-xs underline underline-offset-2"
+              data-testid="run-trigger-comment"
+              >{{ entry.followsUpRunId ? 'Follow-up from a comment' : 'From a comment' }}</RouterLink
+            >
             <span class="ml-auto flex shrink-0 items-center gap-3">
               <a
                 v-if="entry.pullRequestUrl"

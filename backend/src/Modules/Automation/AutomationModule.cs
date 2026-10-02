@@ -32,6 +32,7 @@ public static class AutomationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<RunDispatcher>();
+        services.AddScoped<RunMentionQueue>();
         services.AddScoped<IFactoryPages, AutomationFactoryPages>();
         // The run tools, the aictiq://run/{id} resource: the API host discovers them from
         // this assembly exactly as it discovers WorkItems'.
@@ -48,6 +49,9 @@ public static class AutomationModule
         services.AddScoped<IDomainEventHandler<WorkItemsDeleted>, AutomationWorkItemsDeletedHandler>();
         // The rule conveyor: fires on WorkItems' own transition event.
         services.AddScoped<IDomainEventHandler<Aictiq.Modules.WorkItems.Contracts.WorkItemTransitioned>, RuleFiringHandler>();
+        // The comment door: a comment that mentions an agent asks it to work on the item.
+        services.AddScoped<IDomainEventHandler<Aictiq.Modules.WorkItems.Contracts.CommentAdded>, AgentMentionHandler>();
+        services.AddScoped<IDomainEventHandler<Aictiq.Modules.WorkItems.Contracts.CommentMentionsAdded>, AgentMentionEditHandler>();
         services.AddHostedService<RunSweeper>();
         services.AddHostedService<RunLogRetentionService>();
         return services;

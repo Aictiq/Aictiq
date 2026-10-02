@@ -480,6 +480,13 @@ watch(
               >{{ runScheduledLabel(run) }}</span
             >
             <span
+              v-if="run.followsUpRunId"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-row-follow-up"
+            >
+              follow-up
+            </span>
+            <span
               v-if="run.continuesRunId"
               class="text-muted-foreground shrink-0 text-xs"
               data-testid="run-row-continues"

@@ -37,6 +37,8 @@ public sealed class AutomationWorkItemsDeletedHandler(
             .ExecuteDeleteAsync(cancellationToken);
         await db.Refinements.Where(refinement => @event.ItemIds.Contains(refinement.ItemId))
             .ExecuteDeleteAsync(cancellationToken);
+        await db.RunMentions.Where(mention => @event.ItemIds.Contains(mention.ItemId))
+            .ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         foreach (var token in liveTokens)

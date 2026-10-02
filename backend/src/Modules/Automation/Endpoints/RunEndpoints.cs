@@ -31,6 +31,9 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="Chain">The runs from the first failure to the last continue, oldest first (run detail only).</param>
 /// <param name="ScheduledFor">When the run may start (UTC), or null when it was queued to start right away.</param>
 /// <param name="WorkspacePath">The run's checkout on its runner, where <paramref name="SessionId"/> resumes.</param>
+/// <param name="TriggerCommentId">The comment that asked for the run by mentioning its agent, or null.</param>
+/// <param name="FollowsUpRunId">The earlier run of the agent on the item that this run follows up, or null.</param>
+/// <param name="BranchName">The branch the run delivers on.</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -42,7 +45,8 @@ public sealed record RunView(
     long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement,
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
-    DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null);
+    DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
+    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null);
 
 /// <summary>One run of a continue chain, with what it cost on its own.</summary>
 public sealed record RunChainLink(
@@ -591,7 +595,8 @@ public static class RunEndpoints
             run.Version, run.Kind,
             run.SessionId,
             run.ContinuesRunId, null, run.AutoContinued, ScheduledFor: run.ScheduledFor,
-            WorkspacePath: run.WorkspacePath);
+            WorkspacePath: run.WorkspacePath,
+            TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

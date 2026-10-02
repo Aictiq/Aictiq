@@ -212,6 +212,25 @@ describe('ItemDetail runs and the operator line', () => {
     expect(wrapper.text()).not.toContain('Open log')
   })
 
+  it('links a run a comment asked for to that comment, and says when it was a follow-up', async () => {
+    const original = runs.items[0]!
+    runs.items[0] = {
+      ...original,
+      triggerCommentId: 'c-9',
+      followsUpRunId: 'r-0',
+    } as typeof original
+
+    const wrapper = await mountDetail(false)
+
+    const link = wrapper
+      .findAllComponents(RouterLinkStub)
+      .find((entry) => entry.attributes('data-testid') === 'run-trigger-comment')!
+    expect(link.text()).toBe('Follow-up from a comment')
+    expect(link.props('to')).toEqual({ hash: '#comment-c-9' })
+
+    runs.items[0] = original
+  })
+
   it('names the rule that dispatched a run with no requester', async () => {
     const original = { ...runs.items[0]! }
     runs.items[0]!.requestedBy = null as unknown as string

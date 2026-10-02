@@ -558,6 +558,26 @@ describe('kept workspaces', () => {
     expect(git(local, 'worktree', 'list').trim().split('\n')).toHaveLength(1)
   })
 
+  it('finds the workspace again when a continue run is itself continued', async () => {
+    const ws = await provisionWorkspace(claimed(), options())
+    ws.retain('sess-1')
+    const second = continueRun(claimed().runId)
+    const resumed = await reattachWorkspace(second, 'Continue.', options())
+    resumed.retain('sess-1')
+    // The marker now names the second run, while the directory is still the first run's.
+    expect(JSON.parse(readFileSync(join(ws.runDir, 'kept.json'), 'utf8')).runId).toBe(second.runId)
+
+    const third = claimed({
+      runId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4aaa',
+      resume: { continuesRunId: second.runId, sessionId: 'sess-1', failureReason: null },
+    })
+    const again = await reattachWorkspace(third, 'Continue again.', options())
+    expect(again.checkout).toBe(ws.checkout)
+    expect(readFileSync(again.promptFile, 'utf8')).toBe('Continue again.')
+    await again.cleanup()
+    expect(existsSync(ws.runDir)).toBe(false)
+  })
+
   it('fails with session-unavailable when the workspace is gone', async () => {
     const error = await failure(reattachWorkspace(continueRun('0199-gone'), 'Continue.', options()))
     expect(error.reason).toBe('session-unavailable')

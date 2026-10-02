@@ -398,6 +398,56 @@ latest run can be continued. The run page links each run in the chain and adds u
 tokens. If the runner is offline or no longer has the workspace, the continue run fails with
 `session-unavailable`; use Retry.
 
+### Steer an agent from a comment
+
+Mention an agent in a comment on the item, for example `@builder the redirect should keep the
+query string`, and the agent starts working on what the comment asks. The comment's text is the
+instruction. When the run finishes or fails, the agent replies in the comment's thread with what
+it changed and a link to the pull request, or with the question it needs answered.
+
+- **First run.** If the agent has never implemented the item, or has only refined it, the mention
+  starts a normal implement run with the comment quoted in its prompt. Refine runs are never
+  continued.
+- **Follow-up.** If the agent has an earlier implement run on the item, the mention starts a
+  follow-up of it. The follow-up uses the same playbook and branch and goes to the runner that
+  ran the earlier run, which holds its session. When that runner is offline the follow-up waits
+  in the queue for it. If the runner is disabled or deleted, any runner may take the follow-up
+  and starts a fresh session.
+- **One run at a time.** A mention made while a run or someone's claim holds the item waits. It
+  starts when the item is free, and several mentions run in the order they were written. A
+  mention that waits a day on an item no run holds, for example because a person keeps it
+  claimed, is dropped and the agent replies to say so.
+- **Workflow.** A mention's run moves the item exactly like any implement run: it is claimed and
+  moved to the first Active state, then to the playbook's success or failure state.
+- **Who can ask.** A mention starts work only when its author could start the run by hand: a
+  project Member with **Operate the factory**. A stakeholder's mention, a Guest's, or another
+  agent's only notifies, as before, and stakeholders do not see the agent's replies. Mentions of
+  people only notify.
+- **History.** The item's **Agent runs** list links a mention's run to its comment, and the run
+  page links a follow-up to the run it follows up.
+
+If no run can ever start for a mention, the agent replies with the reason. For example, the
+project may have no default playbook or be archived, or the author may have lost factory
+access. An edit that adds a new agent mention to a comment counts as a new request; editing the
+text of a comment that already mentioned the agent does not start another run.
+
+A follow-up uses the workspace the earlier run kept when its runner still has it: the harness
+resumes the earlier session and gets the comment as its next message. When the workspace is gone, the follow-up does not fail; it starts
+a fresh session from a new checkout, and its prompt quotes the comment. Before the harness
+starts, the runner fetches `origin` and picks the branch:
+
+- The earlier pull request is open, or the run opened none: the runner continues on the earlier
+  branch, fast-forwarding the checkout when someone pushed to it. Commits the agent never pushed
+  are kept.
+- The earlier pull request was merged or closed: the runner creates a new branch from the
+  default branch, and the agent pushes it and opens a new pull request.
+- The earlier pull request or branch no longer exists: the run fails with
+  `follow-up-target-missing` without starting the harness, and the reply to the comment says
+  what was missing.
+
+The runner asks `gh pr view` for the pull request's state. Without `gh`, or when it is not
+signed in, the runner continues on the earlier branch if it still exists.
+
 ### Resume a session by hand
 
 In ItemDetail, under **Agent runs**, each finished run with a session shows **Copy resume
@@ -546,6 +596,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `harness-rate-limited`, `harness-transient`, `harness-crashed` | The harness hit a rate limit, the model API was overloaded or unreachable, or the harness died on its own. | Aictiq continues the run automatically up to twice. After that, use **Continue** once the limit resets, or **Retry**. |
 | `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (older than 5 days, or removed). | Use **Retry** to start a fresh run. |
+| `follow-up-target-missing` | A follow-up's earlier pull request could not be found, or its branch is neither on `origin` nor in the kept checkout. The harness did not start. | Check that the pull request and branch still exist and that `gh auth status` works as the runner's user, then mention the agent again, or start a new run. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then **Continue** the run (each continue gets the full limit again) or start a new one. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
 | Runner exits with code 5 | Its `jrn_` secret was disabled, deleted, or rotated. Retrying cannot repair the credential. | Register or rotate the runner in Aictiq, then run `aictiq runner register` with the newly shown secret. |

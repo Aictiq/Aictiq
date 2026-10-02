@@ -63,6 +63,11 @@ export interface Workspace {
   attachmentsDir: string
   /** The source prompt plus the runner-generated attachment inventory. */
   prompt: string
+  /**
+   * Provisioning created `branch` from the default branch rather than finding it, so its local
+   * ref says nothing about earlier work on it. Unset for a reattached workspace.
+   */
+  createdBranch?: boolean
   /** Extra environment for the harness process (the push credential for a `github` clone). */
   env: Record<string, string>
   /** removes the worktree (git worktree remove --force + prune in the source repo) or clone, then the run dir; no-op when keep; never throws */
@@ -134,6 +139,7 @@ export async function provisionWorkspace(
   const env = options.env ?? process.env
 
   let source: string | null = null
+  let createdBranch: boolean
   const cleanup = async (): Promise<void> => {
     if (options.keep) return
     await removeRunDir(runDir, source, env)
@@ -156,9 +162,10 @@ export async function provisionWorkspace(
 
     let harnessEnv: Record<string, string> = {}
     if (run.repo.source === 'local') {
-      source = await provisionLocal(run, checkout, options, env)
+      ;({ source, createdBranch } = await provisionLocal(run, checkout, options, env))
     } else {
       harnessEnv = await provisionGithub(run, runDir, checkout, options, env)
+      createdBranch = !run.workOnDefaultBranch
     }
 
     const prompt = await provisionAttachments(run, attachmentsDir, options)
@@ -172,6 +179,7 @@ export async function provisionWorkspace(
       mcpConfigFile,
       attachmentsDir,
       prompt,
+      createdBranch,
       env: harnessEnv,
       cleanup,
       retain: (sessionId) => writeKept(runDir, run, sessionId, source),
@@ -188,6 +196,10 @@ export async function provisionWorkspace(
  * lose the conversation. Only the per-run files change - the prompt becomes the continue
  * message and a `github` clone gets a fresh push token. Throws `session-unavailable` when this
  * runner no longer has the workspace (it was continued, swept, or kept on another machine).
+ *
+ * The workspace is found by its `kept.json`, not its directory: a reattached workspace stays in
+ * the directory of the run that first made it while the marker names the run that last worked
+ * in it, so a continue of a continue (or a second follow-up) names a run with no directory.
  */
 export async function reattachWorkspace(
   run: ClaimedRun,
@@ -204,7 +216,7 @@ export async function reattachWorkspace(
     throw unavailable(`Run ${previous} names no workspace to continue.`)
   }
 
-  const runDir = join(options.root, previous)
+  const runDir = findKept(options.root, previous) ?? join(options.root, previous)
   const checkout = join(runDir, 'repo')
   const kept = readKept(runDir)
   if (!kept || !existsSync(checkout)) {
@@ -301,6 +313,22 @@ export async function pruneKeptWorkspaces(
     removed.push(entry.name)
   }
   return removed
+}
+
+/** The directory whose `kept.json` names `runId` as the run that last worked in it. */
+function findKept(root: string, runId: string): string | null {
+  let entries: string[]
+  try {
+    entries = readdirSync(root)
+  } catch {
+    return null
+  }
+  // The run's own directory is the usual answer; the scan covers reattached workspaces.
+  for (const name of [runId, ...entries.filter((entry) => entry !== runId)]) {
+    const dir = join(root, name)
+    if (readKept(dir)?.runId === runId) return dir
+  }
+  return null
 }
 
 function readKept(runDir: string): KeptWorkspace | null {
@@ -505,7 +533,7 @@ async function provisionLocal(
   checkout: string,
   options: WorkspaceOptions,
   env: NodeJS.ProcessEnv,
-): Promise<string | null> {
+): Promise<{ source: string | null; createdBranch: boolean }> {
   const { path: mapped, root } = resolveLocalRepository(run, options)
   const origin = root === null ? 'mapped for project' : 'the path hint for project'
 
@@ -575,7 +603,7 @@ async function provisionLocal(
     await isolated(['checkout', '-B', run.branchName, `origin/${run.branchName}`])
     await isolated(['branch', '--set-upstream-to', `origin/${run.branchName}`, run.branchName])
     options.event(`Created isolated clone ${checkout} on default branch ${run.branchName}`)
-    return null
+    return { source: null, createdBranch: false }
   }
 
   const branchExists = await git(
@@ -603,7 +631,7 @@ async function provisionLocal(
     await call(['worktree', 'add', '--no-track', '-b', run.branchName, checkout, base])
     options.event(`Created worktree ${checkout} on branch ${run.branchName} from ${base}`)
   }
-  return repo
+  return { source: repo, createdBranch: !branchExists }
 }
 
 async function provisionGithub(
@@ -690,7 +718,7 @@ async function assertRefName(name: string, what: string, env: NodeJS.ProcessEnv)
     )
 }
 
-interface GitOptions {
+export interface GitOptions {
   cwd: string
   env: NodeJS.ProcessEnv
   signal?: AbortSignal | undefined
@@ -707,7 +735,7 @@ class GitError extends Error {
 }
 
 /** A step whose failure fails the run, with git's own words in the message. */
-async function gitStep(args: string[], options: GitOptions, secret?: string): Promise<string> {
+export async function gitStep(args: string[], options: GitOptions, secret?: string): Promise<string> {
   try {
     return await git(args, options)
   } catch (error) {
@@ -721,7 +749,7 @@ async function gitStep(args: string[], options: GitOptions, secret?: string): Pr
   }
 }
 
-function git(args: string[], options: GitOptions): Promise<string> {
+export function git(args: string[], options: GitOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       cwd: options.cwd,

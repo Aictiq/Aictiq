@@ -17,7 +17,8 @@ namespace Aictiq.Modules.Automation.Workers;
 /// <see cref="AutomationOptions.RunnerLostAfterMinutes"/>) and a run that outlived its
 /// playbook's time limit. Both verdicts go through the same path as a runner's own
 /// finish - terminal status, token revoked, <see cref="RunFinished"/> staged - so the
-/// item's history cannot tell them apart.
+/// item's history cannot tell them apart. It also starts the mentions waiting for an item
+/// to be free (<see cref="RunMentionQueue"/>).
 /// </summary>
 /// <remarks>
 /// Per organization, not one cross-tenant query: row-level security admits
@@ -109,6 +110,8 @@ public sealed class RunSweeper(
                 await SweepReadOnlyQueuedRunsAsync(scope.ServiceProvider, cancellationToken);
                 await SweepStrandedContinuesAsync(scope.ServiceProvider, cancellationToken);
                 await SweepAutoContinuesAsync(scope.ServiceProvider, cancellationToken);
+                // Last, so a run settled above frees its item for the next mention on this tick.
+                await scope.ServiceProvider.GetRequiredService<RunMentionQueue>().SweepAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

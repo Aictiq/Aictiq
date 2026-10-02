@@ -86,6 +86,13 @@ export interface ClaimedRun {
    * workspace the failed run kept on this runner, instead of starting fresh.
    */
   resume?: RunResume | null
+  /**
+   * Set when someone asked the agent for more work in an item comment, after an earlier
+   * implement run. `branchName` is then the earlier run's branch, `resume` is null, and the
+   * prompt already quotes the request; the runner resumes the earlier session when it still has
+   * its workspace and decides which branch the work goes on.
+   */
+  followUp?: RunFollowUp | null
 }
 
 export interface RunResume {
@@ -94,6 +101,25 @@ export interface RunResume {
   sessionId: string
   /** Why the failed run stopped, told to the agent. */
   failureReason: string | null
+}
+
+export interface RunFollowUp {
+  /** The earlier implement run this one follows up; its kept workspace holds the session. */
+  previousRunId: string
+  /** That run's harness session, or null when it never reported one. */
+  sessionId: string | null
+  /** The branch the earlier run worked on (also sent as run.branchName). */
+  previousBranchName: string
+  /** The pull request the earlier run opened, when it reported one. */
+  pullRequestUrl: string | null
+  /** The branch to start from the default branch when that pull request was merged or closed. */
+  newBranchName: string
+  /** The comment text the person wrote: what they want changed. */
+  instruction: string
+  /** Display name of the person who asked, or null. */
+  requestedByName: string | null
+  /** The comment that asked; the server replies in its thread when the run finishes. */
+  commentId: string
 }
 
 export type LogStream = 'stdout' | 'stderr' | 'event'
@@ -113,6 +139,11 @@ export interface FinishReport {
   sessionId?: string | null
   /** The absolute checkout the session lives in, kept for a person to resume it by hand. */
   workspacePath?: string | null
+  /**
+   * The branch the run delivered on, sent only when it is not the claimed `branchName`: a
+   * follow-up whose earlier pull request was merged or closed starts a new branch.
+   */
+  branchName?: string | null
 }
 
 /** One stdout line of a harness, as the adapter reads it. */

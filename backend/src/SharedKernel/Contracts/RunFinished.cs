@@ -39,4 +39,10 @@ public sealed record RunFinished(
     /// is whatever the outcome - only the claim is released and the comment left.
     /// </summary>
     public bool Refinement { get; init; }
+
+    /// <summary>
+    /// The comment that asked for the run by mentioning its agent, or null. The outcome comment
+    /// is then the agent's reply in that comment's thread rather than a new one.
+    /// </summary>
+    public Guid? TriggerCommentId { get; init; }
 }

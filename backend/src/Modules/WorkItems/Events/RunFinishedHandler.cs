@@ -115,17 +115,30 @@ public sealed class RunFinishedHandler(
             RunOutcomes.Cancelled => string.IsNullOrWhiteSpace(@event.Summary)
                 ? $"{noun} {@event.RunId} was cancelled · [View log](/runs/{@event.RunId})"
                 : $"{noun} {@event.RunId} was cancelled · {@event.Summary} · [View log](/runs/{@event.RunId})",
+            // A reply owes the person who asked the reason in words, not only its code.
+            _ when @event.TriggerCommentId is not null && !string.IsNullOrWhiteSpace(@event.Summary)
+                => $"{noun} {@event.RunId} failed · {@event.FailureReason} · {@event.Summary} · [View log](/runs/{@event.RunId})",
             _ => $"{noun} {@event.RunId} failed · {@event.FailureReason} · [View log](/runs/{@event.RunId})",
         };
+        // A run a comment asked for answers in that comment's thread, with the pull request
+        // beside the log so the person who asked can open what changed in one click.
+        var thread = @event.TriggerCommentId is { } triggerId
+            ? await AgentReplies.ThreadAsync(db, item.Id, triggerId, cancellationToken)
+            : null;
+        if (thread is not null && !string.IsNullOrEmpty(@event.PullRequestUrl))
+        {
+            markdown += $" · [Pull request]({@event.PullRequestUrl})";
+        }
         var comment = new Comment
         {
             OrganizationId = @event.OrganizationId, ItemId = item.Id, AuthorId = @event.AgentId,
+            ParentCommentId = thread?.Id,
             BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown),
             MentionedUserIds = [], CreatedAt = now, EventId = @event.EventId,
         };
         // The comment's own event carries the run's news to watchers through the outbox;
         // the column above is the replay guard, unrelated to it.
-        comment.Added(item, mentionedUserIds: [], threadAuthorId: null, now);
+        comment.Added(item, mentionedUserIds: [], threadAuthorId: thread?.AuthorId, now);
         db.Comments.Add(comment);
 
         db.ItemHistory.Add(new ItemHistory

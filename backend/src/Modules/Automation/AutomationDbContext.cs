@@ -32,6 +32,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<RuleFiring> RuleFirings => Set<RuleFiring>();
     public DbSet<ItemRefinement> Refinements => Set<ItemRefinement>();
     public DbSet<ProjectRefinementSettings> RefinementSettings => Set<ProjectRefinementSettings>();
+    public DbSet<RunMention> RunMentions => Set<RunMention>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -125,6 +126,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.FailureReason).HasMaxLength(Run.MaxFailureReasonLength);
             b.Property(x => x.SessionId).HasMaxLength(Run.MaxSessionIdLength);
             b.Property(x => x.WorkspacePath).HasMaxLength(Run.MaxWorkspacePathLength);
+            b.Property(x => x.Instruction).HasMaxLength(Run.MaxInstructionLength);
             b.Property(x => x.CostUsd).HasPrecision(12, 2);
             b.Property(x => x.Status).HasConversion<short>();
             b.Property(x => x.Kind).HasConversion<short>();
@@ -158,6 +160,35 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                 // rules: a deleted rule must not rewrite or block the history of what it ran.
                 t.HasCheckConstraint("ck_runs_requested_by_xor_rule",
                     "(requested_by IS NOT NULL) <> (rule_id IS NOT NULL)");
+                // A comment's request carries its words; nothing else does.
+                t.HasCheckConstraint("ck_runs_trigger_instruction",
+                    "(trigger_comment_id IS NULL) = (instruction IS NULL)");
+                t.HasCheckConstraint("ck_runs_follow_up_trigger",
+                    "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL");
+            });
+        });
+
+        modelBuilder.Entity<RunMention>(b =>
+        {
+            b.ToTable("run_mentions");
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.ItemKey).HasMaxLength(Run.MaxItemKeyLength);
+            b.Property(x => x.AgentUserId).HasMaxLength(Run.MaxActorLength);
+            b.Property(x => x.RequestedBy).HasMaxLength(Run.MaxActorLength);
+            b.Property(x => x.RefusalReason).HasMaxLength(RunMention.MaxRefusalReasonLength);
+            b.Property(x => x.Status).HasConversion<short>();
+            // The replay guard: one request per comment and agent, however often the event arrives.
+            b.HasIndex(x => new { x.CommentId, x.AgentUserId }).IsUnique()
+                .HasDatabaseName("ux_run_mentions_comment_agent");
+            // The queue: an item's waiting mentions, oldest first.
+            b.HasIndex(x => new { x.ItemId, x.CreatedAt }).HasFilter("status = 0")
+                .HasDatabaseName("ix_run_mentions_pending");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_run_mentions_project_id");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_run_mentions_status", "status BETWEEN 0 AND 2");
+                t.HasCheckConstraint("ck_run_mentions_started", "(status = 1) = (run_id IS NOT NULL)");
+                t.HasCheckConstraint("ck_run_mentions_decided", "(status = 0) = (decided_at IS NULL)");
             });
         });
 
