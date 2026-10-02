@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
+import { failedOutcome } from './failure.js'
 
 const limit = (value: string, length: number) =>
   value.length > length ? `${value.slice(0, Math.max(0, length - 1))}…` : value
@@ -20,14 +21,6 @@ export function versionOf(
       resolve(firstLine || null)
     })
   })
-}
-
-function failedOutcome(exitCode: number | null, lastLines: string[]) {
-  return {
-    outcome: 'failed' as const,
-    failureReason: exitCode === null ? 'harness-killed' : `harness-exit-${exitCode}`,
-    summary: limit(lastLines.slice(-20).join('\n'), 4_000) || null,
-  }
 }
 
 export const claude: HarnessAdapter = {
@@ -54,6 +47,9 @@ export const claude: HarnessAdapter = {
         // beside it, so grant this one read-only run directory explicitly.
         '--add-dir',
         context.attachmentsDir,
+        // The session lives in Claude's own store, keyed by this checkout's path; the kept
+        // workspace is the same path, so the conversation picks up where it stopped.
+        ...(context.resumeSessionId ? ['--resume', context.resumeSessionId] : []),
       ],
       // Claude's -p mode consumes stdin when there is no positional prompt.
       stdin: context.prompt,
@@ -74,7 +70,10 @@ export const claude: HarnessAdapter = {
     }
 
     if (event.type === 'system' && event.subtype === 'init') {
-      return { log: `[init] model ${typeof event.model === 'string' ? event.model : 'unknown'}` }
+      return {
+        log: `[init] model ${typeof event.model === 'string' ? event.model : 'unknown'}`,
+        ...(typeof event.session_id === 'string' ? { sessionId: event.session_id } : {}),
+      }
     }
 
     if (event.type === 'assistant') {
@@ -124,12 +123,13 @@ export const claude: HarnessAdapter = {
     return { log: null }
   },
 
-  outcome(exitCode, lastLines, lastResult) {
-    if (exitCode !== 0) return failedOutcome(exitCode, lastLines)
+  outcome(exitCode, lastLines, lastResult, resuming) {
+    if (exitCode !== 0) return failedOutcome(exitCode, lastLines, resuming)
     // An error result (a refused prompt, an exhausted budget) can still exit 0; the result
-    // line `parse` logged is what says so.
+    // line `parse` logged is what says so. Its text still tells a rate limit from a refusal.
     if (lastLines.some((line) => /^\[result\] .*\(error\)/.test(line))) {
-      return { ...failedOutcome(exitCode, lastLines), failureReason: 'harness-error' }
+      const lines = lastResult ? [...lastLines, lastResult] : lastLines
+      return failedOutcome(exitCode, lines, resuming, 'harness-error')
     }
     return {
       outcome: 'succeeded',

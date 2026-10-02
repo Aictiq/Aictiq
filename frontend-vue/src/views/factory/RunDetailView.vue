@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ExternalLink, Hand } from '@lucide/vue'
+import { ExternalLink, Hand, RotateCcw, StepForward } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import { cancelRun, getRun } from '@/api/runs'
+import { cancelRun, continueRun, dispatchRun, getRun } from '@/api/runs'
+import type { Run } from '@/api/runs'
 import { getProject, hasProjectRole } from '@/api/projects'
 import KeyChip from '@/components/common/KeyChip.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
@@ -18,6 +19,8 @@ import { useToast } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import {
   canCancelRun,
+  canRetryRun,
+  chainTotals,
   formatCost,
   formatTokens,
   isLiveRun,
@@ -36,6 +39,7 @@ import SettingsSection from '@/components/settings/SettingsSection.vue'
  * log; cancelling is narrower - the person who dispatched the run, or an Admin.
  */
 const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const toast = useToast()
 const client = useQueryClient()
@@ -102,6 +106,49 @@ async function cancel() {
     await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
   }
 }
+
+// Continue resumes the failed run's session on the runner that kept its workspace; Retry
+// starts over from a fresh checkout. Both make a new run and open it.
+const starting = ref<'continue' | 'retry' | null>(null)
+async function startNext(how: 'continue' | 'retry') {
+  const current = run.value
+  if (!current || starting.value) return
+  starting.value = how
+  try {
+    const next: Run =
+      how === 'continue'
+        ? await continueRun(slug.value, current.id)
+        : await dispatchRun(slug.value, current.itemKey, {
+            playbookId: current.playbookId,
+            agentId: current.agentId,
+          })
+    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
+    await router.push(`/o/${slug.value}/factory/runs/${next.id}`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      toast.info(error.problem?.detail ?? error.title)
+    } else {
+      toast.error(error)
+    }
+    await client.invalidateQueries({ queryKey: [slug.value, 'runs', current.id] })
+  } finally {
+    starting.value = null
+  }
+}
+
+const mayRetry = computed(() => (run.value ? canRetryRun(run.value) : false))
+const chain = computed(() => run.value?.chain ?? null)
+const chainTotal = computed(() => {
+  if (!chain.value) return null
+  const totals = chainTotals(chain.value)
+  const parts = [
+    formatCost(totals.costUsd),
+    totals.inputTokens !== null || totals.outputTokens !== null
+      ? `${formatTokens(totals.inputTokens) ?? '-'} in · ${formatTokens(totals.outputTokens) ?? '-'} out`
+      : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : null
+})
 
 const logRef = ref<InstanceType<typeof RunLog> | null>(null)
 
@@ -176,6 +223,32 @@ const tokens = computed(() => {
             </div>
           </div>
 
+          <div v-if="run.continuable || mayRetry" class="ml-auto flex items-center gap-2">
+            <Button
+              v-if="run.continuable"
+              size="sm"
+              :disabled="starting !== null"
+              data-testid="run-continue"
+              title="Resume the agent's session where it stopped, on the same runner"
+              @click="startNext('continue')"
+            >
+              <StepForward class="size-3.5" aria-hidden="true" />
+              Continue
+            </Button>
+            <Button
+              v-if="mayRetry"
+              variant="outline"
+              size="sm"
+              :disabled="starting !== null"
+              data-testid="run-retry"
+              title="Start a fresh run from a new checkout"
+              @click="startNext('retry')"
+            >
+              <RotateCcw class="size-3.5" aria-hidden="true" />
+              Retry
+            </Button>
+          </div>
+
           <Button
             v-if="mayCancel"
             variant="outline"
@@ -239,6 +312,32 @@ const tokens = computed(() => {
             <dt class="inline">Limit&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.maxMinutes }} min</dd>
           </div>
+          <div v-if="run.sessionId" data-testid="run-session">
+            <dt class="inline">Session&nbsp;</dt>
+            <dd class="text-foreground inline font-mono">{{ run.sessionId }}</dd>
+          </div>
+          <div v-if="run.continuesRunId" data-testid="run-continues">
+            <dt class="inline">{{ run.autoContinued ? 'Auto-continues' : 'Continues' }}&nbsp;</dt>
+            <dd class="inline">
+              <RouterLink
+                :to="`/o/${slug}/factory/runs/${run.continuesRunId}`"
+                class="text-primary underline underline-offset-2"
+              >
+                the failed run
+              </RouterLink>
+            </dd>
+          </div>
+          <div v-if="run.continuedByRunId" data-testid="run-continued-by">
+            <dt class="inline">Continued as&nbsp;</dt>
+            <dd class="inline">
+              <RouterLink
+                :to="`/o/${slug}/factory/runs/${run.continuedByRunId}`"
+                class="text-primary underline underline-offset-2"
+              >
+                the next run
+              </RouterLink>
+            </dd>
+          </div>
         </dl>
 
         <div v-if="run.pullRequestUrl" class="mt-3">
@@ -265,6 +364,44 @@ const tokens = computed(() => {
           {{ run.failureReason }}
         </p>
       </div>
+
+      <section v-if="chain" class="border-border rounded-lg border" data-testid="run-chain">
+        <header class="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-3 pb-2">
+          <h2 class="text-sm font-medium">Continued runs</h2>
+          <span v-if="chainTotal" class="text-muted-foreground text-xs" data-testid="run-chain-total">
+            Total {{ chainTotal }}
+          </span>
+        </header>
+        <ol class="divide-border divide-y border-t">
+          <li v-for="(link, index) in chain" :key="link.id">
+            <RouterLink
+              :to="`/o/${slug}/factory/runs/${link.id}`"
+              class="hover:bg-muted flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs"
+              :class="{ 'bg-muted/60': link.id === run.id }"
+              :aria-current="link.id === run.id ? 'page' : undefined"
+            >
+              <span class="text-muted-foreground w-12 shrink-0">
+                {{ index === 0 ? 'First' : `#${index + 1}` }}
+              </span>
+              <RunStatusBadge :status="link.status" />
+              <span v-if="link.autoContinued" class="text-muted-foreground italic">automatic</span>
+              <span class="text-muted-foreground">{{ new Date(link.queuedAt).toLocaleString() }}</span>
+              <span class="text-foreground ml-auto">
+                {{
+                  [
+                    formatCost(link.costUsd),
+                    link.inputTokens !== null || link.outputTokens !== null
+                      ? `${formatTokens(link.inputTokens) ?? '-'} in · ${formatTokens(link.outputTokens) ?? '-'} out`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '-'
+                }}
+              </span>
+            </RouterLink>
+          </li>
+        </ol>
+      </section>
 
       <details v-if="run.promptSnapshot" class="border-border rounded-lg border">
         <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium select-none">

@@ -676,7 +676,13 @@ public sealed record RunView(
     long? InputTokens, long? OutputTokens, string? FailureReason, string? PromptSnapshot,
     uint Version, string? PlaybookName = null, string? RunnerName = null,
     Guid? RuleId = null, string? RuleName = null,
-    Guid? RequestedRunnerId = null, string? RequestedRunnerName = null, string? Kind = null);
+    Guid? RequestedRunnerId = null, string? RequestedRunnerName = null, string? Kind = null,
+    string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
+    bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null);
+
+public sealed record RunChainLink(
+    Guid Id, string Status, bool AutoContinued, DateTimeOffset QueuedAt, DateTimeOffset? FinishedAt,
+    decimal? CostUsd, long? InputTokens, long? OutputTokens);
 
 public sealed record RunLogPage(IReadOnlyList<RunLogEntry> Items, bool Truncated);
 
@@ -690,7 +696,10 @@ public sealed record RunnerRunClaimed(
     Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
     string OrganizationSlug, string Harness, string Prompt, Guid PlaybookRevisionId,
     RunnerRunRepo Repo, string DefaultBranch, string BranchName, int MaxMinutes,
-    string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false);
+    string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
+    RunResumeView? Resume = null);
+
+public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
 
 public sealed record RunnerHeartbeatView(bool CancelRequested);
 
@@ -700,4 +709,4 @@ public sealed record RunnerLogChunk(long Seq, string Stream, string Text, DateTi
 
 public sealed record RunnerFinishRequest(
     string Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
-    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason);
+    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null);

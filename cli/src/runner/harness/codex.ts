@@ -1,5 +1,6 @@
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
 import { versionOf } from './claude.js'
+import { failedOutcome } from './failure.js'
 
 const limit = (value: string, length: number) =>
   value.length > length ? `${value.slice(0, Math.max(0, length - 1))}…` : value
@@ -18,10 +19,15 @@ export const codex: HarnessAdapter = {
   },
 
   invocation(context) {
+    // `exec resume` takes the same flags as `exec` except `-C`; the runner starts it in the
+    // checkout, which is its working directory either way.
+    const start = context.resumeSessionId
+      ? ['exec', 'resume', context.resumeSessionId]
+      : ['exec']
     return {
       command: 'codex',
       args: [
-        'exec',
+        ...start,
         '--json',
         // 0.154.0 removed --full-auto. The runner is the ticket's explicit trust boundary:
         // the agent needs unrestricted network access for the MCP server and git push.
@@ -29,8 +35,7 @@ export const codex: HarnessAdapter = {
         // This mode also permits the absolute attachment paths named in prompt.md outside
         // the checkout. The runner itself remains the trust boundary for those files.
         '--skip-git-repo-check',
-        '-C',
-        context.workspace,
+        ...(context.resumeSessionId ? [] : ['-C', context.workspace]),
         '-c',
         `mcp_servers.aictiq.command=${JSON.stringify(context.mcpServer.command)}`,
         '-c',
@@ -57,6 +62,10 @@ export const codex: HarnessAdapter = {
         })()
     } catch {
       return { log: line }
+    }
+
+    if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
+      return { log: null, sessionId: event.thread_id }
     }
 
     const item = recordOf(event.item)
@@ -95,8 +104,8 @@ export const codex: HarnessAdapter = {
     return { log: null }
   },
 
-  outcome(exitCode, lastLines, lastResult) {
-    if (exitCode !== 0) return failedOutcome(exitCode, lastLines)
+  outcome(exitCode, lastLines, lastResult, resuming) {
+    if (exitCode !== 0) return failedOutcome(exitCode, lastLines, resuming)
     return {
       outcome: 'succeeded',
       failureReason: null,
@@ -113,14 +122,6 @@ function usageOf(event: Record<string, unknown>): Record<string, unknown> | null
     return recordOf(payload.usage) ?? recordOf(recordOf(payload.info)?.total_token_usage)
   }
   return null
-}
-
-function failedOutcome(exitCode: number | null, lastLines: string[]) {
-  return {
-    outcome: 'failed' as const,
-    failureReason: exitCode === null ? 'harness-killed' : `harness-exit-${exitCode}`,
-    summary: limit(lastLines.slice(-20).join('\n'), 4_000) || null,
-  }
 }
 
 function numberOf(value: unknown): number {

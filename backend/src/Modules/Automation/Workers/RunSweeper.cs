@@ -107,6 +107,8 @@ public sealed class RunSweeper(
                 await SweepLostRunsAsync(scope.ServiceProvider, cancellationToken);
                 await SweepTimedOutRunsAsync(scope.ServiceProvider, cancellationToken);
                 await SweepReadOnlyQueuedRunsAsync(scope.ServiceProvider, cancellationToken);
+                await SweepStrandedContinuesAsync(scope.ServiceProvider, cancellationToken);
+                await SweepAutoContinuesAsync(scope.ServiceProvider, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -211,6 +213,106 @@ public sealed class RunSweeper(
             }, cancellationToken))
             {
                 AutomationMetrics.Finished.Add(1, AutomationMetrics.OutcomeTag(RunOutcomes.Cancelled));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fails the continue runs still queued for a runner that cannot take them: deleted,
+    /// disabled, or not seen for longer than <see cref="AutomationOptions.RunnerLostAfterMinutes"/>
+    /// past its online window. No other runner has the session, so waiting helps nobody;
+    /// <c>session-unavailable</c> tells the person to retry with a fresh run.
+    /// </summary>
+    private async Task SweepStrandedContinuesAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        var db = services.GetRequiredService<AutomationDbContext>();
+        var now = clock.GetUtcNow();
+        var queuedBefore = now - TimeSpan.FromMinutes(_options.RunnerLostAfterMinutes);
+        var seenBefore = now - _options.OnlineWindow - TimeSpan.FromMinutes(_options.RunnerLostAfterMinutes);
+        var candidates = await db.Runs.AsNoTracking()
+            .Where(run => run.Status == RunStatus.Queued && run.ContinuesRunId != null)
+            .Where(run => !db.Runners.Any(runner => runner.Id == run.RequestedRunnerId
+                && runner.DisabledAt == null && runner.DeletedAt == null
+                && (run.QueuedAt >= queuedBefore || runner.LastSeenAt >= seenBefore)))
+            .OrderBy(run => run.QueuedAt)
+            .Take(BatchSize)
+            .Select(run => run.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var runId in candidates)
+        {
+            if (await SettleAsync(db, services, runId, run =>
+            {
+                run.Finish(RunStatus.Failed, RunOutcomes.Failed, clock.GetUtcNow());
+                run.FailureReason = Run.SessionUnavailable;
+                run.OutcomeSummary = "The runner that kept this session is offline or gone. Start a fresh run instead.";
+                return RunCompletion.StageAsync(db, run, RunOutcomes.Failed,
+                    summary: run.OutcomeSummary, pullRequestUrl: null, failureReason: run.FailureReason, cancellationToken);
+            }, cancellationToken))
+            {
+                AutomationMetrics.Finished.Add(1, AutomationMetrics.OutcomeTag(RunOutcomes.Failed));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Queues the automatic continues that are due (<see cref="Run.ScheduleAutoContinue"/>).
+    /// The due mark is cleared first, by compare-and-swap, so two sweepers never both act on
+    /// one run and a continue the dispatcher refuses - an item someone took meanwhile, a
+    /// read-only organization, a newer run - is not retried: the run stays failed and keeps
+    /// its manual Continue.
+    /// </summary>
+    private async Task SweepAutoContinuesAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        var db = services.GetRequiredService<AutomationDbContext>();
+        var now = clock.GetUtcNow();
+        var due = await db.Runs.AsNoTracking()
+            .Where(run => run.AutoContinueDueAt != null && run.AutoContinueDueAt <= now)
+            .OrderBy(run => run.AutoContinueDueAt)
+            .Take(BatchSize)
+            .ToListAsync(cancellationToken);
+
+        foreach (var previous in due)
+        {
+            try
+            {
+                var taken = await db.Runs
+                    .Where(run => run.Id == previous.Id && run.AutoContinueDueAt != null)
+                    .ExecuteUpdateAsync(set => set.SetProperty(run => run.AutoContinueDueAt, (DateTimeOffset?)null), cancellationToken);
+                if (taken == 0)
+                {
+                    continue;
+                }
+
+                var project = await services.GetRequiredService<IProjectAccess>().GetProjectAsync(previous.ProjectId, cancellationToken);
+                if (project is null || project.IsArchived)
+                {
+                    continue;
+                }
+
+                var actor = previous.RequestedBy is { } requestedBy
+                    ? DispatchActor.User(requestedBy)
+                    : DispatchActor.Rule(previous.RuleId!.Value);
+                var result = await services.GetRequiredService<RunDispatcher>()
+                    .ContinueAsync(previous, actor, automatic: true, cancellationToken);
+                if (result.Outcome == DispatchOutcome.Created)
+                {
+                    AutomationMetrics.AutoContinued.Add(1);
+                }
+                else
+                {
+                    logger.LogInformation("Run {RunId} was not continued automatically: {Outcome} {Message}",
+                        previous.Id, result.Outcome, result.Message);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                db.ChangeTracker.Clear();
+                logger.LogError(ex, "Could not continue run {RunId} automatically", previous.Id);
             }
         }
     }

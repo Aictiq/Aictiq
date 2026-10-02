@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   defaultWorkspaceRoot,
   provisionWorkspace,
+  pruneKeptWorkspaces,
+  reattachWorkspace,
   type WorkspaceOptions,
 } from '../../src/runner/workspace.js'
 import { RunFailure, type ClaimedRun } from '../../src/runner/types.js'
@@ -527,5 +529,71 @@ describe('github workspaces', () => {
 
     expect(error.reason).toBe('repository-token-unavailable')
     expect(existsSync(join(root, claimed().runId))).toBe(false)
+  })
+})
+
+describe('kept workspaces', () => {
+  const continueRun = (previous: string) =>
+    claimed({
+      runId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a99',
+      resume: { continuesRunId: previous, sessionId: 'sess-1', failureReason: 'harness-rate-limited' },
+    })
+
+  it('reattaches a continue run to the failed run’s checkout, edits and all', async () => {
+    const ws = await provisionWorkspace(claimed(), options())
+    writeFileSync(join(ws.checkout, 'half-done.txt'), 'work in progress\n')
+    ws.retain('sess-1')
+    const kept = JSON.parse(readFileSync(join(ws.runDir, 'kept.json'), 'utf8'))
+    expect(kept).toMatchObject({ runId: claimed().runId, itemKey: 'APP-12', sessionId: 'sess-1', source: local })
+
+    const resumed = await reattachWorkspace(continueRun(claimed().runId), 'Continue.', options())
+    expect(resumed.checkout).toBe(ws.checkout)
+    expect(readFileSync(join(resumed.checkout, 'half-done.txt'), 'utf8')).toBe('work in progress\n')
+    expect(readFileSync(resumed.promptFile, 'utf8')).toBe('Continue.')
+    // In use: the retention sweep must not see it while the continue run works.
+    expect(existsSync(join(ws.runDir, 'kept.json'))).toBe(false)
+
+    await resumed.cleanup()
+    expect(existsSync(ws.runDir)).toBe(false)
+    expect(git(local, 'worktree', 'list').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('fails with session-unavailable when the workspace is gone', async () => {
+    const error = await failure(reattachWorkspace(continueRun('0199-gone'), 'Continue.', options()))
+    expect(error.reason).toBe('session-unavailable')
+  })
+
+  it('fails with session-unavailable for a workspace that was cleaned up rather than kept', async () => {
+    const ws = await provisionWorkspace(claimed(), options({ keep: true }))
+    const error = await failure(reattachWorkspace(continueRun(claimed().runId), 'Continue.', options()))
+    expect(error.reason).toBe('session-unavailable')
+    expect(existsSync(ws.checkout)).toBe(true)
+  })
+
+  it('removes kept workspaces after a day, beyond five, and for an item whose next run succeeded', async () => {
+    const now = Date.parse('2026-10-01T12:00:00Z')
+    const keep = (name: string, hoursAgo: number, itemKey = 'APP-1') => {
+      const dir = join(root, name)
+      mkdirSync(join(dir, 'repo'), { recursive: true })
+      writeFileSync(
+        join(dir, 'kept.json'),
+        JSON.stringify({
+          runId: name, organizationSlug: 'acme', itemKey, sessionId: 's', source: null,
+          keptAt: new Date(now - hoursAgo * 3_600_000).toISOString(),
+        }),
+      )
+    }
+    keep('expired', 25)
+    for (let i = 1; i <= 6; i++) keep(`run-${i}`, i)
+    keep('other-item', 0.5, 'APP-2')
+    mkdirSync(join(root, 'in-flight', 'repo'), { recursive: true })
+
+    const removed = await pruneKeptWorkspaces(root, { now })
+    expect(removed.sort()).toEqual(['expired', 'run-5', 'run-6'])
+    expect(existsSync(join(root, 'in-flight'))).toBe(true)
+
+    expect(await pruneKeptWorkspaces(root, { now, item: { organizationSlug: 'acme', itemKey: 'APP-2' } }))
+      .toEqual(['other-item'])
+    expect(existsSync(join(root, 'run-1'))).toBe(true)
   })
 })

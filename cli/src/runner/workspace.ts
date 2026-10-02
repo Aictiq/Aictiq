@@ -1,5 +1,14 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { RunFailure, type ClaimedRun, type RunAttachment } from './types.js'
@@ -58,7 +67,30 @@ export interface Workspace {
   env: Record<string, string>
   /** removes the worktree (git worktree remove --force + prune in the source repo) or clone, then the run dir; no-op when keep; never throws */
   cleanup(): Promise<void>
+  /**
+   * Leaves the workspace in place for a later continue run instead of cleaning it up, with a
+   * `kept.json` beside the checkout that the retention sweep reads. Never throws.
+   */
+  retain(sessionId: string): void
 }
+
+/** How long a failed run's workspace waits to be continued, and how many a runner holds. */
+export const KeptWorkspaceMaxAgeMs = 24 * 60 * 60 * 1000
+export const KeptWorkspaceMax = 5
+
+/** `kept.json`: what the retention sweep needs to remove a kept workspace without its run. */
+export interface KeptWorkspace {
+  /** The run that last worked in it - the one a continue names. */
+  runId: string
+  organizationSlug: string
+  itemKey: string
+  sessionId: string
+  /** The local repository a worktree belongs to, or null for a clone. */
+  source: string | null
+  keptAt: string
+}
+
+const KeptFile = 'kept.json'
 
 export function defaultWorkspaceRoot(env: NodeJS.ProcessEnv = process.env): string {
   const base = env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
@@ -100,17 +132,7 @@ export async function provisionWorkspace(
   let source: string | null = null
   const cleanup = async (): Promise<void> => {
     if (options.keep) return
-    if (source !== null) {
-      await git(['worktree', 'remove', '--force', checkout], { cwd: source, env }).catch(
-        () => undefined,
-      )
-      await git(['worktree', 'prune'], { cwd: source, env }).catch(() => undefined)
-    }
-    try {
-      rmSync(runDir, { recursive: true, force: true })
-    } catch {
-      // Cleanup is best effort; a leftover directory is not a failed run.
-    }
+    await removeRunDir(runDir, source, env)
   }
 
   mkdirSync(options.root, { recursive: true, mode: 0o700 })
@@ -148,10 +170,178 @@ export async function provisionWorkspace(
       prompt,
       env: harnessEnv,
       cleanup,
+      retain: (sessionId) => writeKept(runDir, run, sessionId, source),
     }
   } catch (error) {
     await cleanup()
     throw error
+  }
+}
+
+/**
+ * The workspace a failed run kept, for the run that continues it. The checkout stays where it
+ * is: Claude files its sessions under the working directory's path, so a moved checkout would
+ * lose the conversation. Only the per-run files change - the prompt becomes the continue
+ * message and a `github` clone gets a fresh push token. Throws `session-unavailable` when this
+ * runner no longer has the workspace (it was continued, swept, or kept on another machine).
+ */
+export async function reattachWorkspace(
+  run: ClaimedRun,
+  prompt: string,
+  options: WorkspaceOptions,
+): Promise<Workspace> {
+  const previous = run.resume?.continuesRunId ?? ''
+  const unavailable = (detail: string) =>
+    new RunFailure(
+      'session-unavailable',
+      `${detail} Start a fresh run instead (Retry).`,
+    )
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(previous)) {
+    throw unavailable(`Run ${previous} names no workspace to continue.`)
+  }
+
+  const runDir = join(options.root, previous)
+  const checkout = join(runDir, 'repo')
+  const kept = readKept(runDir)
+  if (!kept || !existsSync(checkout)) {
+    throw unavailable(`This runner no longer has the workspace of run ${previous}.`)
+  }
+  // Claimed: the retention sweep only removes workspaces that carry the marker, and this
+  // one is in use until the run retains it again or cleans it up.
+  rmSync(join(runDir, KeptFile), { force: true })
+  const env = options.env ?? process.env
+  const promptFile = join(runDir, 'prompt.md')
+  const mcpConfigFile = join(runDir, 'mcp.json')
+  const mcpConfig = {
+    mcpServers: { aictiq: { command: options.mcpServer.command, args: options.mcpServer.args } },
+  }
+  writePrivate(mcpConfigFile, `${JSON.stringify(mcpConfig, null, 2)}\n`)
+  writePrivate(promptFile, prompt)
+
+  let harnessEnv: Record<string, string> = {}
+  if (run.repo.source === 'github') {
+    const token = (await options.refreshCloneToken?.()) ?? run.repo.cloneToken ?? null
+    if (!token) {
+      throw new RunFailure(
+        'repository-token-unavailable',
+        `No GitHub installation token is available to push ${run.repo.repoFullName ?? 'the repository'}.`,
+      )
+    }
+    harnessEnv = { [TOKEN_ENV]: token }
+  }
+  options.event(`Continuing in the workspace run ${previous} kept: ${checkout}`)
+
+  return {
+    runDir,
+    checkout,
+    branch: run.branchName,
+    promptFile,
+    mcpConfigFile,
+    attachmentsDir: join(runDir, 'attachments'),
+    prompt,
+    env: harnessEnv,
+    cleanup: async () => {
+      if (options.keep) return
+      await removeRunDir(runDir, kept.source, env)
+    },
+    retain: (sessionId) => writeKept(runDir, run, sessionId, kept.source),
+  }
+}
+
+/**
+ * Removes kept workspaces that are past their time, beyond the runner's limit (oldest first),
+ * or - when `item` is given - kept for that item, whose next run made them stale. `except`
+ * spares the workspaces a run is working in right now. Never throws.
+ */
+export async function pruneKeptWorkspaces(
+  root: string,
+  options: {
+    now?: number
+    maxAgeMs?: number
+    max?: number
+    item?: { organizationSlug: string; itemKey: string }
+    except?: string[]
+    env?: NodeJS.ProcessEnv
+  } = {},
+): Promise<string[]> {
+  const now = options.now ?? Date.now()
+  const maxAgeMs = options.maxAgeMs ?? KeptWorkspaceMaxAgeMs
+  const max = options.max ?? KeptWorkspaceMax
+  const except = new Set(options.except ?? [])
+  const env = options.env ?? process.env
+
+  let entries: string[]
+  try {
+    entries = readdirSync(root)
+  } catch {
+    return []
+  }
+  const kept = entries
+    .filter((name) => !except.has(name))
+    .map((name) => ({ name, dir: join(root, name), kept: readKept(join(root, name)) }))
+    .filter((entry): entry is { name: string; dir: string; kept: KeptWorkspace } => entry.kept !== null)
+    .sort((a, b) => Date.parse(b.kept.keptAt) - Date.parse(a.kept.keptAt))
+
+  const removed: string[] = []
+  for (const [index, entry] of kept.entries()) {
+    const age = now - Date.parse(entry.kept.keptAt)
+    const stale =
+      options.item !== undefined &&
+      entry.kept.organizationSlug === options.item.organizationSlug &&
+      entry.kept.itemKey === options.item.itemKey
+    // `except` workspaces are in use and do not count against the limit.
+    if (!(age > maxAgeMs || Number.isNaN(age) || index >= max || stale)) continue
+    await removeRunDir(entry.dir, entry.kept.source, env)
+    removed.push(entry.name)
+  }
+  return removed
+}
+
+function readKept(runDir: string): KeptWorkspace | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(runDir, KeptFile), 'utf8')) as Partial<KeptWorkspace>
+    return typeof parsed.runId === 'string' && typeof parsed.keptAt === 'string'
+      ? {
+          runId: parsed.runId,
+          organizationSlug: String(parsed.organizationSlug ?? ''),
+          itemKey: String(parsed.itemKey ?? ''),
+          sessionId: String(parsed.sessionId ?? ''),
+          source: typeof parsed.source === 'string' ? parsed.source : null,
+          keptAt: parsed.keptAt,
+        }
+      : null
+  } catch {
+    return null
+  }
+}
+
+function writeKept(runDir: string, run: ClaimedRun, sessionId: string, source: string | null): void {
+  const kept: KeptWorkspace = {
+    runId: run.runId,
+    organizationSlug: run.organizationSlug,
+    itemKey: run.itemKey,
+    sessionId,
+    source,
+    keptAt: new Date().toISOString(),
+  }
+  try {
+    writePrivate(join(runDir, KeptFile), `${JSON.stringify(kept, null, 2)}\n`)
+  } catch {
+    // Without the marker the directory is simply not continuable; the run already failed.
+  }
+}
+
+async function removeRunDir(runDir: string, source: string | null, env: NodeJS.ProcessEnv) {
+  if (source !== null) {
+    await git(['worktree', 'remove', '--force', join(runDir, 'repo')], { cwd: source, env }).catch(
+      () => undefined,
+    )
+    await git(['worktree', 'prune'], { cwd: source, env }).catch(() => undefined)
+  }
+  try {
+    rmSync(runDir, { recursive: true, force: true })
+  } catch {
+    // Cleanup is best effort; a leftover directory is not a failed run.
   }
 }
 

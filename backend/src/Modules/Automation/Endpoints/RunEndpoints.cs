@@ -22,6 +22,13 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="RuleId">The automation rule that dispatched the run, or null for a person.</param>
 /// <param name="RuleName">The rule's name, or null once the rule that started this run has been deleted.</param>
 /// <param name="Kind">An implement run delivers code; a refine run rewrites the ticket.</param>
+/// <param name="SessionId">The harness session a continue run resumes; operators only.</param>
+/// <param name="ContinuesRunId">The failed run this one continues, or null for a fresh run.</param>
+/// <param name="ContinuedByRunId">The run that continued this one, once there is one.</param>
+/// <param name="AutoContinued">The server queued this continue run itself after a transient failure.</param>
+/// <param name="Continuable">The run can be continued now (run detail only).</param>
+/// <param name="Superseded">The item has a newer run, so neither Continue nor Retry applies (run detail only).</param>
+/// <param name="Chain">The runs from the first failure to the last continue, oldest first (run detail only).</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -30,7 +37,14 @@ public sealed record RunView(
     Guid? PlaybookRevisionId, int MaxMinutes, DateTimeOffset QueuedAt, DateTimeOffset? AssignedAt,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, DateTimeOffset? LastHeartbeatAt, bool CancelRequested,
     string? OutcomeSummary, string? PullRequestUrl, int? ExitCode, decimal? CostUsd, long? InputTokens,
-    long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement);
+    long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement,
+    string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
+    bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null);
+
+/// <summary>One run of a continue chain, with what it cost on its own.</summary>
+public sealed record RunChainLink(
+    Guid Id, RunStatus Status, bool AutoContinued, DateTimeOffset QueuedAt, DateTimeOffset? FinishedAt,
+    decimal? CostUsd, long? InputTokens, long? OutputTokens);
 
 /// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
 public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId, Guid? RunnerId = null);
@@ -64,6 +78,8 @@ public static class RunEndpoints
         runs.MapGet("/{runId:guid}", GetAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapGet("/{runId:guid}/log", LogAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapPost("/{runId:guid}/cancel", CancelAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
+        runs.MapPost("/{runId:guid}/continue", ContinueAsync).RequireOrgRole(OrgRole.Member)
+            .RequireFactoryOperator().RequireScope(Scopes.Write);
 
         return api;
     }
@@ -171,8 +187,10 @@ public static class RunEndpoints
             .ToListAsync(ct);
         var people = await directory.GetAsync([.. runs.Select(run => run.AgentUserId).Distinct()], ct);
         var names = await DisplayNamesAsync(db, runs, ct);
+        var continuedBy = await ContinuedByAsync(db, runs, ct);
         return Results.Ok(new PagedResult<RunView>(
-            runs.Select(run => ToView(run, people, includeDetails: false, names)).ToList(),
+            runs.Select(run => ToView(run, people, includeDetails: false, names)
+                with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
     }
 
@@ -193,7 +211,87 @@ public static class RunEndpoints
         var isOperator = await access.CanOperateFactoryAsync(userId, tenant.OrganizationId!.Value, ct);
         var people = await directory.GetAsync([run.AgentUserId], ct);
         var names = await DisplayNamesAsync(db, [run], ct);
-        return Results.Ok(ToView(run, people, includeDetails: isOperator, names));
+        return Results.Ok(await WithChainAsync(db, run, ToView(run, people, includeDetails: isOperator, names), ct));
+    }
+
+    /// <summary>
+    /// Queues a run that resumes this failed run's harness session on the runner that kept its
+    /// workspace. The same people who may dispatch on the item may continue it, and the same
+    /// limits apply: a continue run is a run.
+    /// </summary>
+    private static async Task<IResult> ContinueAsync(
+        string orgSlug, Guid runId, HttpContext http, AutomationDbContext db, ICurrentTenant tenant,
+        ICurrentUser user, IProjectAccess access, RunDispatcher dispatcher, IUserDirectory directory,
+        CancellationToken ct)
+    {
+        if (user.UserId is not { } userId)
+        {
+            return NotFound();
+        }
+        var previous = await db.Runs.AsNoTracking().SingleOrDefaultAsync(run => run.Id == runId, ct);
+        if (previous is null || await access.GetProjectRoleAsync(userId, previous.ProjectId, ct) is not { } role)
+        {
+            return NotFound();
+        }
+        if (!role.Satisfies(ProjectRole.Member))
+        {
+            return Results.Problem(
+                title: "Insufficient permissions.",
+                detail: "This action requires the Member project role or higher.",
+                type: ProblemTypes.InsufficientRole,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+        var project = await access.FindProjectAsync(tenant.OrganizationId!.Value, ProjectKeyOf(previous.ItemKey) ?? "", ct);
+        if (project is null)
+        {
+            return NotFound();
+        }
+        if (await AuthorizationFilters.ProjectWriteRefusalAsync(http, project.Key, project.IsArchived) is { } refusal)
+        {
+            return refusal;
+        }
+
+        var result = await dispatcher.ContinueAsync(previous, DispatchActor.User(userId), automatic: false, ct);
+        switch (result.Outcome)
+        {
+            case DispatchOutcome.ItemNotFound:
+                return NotFound();
+            case DispatchOutcome.Validation:
+                return Validation(result.Field!, result.Message!);
+            case DispatchOutcome.NotContinuable:
+                return Results.Problem(
+                    title: "This run cannot be continued.",
+                    detail: result.Message,
+                    type: ProblemTypes.Conflict,
+                    statusCode: StatusCodes.Status409Conflict);
+            case DispatchOutcome.ReadOnly:
+                return Results.Problem(
+                    title: "This organization is read-only.",
+                    detail: "The evaluation has ended or a payment problem is unresolved, so new agent runs are paused. Reading and exporting still work; choosing a paid plan resumes dispatch.",
+                    type: ProblemTypes.OrganizationReadOnly,
+                    statusCode: StatusCodes.Status409Conflict);
+            case DispatchOutcome.ItemClaimed:
+                return Results.Problem(
+                    title: "This item already has a live claim or run.",
+                    type: ProblemTypes.ItemClaimed,
+                    statusCode: StatusCodes.Status409Conflict,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["claimedBy"] = result.ClaimedBy,
+                        ["version"] = result.Version,
+                    });
+            case DispatchOutcome.RunInProgress:
+                return Results.Problem(
+                    title: "This item already has a live run.",
+                    type: ProblemTypes.ItemClaimed,
+                    statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var run = result.Run!;
+        var people = await directory.GetAsync(RequesterIds(run), ct);
+        var names = await DisplayNamesAsync(db, [run], ct);
+        return Results.Created($"/api/v1/orgs/{orgSlug}/runs/{run.Id}",
+            ToView(run, people, includeDetails: true, names));
     }
 
     private static async Task<IResult> LogAsync(
@@ -256,8 +354,10 @@ public static class RunEndpoints
             .ToListAsync(ct);
         var people = await directory.GetAsync([.. runs.Select(run => run.AgentUserId).Distinct()], ct);
         var names = await DisplayNamesAsync(db, runs, ct);
+        var continuedBy = await ContinuedByAsync(db, runs, ct);
         return Results.Ok(new PagedResult<RunView>(
-            runs.Select(run => ToView(run, people, includeDetails: false, names)).ToList(),
+            runs.Select(run => ToView(run, people, includeDetails: false, names)
+                with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
     }
 
@@ -344,6 +444,68 @@ public static class RunEndpoints
 
     // ── helpers ──────────────────────────────────────────────────────────────────────
 
+    /// <summary>For a page of runs, the run that continued each one that was continued.</summary>
+    private static async Task<Dictionary<Guid, Guid?>> ContinuedByAsync(
+        AutomationDbContext db, IReadOnlyCollection<Run> runs, CancellationToken ct)
+    {
+        var ids = runs.Where(run => run.IsTerminal).Select(run => (Guid?)run.Id).ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+        return await db.Runs.AsNoTracking()
+            .Where(run => ids.Contains(run.ContinuesRunId))
+            .Select(run => new { Previous = run.ContinuesRunId!.Value, run.Id })
+            .ToDictionaryAsync(row => row.Previous, row => (Guid?)row.Id, ct);
+    }
+
+    /// <summary>
+    /// The run detail's chain and actions. An item has few runs, so all of them are read once
+    /// and the chain is walked in memory, both ways from this run.
+    /// </summary>
+    private static async Task<RunView> WithChainAsync(
+        AutomationDbContext db, Run run, RunView view, CancellationToken ct)
+    {
+        var siblings = await db.Runs.AsNoTracking()
+            .Where(other => other.ItemId == run.ItemId)
+            .Select(other => new
+            {
+                other.Id, other.ContinuesRunId, other.Status, other.AutoContinued, other.QueuedAt,
+                other.FinishedAt, other.CostUsd, other.InputTokens, other.OutputTokens,
+            })
+            .ToListAsync(ct);
+        var byId = siblings.ToDictionary(other => other.Id);
+        var byPrevious = siblings.Where(other => other.ContinuesRunId is not null)
+            .GroupBy(other => other.ContinuesRunId!.Value)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        var first = byId[run.Id];
+        while (first.ContinuesRunId is { } previous && byId.TryGetValue(previous, out var earlier))
+        {
+            first = earlier;
+        }
+        var chain = new List<RunChainLink>();
+        for (var link = first; link is not null; link = byPrevious.GetValueOrDefault(link.Id))
+        {
+            chain.Add(new RunChainLink(link.Id, link.Status, link.AutoContinued, link.QueuedAt, link.FinishedAt,
+                link.CostUsd, link.InputTokens, link.OutputTokens));
+            if (chain.Count > 100)
+            {
+                break;
+            }
+        }
+
+        var continuedBy = byPrevious.GetValueOrDefault(run.Id)?.Id;
+        var superseded = siblings.Any(other => other.Id != run.Id && other.QueuedAt > run.QueuedAt);
+        return view with
+        {
+            ContinuedByRunId = continuedBy,
+            Superseded = superseded,
+            Continuable = run.HasResumableSession && continuedBy is null && !superseded,
+            Chain = chain.Count > 1 ? chain : null,
+        };
+    }
+
     internal static Task<long> StoredLogBytesAsync(AutomationDbContext db, Guid runId, CancellationToken ct) =>
         db.Database.SqlQuery<long>($"""
             SELECT COALESCE(SUM(octet_length(text)), 0) AS "Value"
@@ -409,7 +571,9 @@ public static class RunEndpoints
             run.InputTokens, run.OutputTokens,
             includeDetails ? run.FailureReason : null,
             includeDetails ? run.PromptSnapshot : null,
-            run.Version, run.Kind);
+            run.Version, run.Kind,
+            includeDetails ? run.SessionId : null,
+            run.ContinuesRunId, null, run.AutoContinued);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

@@ -8,6 +8,8 @@ import type { LogChunk } from '../../src/runner/client.js'
 import { executeRun } from '../../src/runner/execute.js'
 import type { ExecuteOptions } from '../../src/runner/execute.js'
 import type { Workspace } from '../../src/runner/workspace.js'
+import { RunFailure } from '../../src/runner/types.js'
+import type { HarnessAdapter, InvocationContext } from '../../src/runner/types.js'
 import { claimedRun, hello, runnerToken, scriptAdapter } from './helpers.js'
 import { FakeInstance } from './fake-instance.js'
 
@@ -27,6 +29,7 @@ function stubWorkspace(): Workspace {
     prompt: 'Implement ACME-42',
     env: {},
     cleanup: async () => {},
+    retain: () => {},
   }
 }
 
@@ -291,5 +294,121 @@ describe('executeRun', () => {
     // Cleaned up: the worktree is gone, the branch stays for the pull request.
     expect(git(clone, 'worktree', 'list').trim().split('\n')).toHaveLength(1)
     expect(git(clone, 'branch', '--list', 'aictiq/acme-42')).toContain('aictiq/acme-42')
+  })
+
+  describe('continuing failed runs', () => {
+    /** Reports `SESSION <id>` lines as the harness session, and records how it was started. */
+    const sessionAdapter = (script: string, contexts: InvocationContext[]): HarnessAdapter => {
+      const base = scriptAdapter(script)
+      return {
+        ...base,
+        invocation: (context) => {
+          contexts.push(context)
+          return base.invocation(context)
+        },
+        parse: (line) =>
+          line.startsWith('SESSION ') ? { log: null, sessionId: line.slice(8) } : base.parse(line),
+      }
+    }
+    const tracked = () => {
+      const calls = { retained: [] as string[], cleaned: 0, pruned: [] as unknown[] }
+      const workspace = stubWorkspace()
+      workspace.retain = (id) => calls.retained.push(id)
+      workspace.cleanup = async () => {
+        calls.cleaned++
+      }
+      options.provision = async () => workspace
+      options.prune = async (_root, filter) => {
+        calls.pruned.push(filter?.item ?? null)
+        return []
+      }
+      return calls
+    }
+
+    it('reports the session and keeps the workspace of a run that failed after the harness started', async () => {
+      const calls = tracked()
+      options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); process.exit(3)`, [])
+      const report = await executeRun(claimedRun(), options)
+
+      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-1' })
+      expect(instance.to('/finish')[0]!.body).toMatchObject({ sessionId: 'sess-1' })
+      expect(calls).toMatchObject({ retained: ['sess-1'], cleaned: 0 })
+    })
+
+    it('cleans up a successful run and the item’s kept workspaces', async () => {
+      const calls = tracked()
+      options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); console.log('RESULT ok')`, [])
+      await executeRun(claimedRun(), options)
+
+      expect(calls.retained).toEqual([])
+      expect(calls.cleaned).toBe(1)
+      expect(calls.pruned).toContainEqual({ organizationSlug: 'acme', itemKey: 'ACME-42' })
+    })
+
+    it('cleans up a failed run without a session: there is nothing to continue', async () => {
+      const calls = tracked()
+      options.adapters.fake = sessionAdapter(`process.exit(3)`, [])
+      await executeRun(claimedRun(), options)
+      expect(calls).toMatchObject({ retained: [], cleaned: 1 })
+    })
+
+    it('resumes the session in the kept workspace with the continue message', async () => {
+      const calls = tracked()
+      const contexts: InvocationContext[] = []
+      let reattached: string | undefined
+      options.provision = async () => {
+        throw new Error('a continue run must not provision a fresh workspace')
+      }
+      options.reattach = async (run, prompt) => {
+        reattached = run.resume?.continuesRunId
+        return { ...stubWorkspace(), prompt, retain: () => {}, cleanup: async () => { calls.cleaned++ } }
+      }
+      options.adapters.fake = sessionAdapter(
+        `let p = ''; process.stdin.on('data', (d) => (p += d)).on('end', () => { console.log('got ' + p); console.log('RESULT ok') })`,
+        contexts,
+      )
+      const report = await executeRun(
+        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: 'harness-transient' } }),
+        options,
+      )
+
+      expect(report?.outcome).toBe('succeeded')
+      expect(reattached).toBe('run-0')
+      expect(contexts[0]).toMatchObject({ resumeSessionId: 'sess-0' })
+      expect(contexts[0]!.prompt).toContain('Continue where you stopped')
+      expect(contexts[0]!.prompt).toContain('harness-transient')
+      expect(logLines().map((c) => c.text)).toContain('Continuing run run-0 (session sess-0)')
+      expect(calls.cleaned).toBe(1)
+    })
+
+    it('keeps the workspace of a resumed run that fails before the harness names its session', async () => {
+      const retained: string[] = []
+      options.reattach = async (_run, prompt) => ({
+        ...stubWorkspace(),
+        prompt,
+        retain: (id) => retained.push(id),
+      })
+      options.prune = async () => []
+      options.adapters.fake = sessionAdapter(`process.exit(3)`, [])
+      const report = await executeRun(
+        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null } }),
+        options,
+      )
+      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-0' })
+      expect(retained).toEqual(['sess-0'])
+    })
+
+    it('fails with session-unavailable when the kept workspace is gone', async () => {
+      tracked()
+      options.reattach = async () => {
+        throw new RunFailure('session-unavailable', 'This runner no longer has the workspace.')
+      }
+      options.adapters.fake = sessionAdapter(`console.log('RESULT ok')`, [])
+      const report = await executeRun(
+        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null } }),
+        options,
+      )
+      expect(report).toMatchObject({ outcome: 'failed', failureReason: 'session-unavailable' })
+    })
   })
 })

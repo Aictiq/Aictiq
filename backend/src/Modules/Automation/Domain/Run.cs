@@ -48,6 +48,14 @@ public sealed class Run : TenantEntity
 
     public const int MaxFailureReasonLength = 500;
 
+    public const int MaxSessionIdLength = 200;
+
+    /// <summary>How many times one failed run - and the runs continuing it - is continued automatically.</summary>
+    public const int MaxAutoContinues = 2;
+
+    /// <summary>The failure a continue run reports when its runner no longer has the session.</summary>
+    public const string SessionUnavailable = "session-unavailable";
+
     public Guid ProjectId { get; init; }
 
     public Guid ItemId { get; init; }
@@ -136,11 +144,64 @@ public sealed class Run : TenantEntity
 
     public string? FailureReason { get; set; }
 
+    /// <summary>
+    /// The harness's own session (Claude's session id, Codex's thread id, OpenCode's session
+    /// id), reported by the runner. It is what a continue run resumes - on the same runner,
+    /// whose machine holds the conversation and the kept checkout.
+    /// </summary>
+    public string? SessionId { get; set; }
+
+    /// <summary>The failed run this one picks up from, or null for a run that starts fresh.</summary>
+    public Guid? ContinuesRunId { get; init; }
+
+    /// <summary>The server queued this continue run itself, after a transient failure.</summary>
+    public bool AutoContinued { get; init; }
+
+    /// <summary>Automatic continues in this run's chain so far, this run included; capped at <see cref="MaxAutoContinues"/>.</summary>
+    public int AutoContinues { get; init; }
+
+    /// <summary>
+    /// When the sweeper should queue an automatic continue of this failed run. Set when the run
+    /// fails transiently with a session and the chain has continues left; cleared as soon as
+    /// the sweeper acts on it, whatever the outcome.
+    /// </summary>
+    public DateTimeOffset? AutoContinueDueAt { get; set; }
+
     public uint Version { get; set; }
 
     public bool IsLive => Status < RunStatus.Succeeded;
 
     public bool IsTerminal => Status >= RunStatus.Succeeded;
+
+    /// <summary>
+    /// Ended without finishing its work, with a session a continue run can resume on the
+    /// runner that has it. Whether the item has moved on since is the caller's question.
+    /// </summary>
+    public bool HasResumableSession =>
+        Status is RunStatus.Failed or RunStatus.TimedOut
+        && SessionId is not null && RunnerId is not null
+        && FailureReason != SessionUnavailable;
+
+    /// <summary>
+    /// Failures worth trying again without a person: a rate limit, an overloaded or unreachable
+    /// model API, a harness that crashed. Not a cancel, a time limit or a refused prompt.
+    /// </summary>
+    public static bool IsTransientFailure(string? failureReason) =>
+        failureReason is "harness-rate-limited" or "harness-transient" or "harness-crashed";
+
+    /// <summary>
+    /// Schedules the automatic continue of a run that just failed, when it qualifies: a
+    /// transient failure, a session to resume, no cancel asked for, and continues left in its
+    /// chain. Waits 1 minute before the first and 5 before the second - a rate limit needs time.
+    /// </summary>
+    public void ScheduleAutoContinue(DateTimeOffset now)
+    {
+        if (Status == RunStatus.Failed && IsTransientFailure(FailureReason) && HasResumableSession
+            && CancelRequestedAt is null && AutoContinues < MaxAutoContinues)
+        {
+            AutoContinueDueAt = now + (AutoContinues == 0 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5));
+        }
+    }
 
     public static RunStatus? StatusFor(string outcome) => outcome switch
     {

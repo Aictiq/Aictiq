@@ -7,7 +7,8 @@ import { spawnSupervised } from './process.js'
 import type { SupervisedProcess } from './process.js'
 import { RunFailure } from './types.js'
 import type { ClaimedRun, FinishReport, HarnessAdapter, RunnerHello } from './types.js'
-import { provisionWorkspace } from './workspace.js'
+import { continuePrompt } from './harness/failure.js'
+import { pruneKeptWorkspaces, provisionWorkspace, reattachWorkspace } from './workspace.js'
 import type { Workspace, WorkspaceOptions } from './workspace.js'
 
 const MaxSummary = 4000
@@ -27,6 +28,10 @@ export interface ExecuteOptions {
   /** Runner-side messages for the operator's terminal (never sent to the instance). */
   local?: (message: string) => void
   provision?: (run: ClaimedRun, options: WorkspaceOptions) => Promise<Workspace>
+  /** Finds the workspace a failed run kept, for a run that continues it. */
+  reattach?: (run: ClaimedRun, prompt: string, options: WorkspaceOptions) => Promise<Workspace>
+  /** Removes kept workspaces past their time or limit, or stale for `item`. */
+  prune?: typeof pruneKeptWorkspaces
   findPullRequest?: (
     checkout: string,
     branch: string,
@@ -77,6 +82,10 @@ export async function executeRun(
   if (options.shutdown?.aborted) onShutdown()
 
   let workspace: Workspace | undefined
+  const resume = run.resume ?? null
+  // A resumed run already has its session: a failure before the harness names it again must
+  // still keep the workspace for the next continue.
+  let sessionId: string | undefined = resume?.sessionId
   let revoked: RunnerHttpError | undefined
   let heartbeat: NodeJS.Timeout | undefined
   let beating: Promise<void> = Promise.resolve()
@@ -99,7 +108,7 @@ export async function executeRun(
     // goes stale if nobody refreshes it while the workspace is being cloned.
     const beat = async () => {
       try {
-        const { cancelRequested } = await client.runHeartbeat(run.runId)
+        const { cancelRequested } = await client.runHeartbeat(run.runId, sessionId)
         if (cancelRequested) {
           event('Cancel requested; stopping the harness')
           stop('cancelled')
@@ -149,17 +158,32 @@ export async function executeRun(
     }
     event(`Using ${run.harness} ${info.version ?? ''}`.trim())
 
+    const workspaceOptions: WorkspaceOptions = {
+      ...options.workspace,
+      event,
+      refreshCloneToken: () => client.repoToken(run.runId),
+      attachments: {
+        list: () => client.listAttachments(run),
+        download: (attachmentId) => client.downloadAttachment(run, attachmentId),
+      },
+      signal: abort.signal,
+    }
     try {
-      workspace = await (options.provision ?? provisionWorkspace)(run, {
-        ...options.workspace,
-        event,
-        refreshCloneToken: () => client.repoToken(run.runId),
-        attachments: {
-          list: () => client.listAttachments(run),
-          download: (attachmentId) => client.downloadAttachment(run, attachmentId),
-        },
-        signal: abort.signal,
-      })
+      if (resume) {
+        event(`Continuing run ${resume.continuesRunId} (session ${resume.sessionId})`)
+        workspace = await (options.reattach ?? reattachWorkspace)(
+          run,
+          continuePrompt(resume.failureReason),
+          workspaceOptions,
+        )
+      } else {
+        if (run.repo.source === 'local' && !run.workOnDefaultBranch) {
+          // A failed run's kept worktree holds the item's branch, and git checks a branch out
+          // in one worktree only. This fresh run supersedes it.
+          await prune({ item: run })
+        }
+        workspace = await (options.provision ?? provisionWorkspace)(run, workspaceOptions)
+      }
     } catch (error) {
       if (stopReason) return stopped(null, [])
       if (error instanceof RunFailure) {
@@ -178,6 +202,7 @@ export async function executeRun(
       attachmentsDir: workspace.attachmentsDir,
       mcpConfigFile: workspace.mcpConfigFile,
       mcpServer: options.workspace.mcpServer,
+      ...(resume ? { resumeSessionId: resume.sessionId } : {}),
     })
     const env: NodeJS.ProcessEnv = {
       ...inheritedEnv(process.env),
@@ -229,6 +254,10 @@ export async function executeRun(
         inputTokens = tally(inputTokens, parsed.inputTokens)
         outputTokens = tally(outputTokens, parsed.outputTokens)
         if (parsed.result !== undefined) lastResult = parsed.result
+        if (parsed.sessionId && parsed.sessionId !== sessionId) {
+          sessionId = parsed.sessionId
+          event(`Harness session ${sessionId}`)
+        }
         if (parsed.log !== null) {
           log.push('stdout', parsed.log)
           remember(parsed.log)
@@ -243,7 +272,7 @@ export async function executeRun(
     const usage = { costUsd, inputTokens, outputTokens, exitCode }
     if (stopReason) return stopped(exitCode, lastLines, usage)
 
-    const verdict = adapter.outcome(exitCode, lastLines, lastResult)
+    const verdict = adapter.outcome(exitCode, lastLines, lastResult, resume !== null)
     if (verdict.outcome === 'succeeded' && !run.workOnDefaultBranch && !pullRequestUrl) {
       pullRequestUrl = await (options.findPullRequest ?? findPullRequest)(
         workspace.checkout,
@@ -280,14 +309,46 @@ export async function executeRun(
 
   if (report?.outcome === 'failed' && report.failureReason)
     event(`Run failed: ${report.failureReason}`)
+  if (report && sessionId) report.sessionId = sessionId
+  // A run that failed once its harness had a session keeps its checkout, so a continue run
+  // can resume the conversation over the agent's own edits. Successful and cancelled runs,
+  // and a session that would not resume, clean up as before.
+  const retained =
+    workspace !== undefined &&
+    report?.outcome === 'failed' &&
+    sessionId !== undefined &&
+    report.failureReason !== 'session-unavailable'
+  if (retained) {
+    workspace!.retain(sessionId!)
+    event(`Kept the workspace so this run can be continued: ${workspace!.checkout}`)
+  }
   // A beat still in flight would otherwise reach the instance after the finish, and its
   // item heartbeat with a token the finish just revoked.
   await beating
   await log.close()
-  await workspace?.cleanup()
+  if (!retained) await workspace?.cleanup()
+  // The item's earlier failures are moot once a run on it succeeds; past that, a runner keeps
+  // a few workspaces for a day.
+  await prune(report?.outcome === 'succeeded' ? { item: run } : {})
   if (revoked) throw revoked
   if (!report) return null
   return (await sendFinish(client, run, report, local)) ? report : null
+
+  async function prune(filter: { item?: ClaimedRun }) {
+    // `--keep-workspaces` keeps everything for inspection; nothing is swept behind it.
+    if (options.workspace.keep) return
+    await (options.prune ?? pruneKeptWorkspaces)(options.workspace.root, {
+      ...(filter.item
+        ? {
+            item: {
+              organizationSlug: filter.item.organizationSlug,
+              itemKey: filter.item.itemKey,
+            },
+          }
+        : {}),
+      ...(options.workspace.env ? { env: options.workspace.env } : {}),
+    })
+  }
 
   function failed(reason: string, detail: string): FinishReport {
     return {
