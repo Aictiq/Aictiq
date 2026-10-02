@@ -122,6 +122,10 @@ jobs:
           mkdir -p perf/results
           export BASE_URL=http://localhost:8080
           export ORG_SLUG=perf
+          # Search keeps its 300 ms budget at a rate the shared runner can serve. RLS keeps
+          # the org-wide queries off their GIN indexes (@@ and % are not leakproof), so at
+          # 10/s the runner saturates and the run measures queueing, not search.
+          export SEARCH_RATE=3
           export ADMIN_EMAIL="$(sed -n 's/^SEED_ADMIN_EMAIL=//p' deploy/.env)"
           export ADMIN_PASSWORD="$(sed -n 's/^SEED_ADMIN_PASSWORD=//p' deploy/.env)"
           test -n "$ADMIN_EMAIL" && test -n "$ADMIN_PASSWORD"
