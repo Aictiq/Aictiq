@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -52,9 +53,15 @@ public static class MigrationRunner
         }
         finally
         {
-            await using var releaseLock = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", connection);
-            releaseLock.Parameters.AddWithValue("key", AdvisoryLockKey);
-            await releaseLock.ExecuteNonQueryAsync(CancellationToken.None);
+            // A connection that broke mid-migration took its session lock with it, and
+            // unlocking on it would throw "Connection is not open" over the error that
+            // actually broke it.
+            if (connection.State == ConnectionState.Open)
+            {
+                await using var releaseLock = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", connection);
+                releaseLock.Parameters.AddWithValue("key", AdvisoryLockKey);
+                await releaseLock.ExecuteNonQueryAsync(CancellationToken.None);
+            }
         }
     }
 }
