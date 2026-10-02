@@ -134,34 +134,37 @@ describe('CreateTicketDialog', () => {
     [true, true],
     [false, true],
     [true, false],
-  ])('creates normally for factory permission %s and refinement enabled %s', async (canOperate, enabled) => {
-    const { wrapper, calls } = await mountDialog(canOperate, enabled)
-    expect(wrapper.find('[data-testid="create-ticket-refine"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Refine ticket')
-    expect(wrapper.find('#create-ticket-title').attributes('placeholder')).toBe('What is it?')
+  ])(
+    'creates normally for factory permission %s and refinement enabled %s',
+    async (canOperate, enabled) => {
+      const { wrapper, calls } = await mountDialog(canOperate, enabled)
+      expect(wrapper.find('[data-testid="create-ticket-refine"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('Refine ticket')
+      expect(wrapper.find('#create-ticket-title').attributes('placeholder')).toBe('What is it?')
 
-    await wrapper.find('#create-ticket-type').setValue('bug')
-    await wrapper.find('#create-ticket-title').setValue('  Login button broken  ')
-    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
+      await wrapper.find('#create-ticket-type').setValue('bug')
+      await wrapper.find('#create-ticket-title').setValue('  Login button broken  ')
+      await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
+      await wrapper.find('form').trigger('submit')
+      await flushPromises()
 
-    const posts = calls.filter((call) => call.method === 'POST')
-    expect(posts).toHaveLength(1)
-    expect(posts[0]).toMatchObject({
-      url: '/api/v1/orgs/acme/projects/PROJ/items/',
-      body: {
-        type: 'bug',
-        title: 'Login button broken',
-        descriptionMarkdown: 'The login button does nothing',
-        teamId: 'team-1',
-      },
-    })
-    expect(wrapper.emitted('created')?.[0]?.[0]).toMatchObject({ key: 'PROJ-7' })
-    expect(wrapper.emitted('update:open')).toEqual([[false]])
-    expect(calls.some((call) => call.url.includes('refinement'))).toBe(false)
-    wrapper.unmount()
-  })
+      const posts = calls.filter((call) => call.method === 'POST')
+      expect(posts).toHaveLength(1)
+      expect(posts[0]).toMatchObject({
+        url: '/api/v1/orgs/acme/projects/PROJ/items/',
+        body: {
+          type: 'bug',
+          title: 'Login button broken',
+          descriptionMarkdown: 'The login button does nothing',
+          teamId: 'team-1',
+        },
+      })
+      expect(wrapper.emitted('created')?.[0]?.[0]).toMatchObject({ key: 'PROJ-7' })
+      expect(wrapper.emitted('update:open')).toEqual([[false]])
+      expect(calls.some((call) => call.url.includes('refinement'))).toBe(false)
+      wrapper.unmount()
+    },
+  )
 
   it('requires a title even with a description and refinement configured', async () => {
     const { wrapper, calls } = await mountDialog(true, true)
@@ -182,16 +185,21 @@ describe('CreateTicketDialog', () => {
 })
 
 describe('RefinementPanel', () => {
-  async function mountPanel(current: unknown, dirty = false, canOperateFactory = true) {
+  async function mountPanel(
+    current: unknown,
+    dirty = false,
+    canOperateFactory = true,
+    enabled = true,
+  ) {
     const calls = stubFetch([
-      ['GET', /\/refinement-settings\/$/, settings(true)],
+      ['GET', /\/refinement-settings\/$/, settings(enabled)],
       ['GET', /\/items\/PROJ-7\/refinement\/$/, current],
       ['POST', /\/items\/PROJ-7\/refinement\/$/, refinement('refining')],
       ['POST', /\/items\/PROJ-7\/transition$/, { ...item, stateId: 's-ready', version: 4 }],
       ['POST', /\/items\/PROJ-7\/refinement\/confirm$/, refinement('confirmed')],
     ])
     const pinia = withOrganization(canOperateFactory)
-    const queryClient = new QueryClient()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const wrapper = mount(RefinementPanel, {
       props: { slug: 'acme', projectKey: 'PROJ', item: item as never, dirty, busy: false },
       global: {
@@ -202,6 +210,75 @@ describe('RefinementPanel', () => {
     await flushPromises()
     return { wrapper, calls, queryClient }
   }
+
+  it.each([null, refinement('confirmed'), refinement('ready')])(
+    'shows a setup notice linking to this project’s refinement settings when disabled',
+    async (current) => {
+      const { wrapper, calls } = await mountPanel(current, false, true, false)
+      expect(wrapper.find('[data-testid="refinement-not-configured"]').text()).toContain(
+        'Ticket refinement is not set up for this project.',
+      )
+      expect(wrapper.findComponent(RouterLinkStub).props('to')).toBe(
+        '/o/acme/p/PROJ/settings/factory#ticket-refinement',
+      )
+      expect(wrapper.find('[data-testid="refinement-start"]').exists()).toBe(false)
+      expect(calls.some((call) => call.method === 'POST')).toBe(false)
+      if (current?.status === 'ready') {
+        expect(wrapper.find('[data-testid="refinement-confirm"]').exists()).toBe(true)
+      }
+      wrapper.unmount()
+    },
+  )
+
+  it('shows no setup notice while settings are loading', async () => {
+    const { wrapper, queryClient } = await mountPanel(null)
+    let finishLoading!: (response: Response) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishLoading = resolve
+          }),
+      ),
+    )
+    const reload = queryClient.resetQueries({ queryKey: ['acme', 'PROJ', 'refinement-settings'] })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(false)
+    finishLoading(
+      new Response(JSON.stringify(settings(false)), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    await reload
+    await flushPromises()
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('hides disabled settings from stakeholders and after factory permission is revoked', async () => {
+    const stakeholder = await mountPanel(null, false, false, false)
+    expect(stakeholder.wrapper.text()).toBe('')
+    expect(stakeholder.calls).toHaveLength(0)
+    stakeholder.wrapper.unmount()
+
+    const { wrapper } = await mountPanel(null, false, true, false)
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(true)
+    useOrganizationsStore().organizations[0]!.canOperateFactory = false
+    await flushPromises()
+    expect(wrapper.text()).toBe('')
+    wrapper.unmount()
+  })
+
+  it('shows no setup notice after a settings error', async () => {
+    const { wrapper, queryClient } = await mountPanel(null)
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(false)
+    stubFetch([])
+    await queryClient.resetQueries({ queryKey: ['acme', 'PROJ', 'refinement-settings'] })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 
   it('asks the agent questions and sends the answers back with a new refinement', async () => {
     const { wrapper, calls } = await mountPanel(
@@ -280,10 +357,11 @@ describe('RefinementPanel', () => {
   it('starts refinement from the details of an item that was never refined', async () => {
     const { wrapper, calls } = await mountPanel(null)
     expect(wrapper.find('[data-testid="refinement-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="refinement-not-configured"]').exists()).toBe(false)
     await wrapper.find('[data-testid="refinement-start"]').trigger('click')
     await flushPromises()
-    expect(
-      calls.filter((call) => call.method === 'POST').map((call) => call.url),
-    ).toEqual(['/api/v1/orgs/acme/items/PROJ-7/refinement/'])
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual([
+      '/api/v1/orgs/acme/items/PROJ-7/refinement/',
+    ])
   })
 })

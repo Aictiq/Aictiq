@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, Copy, Loader2 } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, nextTick, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 
 import { listAgents, type Agent } from '@/api/agents'
 import { listGitHubBindings, type RepoBinding } from '@/api/github'
@@ -26,6 +26,18 @@ import { factorySetupPath, projectSettingsPath } from '@/router/paths'
 import { ApiError, ConflictError } from '@/utils/api'
 
 const project = useProjectScope()
+const route = useRoute()
+const refinementSection = ref<HTMLElement | null>(null)
+
+// Wait for the form to render at its full height before scrolling inside the shell.
+async function scrollToRefinement() {
+  await nextTick()
+  if (route.hash === '#ticket-refinement') {
+    refinementSection.value?.scrollIntoView({ block: 'start' })
+  }
+}
+
+watch(() => route.hash, scrollToRefinement, { flush: 'post' })
 const toast = useToast()
 const organizations = useOrganizationsStore()
 const canOperateFactory = computed(
@@ -334,17 +346,23 @@ async function save() {
       </div>
     </form>
   </SettingsSection>
-  <SettingsSection
+  <div
     v-if="!loading && mayRead && canOperateFactory && !failed"
-    class="mt-8"
-    title="Ticket refinement"
-    description="Let an agent turn a short description into a complete ticket, using what it should know about this product."
+    id="ticket-refinement"
+    ref="refinementSection"
+    class="mt-8 scroll-mt-4"
   >
-    <RefinementSettingsForm
-      :slug="project.slug.value"
-      :project-key="project.projectKey.value"
-      :agents="agents"
-      :may-manage="mayManage"
-    />
-  </SettingsSection>
+    <SettingsSection
+      title="Ticket refinement"
+      description="Let an agent turn a short description into a complete ticket, using what it should know about this product."
+    >
+      <RefinementSettingsForm
+        :slug="project.slug.value"
+        :project-key="project.projectKey.value"
+        :agents="agents"
+        :may-manage="mayManage"
+        @loaded="scrollToRefinement"
+      />
+    </SettingsSection>
+  </div>
 </template>
