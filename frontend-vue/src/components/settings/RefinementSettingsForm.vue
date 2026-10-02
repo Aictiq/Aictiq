@@ -30,6 +30,7 @@ const props = defineProps<{
   mayManage: boolean
 }>()
 
+const emit = defineEmits<{ loaded: [] }>()
 const toast = useToast()
 const loading = ref(true)
 const failed = ref(false)
@@ -78,6 +79,7 @@ async function load() {
     failed.value = true
   } finally {
     loading.value = false
+    emit('loaded')
   }
 }
 
@@ -170,8 +172,8 @@ async function createPlaybook() {
         </Button>
       </div>
       <p class="text-muted-foreground text-xs">
-        Choosing one adds <strong>Refine ticket</strong> to ticket details. Its instructions say
-        how each item type is written up; a refine run reads the code but never changes it.
+        Choosing one adds <strong>Refine ticket</strong> to ticket details. Its instructions say how
+        each item type is written up; a refine run reads the code but never changes it.
       </p>
     </div>
 

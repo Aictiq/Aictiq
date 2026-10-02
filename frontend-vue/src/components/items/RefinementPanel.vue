@@ -13,13 +13,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import { refinementLabels } from '@/lib/refinement'
-import { factoryRunPath } from '@/router/paths'
+import { factoryRunPath, projectSettingsPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
 
 /**
  * Where an item's refinement stands, above its description: the agent at work, its
  * questions with room for the answers, or the refined ticket waiting for the person to
- * review and confirm. A confirmed or never-refined item shows only a "Refine ticket" action.
+ * review and confirm. When refinement is off, a notice links to its project settings.
  */
 const props = defineProps<{
   slug: string
@@ -123,6 +123,23 @@ async function confirm() {
 </script>
 
 <template>
+  <div
+    v-if="canOperate && settings.data.value?.enabled === false"
+    class="border-border bg-muted/30 text-muted-foreground mt-2 flex items-start gap-2 rounded-md border p-3 text-sm"
+    data-testid="refinement-not-configured"
+    role="status"
+  >
+    <Sparkles class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+    <p>
+      Ticket refinement is not set up for this project.
+      <RouterLink
+        :to="`${projectSettingsPath(slug, projectKey, 'factory')}#ticket-refinement`"
+        class="text-primary underline underline-offset-2"
+      >
+        View refinement settings
+      </RouterLink>
+    </p>
+  </div>
   <section
     v-if="canOperate && active && current"
     class="border-border bg-muted/30 mt-5 rounded-md border p-4"

@@ -450,6 +450,9 @@ ordinary run on your runner with a different job: it reads the item, its screens
 files, and the code, then rewrites the item's title and description, or asks the questions it
 cannot answer itself. It never commits, pushes or opens a pull request.
 
+When refinement is off, ticket details show a notice with **View refinement settings**,
+which opens this project's **Ticket refinement** section directly.
+
 To turn it on, open **Project settings → Factory → Ticket refinement** and choose
 **Create Refine playbook** (or pick an existing playbook). The starter's instructions say how
 a Story, Bug, Epic and Task are written up; edit them like any playbook. The same section
