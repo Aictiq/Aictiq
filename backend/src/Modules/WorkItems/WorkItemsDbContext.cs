@@ -223,6 +223,7 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
         {
             b.ToTable("comment_reactions"); b.Ignore(x => x.Id); b.HasKey(x => new { x.CommentId, x.UserId, x.Emoji });
             b.Property(x => x.UserId).HasMaxLength(64); b.Property(x => x.Emoji).HasMaxLength(32);
+            b.ToTable(t => t.HasCheckConstraint("ck_comment_reactions_emoji", "emoji IN ('👍', '👎', '❤️', '🎉', '👀', '✅')"));
             b.HasOne<Comment>().WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<Attachment>(b =>

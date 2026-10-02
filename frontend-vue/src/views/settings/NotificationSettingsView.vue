@@ -6,7 +6,7 @@ import { useToast } from '@/composables/useToast'
 const toast = useToast()
 const saving = ref(false)
 const preferences = ref<NotificationPreference[]>([])
-const kinds = ['assigned', 'mentioned', 'replied', 'commented', 'transitioned', 'claimed', 'sprintStarted', 'sprintCompleted', 'wikiMentioned', 'inviteAccepted']
+const kinds = ['assigned', 'mentioned', 'replied', 'reacted', 'commented', 'transitioned', 'claimed', 'sprintStarted', 'sprintCompleted', 'wikiMentioned', 'inviteAccepted']
 // Comments on watched items reach the inbox; only mentions and replies are mailed as they
 // happen, so "commented" offers the digest or nothing.
 const inboxOnly = new Set(['commented'])

@@ -3824,6 +3824,48 @@ export interface components {
             /** Format: uint32 */
             version: number | string;
         };
+        CommentAuthorView: {
+            avatarKey: null | string;
+            displayName: string;
+            id: string;
+            isAgent: boolean;
+        };
+        CommentReactionView: {
+            /** Format: int32 */
+            count: number | string;
+            emoji: string;
+            reactedByMe: boolean;
+            users: components["schemas"]["CommentAuthorView"][];
+        };
+        CommentRevisionView: {
+            bodyHtml: string;
+            bodyMarkdown: string;
+            /** Format: date-time */
+            editedAt: string;
+            editedBy: string;
+            /** Format: uuid */
+            id: string;
+        };
+        CommentView: {
+            author: components["schemas"]["CommentAuthorView"];
+            bodyHtml: string;
+            bodyMarkdown: string;
+            /** @default false */
+            canReact: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deletedAt: null | string;
+            /** Format: date-time */
+            editedAt: null | string;
+            /** Format: uuid */
+            id: string;
+            mentions: string[];
+            /** Format: uuid */
+            parentCommentId?: null | string;
+            reactions: components["schemas"]["CommentReactionView"][];
+            revisions: components["schemas"]["CommentRevisionView"][];
+        };
         CommitAttachmentRequest: {
             /** Format: uuid */
             commentId: null | string;
@@ -4081,7 +4123,7 @@ export interface components {
             version: number | string;
         };
         /** @enum {unknown} */
-        NotificationKind: "assigned" | "mentioned" | "commented" | "transitioned" | "claimed" | "sprintStarted" | "sprintCompleted" | "wikiMentioned" | "inviteAccepted" | "replied";
+        NotificationKind: "assigned" | "mentioned" | "commented" | "transitioned" | "claimed" | "sprintStarted" | "sprintCompleted" | "wikiMentioned" | "inviteAccepted" | "replied" | "reacted";
         NotificationPreferenceView: {
             email?: components["schemas"]["EmailNotificationMode"];
             inApp?: boolean;
@@ -4108,6 +4150,17 @@ export interface components {
         };
         /** @enum {unknown} */
         OrgRole: "owner" | "admin" | "member" | "guest" | null;
+        PagedResultOfCommentView: {
+            items: components["schemas"]["CommentView"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            totalCount: number | string;
+            /** Format: int32 */
+            totalPages?: number | string;
+        };
         /** @enum {unknown} */
         ProjectRole: "admin" | "member" | "guest" | null;
         /** @enum {unknown} */
@@ -17722,7 +17775,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PagedResultOfCommentView"];
+                };
             };
             /** @description The request is invalid. */
             400: {
@@ -17892,6 +17947,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentView"];
+                };
             };
             /** @description The request is invalid. */
             400: {
@@ -18229,7 +18293,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CommentView"];
+                };
             };
             /** @description The request is invalid. */
             400: {

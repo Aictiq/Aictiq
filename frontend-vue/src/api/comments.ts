@@ -11,7 +11,17 @@ export interface CommentReaction {
   emoji: string
   count: number
   reactedByMe: boolean
+  users: CommentAuthor[]
 }
+
+export const commentReactionOptions = [
+  { emoji: '👍', label: 'Thumbs up' },
+  { emoji: '👎', label: 'Thumbs down' },
+  { emoji: '❤️', label: 'Heart' },
+  { emoji: '🎉', label: 'Celebrate' },
+  { emoji: '👀', label: 'Eyes' },
+  { emoji: '✅', label: 'Check mark' },
+] as const
 
 export interface CommentRevision {
   id: string
@@ -30,6 +40,7 @@ export interface WorkItemComment {
   editedAt: string | null
   deletedAt: string | null
   mentions: string[]
+  canReact: boolean
   reactions: CommentReaction[]
   revisions: CommentRevision[]
   /** The first comment of the thread this one answers; null when it starts a thread. */
@@ -59,14 +70,32 @@ export const createComment = (
     body: { bodyMarkdown, parentCommentId },
   })
 
-export const updateComment = (slug: string, itemKey: string, commentId: string, bodyMarkdown: string) =>
-  apiFetch<WorkItemComment>(`${base(slug, itemKey)}/${commentId}`, { method: 'PATCH', body: { bodyMarkdown } })
+export const updateComment = (
+  slug: string,
+  itemKey: string,
+  commentId: string,
+  bodyMarkdown: string,
+) =>
+  apiFetch<WorkItemComment>(`${base(slug, itemKey)}/${commentId}`, {
+    method: 'PATCH',
+    body: { bodyMarkdown },
+  })
 
 export const deleteComment = (slug: string, itemKey: string, commentId: string) =>
   apiFetch<void>(`${base(slug, itemKey)}/${commentId}`, { method: 'DELETE' })
 
 export const reactToComment = (slug: string, itemKey: string, commentId: string, emoji: string) =>
-  apiFetch<void>(`${base(slug, itemKey)}/${commentId}/reactions`, { method: 'PUT', body: { emoji } })
+  apiFetch<void>(`${base(slug, itemKey)}/${commentId}/reactions`, {
+    method: 'PUT',
+    body: { emoji },
+  })
 
-export const unreactFromComment = (slug: string, itemKey: string, commentId: string, emoji: string) =>
-  apiFetch<void>(`${base(slug, itemKey)}/${commentId}/reactions/${encodeURIComponent(emoji)}`, { method: 'DELETE' })
+export const unreactFromComment = (
+  slug: string,
+  itemKey: string,
+  commentId: string,
+  emoji: string,
+) =>
+  apiFetch<void>(`${base(slug, itemKey)}/${commentId}/reactions/${encodeURIComponent(emoji)}`, {
+    method: 'DELETE',
+  })

@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Npgsql;
 using Aictiq.IntegrationTests.Storage;
+using Aictiq.Modules.Identity.Endpoints;
+using Aictiq.Modules.Notifications.Endpoints;
 using Aictiq.Modules.Notifications.Delivery;
 using Aictiq.Modules.Notifications.Domain;
 using Aictiq.Modules.Notifications.Events;
@@ -43,6 +45,7 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
             configure: settings => settings["Email:BaseUrl"] = "https://aictiq.test",
             // The Workers half of Notifications, minus its hosted services: nothing here is
             // sent, only queued, and the tests read the queue.
+            appRole: true,
             configureServices: services =>
             {
                 services.AddOptions<NotificationEmailOptions>();
@@ -168,6 +171,185 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
         await HandleAddedAsync(reply.Id);
         Assert.DoesNotContain(anaId, (await NotificationsAsync(reply.Id)).Select(x => x.UserId));
         Assert.Empty(await EmailsAsync());
+    }
+
+    [Fact]
+    public async Task every_emoji_toggles_on_roots_and_replies_with_names_counts_and_independent_users()
+    {
+        var (anaId, ana) = await JoinAsync("Ana", "Kovač");
+        var item = await CreateItemAsync("React to this");
+        var root = await CommentAsync(_owner, item.Key, "Ready?");
+        var reply = await CommentAsync(ana, item.Key, "Ready!", root.Id);
+        foreach (var comment in new[] { root, reply })
+        {
+            foreach (var emoji in CommentReaction.AllowedEmoji)
+            {
+                await ReactAsync(_owner, item.Key, comment.Id, emoji);
+                await ReactAsync(ana, item.Key, comment.Id, emoji);
+            }
+            var page = await CommentsAsync(_owner, item.Key);
+            var reactions = page.Items.Single(x => x.Id == comment.Id).Reactions;
+            Assert.Equal(6, reactions.Count);
+            Assert.All(reactions, reaction =>
+            {
+                Assert.Equal(2, reaction.Count);
+                Assert.True(reaction.ReactedByMe);
+                Assert.Equal(new[] { anaId, _ownerId }.Order(), reaction.Users.Select(x => x.Id).Order());
+                Assert.Contains(reaction.Users, x => x.DisplayName == "Ana Kovač");
+            });
+            foreach (var emoji in CommentReaction.AllowedEmoji)
+            {
+                await UnreactAsync(_owner, item.Key, comment.Id, emoji);
+            }
+            page = await CommentsAsync(_owner, item.Key);
+            Assert.All(page.Items.Single(x => x.Id == comment.Id).Reactions, reaction =>
+            {
+                Assert.Equal(1, reaction.Count);
+                Assert.False(reaction.ReactedByMe);
+            });
+            Assert.All((await CommentsAsync(ana, item.Key)).Items.Single(x => x.Id == comment.Id).Reactions, reaction => Assert.True(reaction.ReactedByMe));
+            foreach (var emoji in CommentReaction.AllowedEmoji) await UnreactAsync(ana, item.Key, comment.Id, emoji);
+            Assert.Empty((await CommentsAsync(_owner, item.Key)).Items.Single(x => x.Id == comment.Id).Reactions);
+        }
+    }
+
+    [Fact]
+    public async Task first_reaction_notifies_only_the_author_once_even_after_concurrent_adds_and_readding()
+    {
+        var (_, ana) = await JoinAsync("Ana", "Kovač");
+        var item = await CreateItemAsync("Approval");
+        var root = await CommentAsync(_owner, item.Key, "The **release** is ready.");
+        await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ReactAsync(ana, item.Key, root.Id, "👍")));
+        var e = Assert.Single(await ReactionEventsAsync(root.Id));
+        Assert.Single((await CommentsAsync(ana, item.Key)).Items.Single().Reactions);
+        await HandleReactionAsync(e);
+        await HandleReactionAsync(e); // outbox replay
+        var inbox = await _owner.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct);
+        var notification = Assert.Single(inbox!);
+        Assert.Equal(NotificationKind.Reacted, notification.Kind);
+        Assert.Contains("👍", notification.Message);
+        Assert.Empty((await ana.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct))!);
+        var mail = Assert.Single(await EmailsAsync());
+        Assert.Equal("reaction", mail.Template);
+        Assert.Equal($"Ana Kovač reacted 👍 to your comment on {item.Key}", mail.Subject);
+        Assert.Contains("The release is ready.", mail.Text);
+        Assert.Contains($"#comment-{root.Id}", mail.Text);
+        await UnreactAsync(ana, item.Key, root.Id, "👍");
+        await ReactAsync(ana, item.Key, root.Id, "👍");
+        Assert.Single(await ReactionEventsAsync(root.Id));
+        Assert.Single(await EmailsAsync());
+        await ReactAsync(_owner, item.Key, root.Id, "🎉");
+        foreach (var reaction in await ReactionEventsAsync(root.Id)) await HandleReactionAsync(reaction);
+        Assert.Single(await EmailsAsync()); // own reaction never emails/notifies
+        Assert.Single((await _owner.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct))!);
+    }
+
+    [Fact]
+    public async Task reaction_preferences_mute_inbox_and_email_and_email_can_be_disabled_independently()
+    {
+        var (_, ana) = await JoinAsync("Ana", "Kovač");
+        var item = await CreateItemAsync("Quiet reactions");
+        var root = await CommentAsync(_owner, item.Key, "Ready.");
+        var saved = await _owner.PutAsJsonAsync("/api/v1/me/notification-preferences",
+            new PutNotificationPreferencesRequest([new(NotificationKind.Reacted, false, false)]), ApiTestContext.Json, Ct);
+        saved.EnsureSuccessStatusCode();
+        await ReactAsync(ana, item.Key, root.Id, "👍");
+        await HandleReactionAsync(Assert.Single(await ReactionEventsAsync(root.Id)));
+        Assert.Empty((await _owner.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct))!);
+        Assert.Empty(await EmailsAsync());
+        saved = await _owner.PutAsJsonAsync("/api/v1/me/notification-preferences",
+            new PutNotificationPreferencesRequest([new(NotificationKind.Reacted, true, false)]), ApiTestContext.Json, Ct);
+        saved.EnsureSuccessStatusCode();
+        await ReactAsync(ana, item.Key, root.Id, "❤️");
+        await HandleReactionAsync((await ReactionEventsAsync(root.Id)).Single(x => x.Emoji == "❤️"));
+        Assert.Single((await _owner.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct))!);
+        Assert.Empty(await EmailsAsync());
+    }
+
+    [Fact]
+    public async Task reaction_endpoints_reject_invalid_emojis_read_only_tokens_hidden_items_and_archived_projects()
+    {
+        var item = await CreateItemAsync("Permissions");
+        var other = await CreateItemAsync("Different item");
+        var root = await CommentAsync(_owner, item.Key, "Ready.");
+        var path = ItemPath(item.Key, $"comments/{root.Id}/reactions");
+        var invalid = await _owner.PutAsJsonAsync(path, new ReactToCommentRequest("😀"), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _owner.PutAsJsonAsync(ItemPath(other.Key, $"comments/{root.Id}/reactions"), new ReactToCommentRequest("👍"), ApiTestContext.Json, Ct)).StatusCode);
+        var stranger = _context.ClientFor(await _context.RegisterAsync($"stranger-{Guid.NewGuid():N}@test.local", "Out", "Sider"));
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.PutAsJsonAsync(path, new ReactToCommentRequest("👍"), ApiTestContext.Json, Ct)).StatusCode);
+        var tokenResponse = await _owner.PostAsJsonAsync("/api/v1/me/tokens",
+            new CreateAccessTokenRequest("Read only", [Scopes.Read], _organization.Id, null), ApiTestContext.Json, Ct);
+        tokenResponse.EnsureSuccessStatusCode();
+        using var reader = _context.Factory.CreateClient();
+        reader.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",
+            (await tokenResponse.Content.ReadFromJsonAsync<AccessTokenCreated>(ApiTestContext.Json, Ct))!.Secret);
+        await ReactAsync(_owner, item.Key, root.Id, "👍");
+        var readOnlyComment = (await CommentsAsync(reader, item.Key)).Items.Single();
+        Assert.Single(readOnlyComment.Reactions);
+        Assert.False(readOnlyComment.CanReact);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PutAsJsonAsync(path, new ReactToCommentRequest("👍"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.DeleteAsync(path + "/" + Uri.EscapeDataString("👍"), Ct)).StatusCode);
+        var archive = await _owner.PostAsync($"/api/v1/orgs/{Slug}/projects/{_project.Key}/archive", null, Ct);
+        archive.EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, (await _owner.PutAsJsonAsync(path, new ReactToCommentRequest("🎉"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await _owner.DeleteAsync(path + "/" + Uri.EscapeDataString("👍"), Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task deleting_a_comment_clears_active_and_removed_reactions_and_rejects_late_additions()
+    {
+        var item = await CreateItemAsync("Deleted reactions");
+        var root = await CommentAsync(_owner, item.Key, "Ready.");
+        await ReactAsync(_owner, item.Key, root.Id, "👍");
+        await ReactAsync(_owner, item.Key, root.Id, "✅");
+        await UnreactAsync(_owner, item.Key, root.Id, "👍");
+        var adding = _owner.PutAsJsonAsync(ItemPath(item.Key, $"comments/{root.Id}/reactions"), new ReactToCommentRequest("👀"), ApiTestContext.Json, Ct);
+        var deleting = _owner.DeleteAsync(ItemPath(item.Key, $"comments/{root.Id}"), Ct);
+        await Task.WhenAll(adding, deleting);
+        Assert.Contains((await adding).StatusCode, new[] { HttpStatusCode.NoContent, HttpStatusCode.Conflict });
+        (await deleting).EnsureSuccessStatusCode();
+        Assert.Empty((await CommentsAsync(_owner, item.Key)).Items.Single().Reactions);
+        var late = await _owner.PutAsJsonAsync(ItemPath(item.Key, $"comments/{root.Id}/reactions"), new ReactToCommentRequest("👍"), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, late.StatusCode);
+        await using var connection = new NpgsqlConnection(_context.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var rows = new NpgsqlCommand("SELECT count(*) FROM work.comment_reactions WHERE comment_id = @comment", connection);
+        rows.Parameters.AddWithValue("comment", root.Id);
+        Assert.Equal(0L, await rows.ExecuteScalarAsync(Ct));
+    }
+
+    private async Task ReactAsync(HttpClient client, string itemKey, Guid commentId, string emoji)
+    {
+        var response = await client.PutAsJsonAsync(ItemPath(itemKey, $"comments/{commentId}/reactions"), new ReactToCommentRequest(emoji), ApiTestContext.Json, Ct);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    private async Task UnreactAsync(HttpClient client, string itemKey, Guid commentId, string emoji)
+    {
+        var response = await client.DeleteAsync(ItemPath(itemKey, $"comments/{commentId}/reactions/{Uri.EscapeDataString(emoji)}"), Ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private async Task<PagedResult<CommentView>> CommentsAsync(HttpClient client, string itemKey) =>
+        (await client.GetFromJsonAsync<PagedResult<CommentView>>(ItemPath(itemKey, "comments"), ApiTestContext.Json, Ct))!;
+
+    private async Task<List<CommentReactionAdded>> ReactionEventsAsync(Guid commentId)
+    {
+        await using var connection = new NpgsqlConnection(_context.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand("SELECT payload::text FROM shared.outbox_messages WHERE type LIKE '%CommentReactionAdded%' AND payload::text LIKE @comment", connection);
+        command.Parameters.AddWithValue("comment", $"%{commentId}%");
+        var events = new List<CommentReactionAdded>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) events.Add(JsonSerializer.Deserialize<CommentReactionAdded>(reader.GetString(0))!);
+        return events;
+    }
+
+    private async Task HandleReactionAsync(CommentReactionAdded e)
+    {
+        await using var scope = _context.Factory.Services.CreateAsyncScope();
+        await ActivatorUtilities.CreateInstance<CommentReactionNotificationHandler>(scope.ServiceProvider).HandleAsync(e, Ct);
     }
 
     private async Task HandleAddedAsync(Guid commentId)

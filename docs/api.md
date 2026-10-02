@@ -90,3 +90,27 @@ item context or when the organization is no longer accessible.
 Run-completion updates also include an optional `runId`. When the notification’s
 organization grants `canOperateFactory`, link to `/o/{slug}/factory/runs/{runId}`;
 otherwise open the related item. Older notifications have no run ID.
+
+## Comment reactions
+
+Comments and replies support the fixed set 👍 👎 ❤️ 🎉 👀 ✅. Use
+`PUT /api/v1/orgs/{slug}/items/{key}/comments/{commentId}/reactions` with
+`{"emoji":"👍"}` to add a reaction, and
+`DELETE /api/v1/orgs/{slug}/items/{key}/comments/{commentId}/reactions/{emoji}`
+with a URL-encoded emoji to remove it. Both operations are idempotent and require the
+same item visibility and `write` scope as commenting; archived projects are read-only.
+These operations do not require a version. Guest roles can comment and react.
+
+The comments response includes `reactions`, with `emoji`, `count`, `reactedByMe`, and
+`users` (reactor IDs, display names, avatar keys, and agent flags). Removed reactions
+are excluded. Each comment also has `canReact`, false for read-only credentials,
+archived projects, and deleted comments. A user can add multiple different emojis,
+each once per comment.
+Deleting a comment clears its reactions, including its internal toggle history.
+
+The first addition of each emoji by another user sends the comment author a `reacted`
+Inbox notification and email. Removing or re-adding that same reaction sends nothing;
+self-reactions never notify. Notification preferences accept `reacted`: disabling Inbox
+suppresses both channels, and Email Off suppresses email independently. Immediate and
+daily digest email modes use the existing delivery settings. No reaction commands are
+added to the CLI or MCP tools.

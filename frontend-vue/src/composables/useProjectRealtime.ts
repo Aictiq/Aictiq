@@ -62,7 +62,10 @@ export function useProjectRealtime(
     })
     connection.on('comment.added', (event: CommentAdded) => {
       invalidate('item', event.itemId)
-      if (toValue(openItemKey)) void client.invalidateQueries({ queryKey: [toValue(openItemKey), 'comments'] })
+      if (toValue(openItemKey)) void client.invalidateQueries({ queryKey: [toValue(organizationSlug), toValue(openItemKey), 'comments'] })
+    })
+    connection.on('comment.reactions.changed', (event: { itemKey: string }) => {
+      void client.invalidateQueries({ queryKey: [toValue(organizationSlug), event.itemKey, 'comments'] })
     })
     connection.on('board.moved', (event: ItemChanged) => { onBoardMoved?.(event); invalidate('board', event.key) })
     connection.on('sprint.changed', () => invalidate('sprint'))

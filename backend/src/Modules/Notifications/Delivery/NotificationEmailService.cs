@@ -110,12 +110,18 @@ public sealed class NotificationEmailService(
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent) continue;
             if (modes.TryGetValue((notification.UserId, notification.Kind), out var mode) && mode != EmailNotificationMode.Immediate)
                 continue;
-            var template = notification.Kind == NotificationKind.Replied ? "comment-reply" : "mention";
+            var template = notification.Kind switch
+            {
+                NotificationKind.Replied => "comment-reply",
+                NotificationKind.Reacted => "reaction",
+                _ => "mention"
+            };
             var rendered = renderer.Render(template, new Dictionary<string, string>
             {
                 ["organizationName"] = organization?.Name ?? "",
                 ["recipientName"] = recipient.DisplayName,
                 ["actorName"] = actorName,
+                ["emoji"] = comment.Emoji ?? "",
                 ["itemKey"] = comment.ItemKey ?? "",
                 ["itemTitle"] = comment.ItemTitle ?? "",
                 ["excerpt"] = comment.Excerpt ?? "",
@@ -174,4 +180,4 @@ public sealed class NotificationEmailService(
 /// <summary>What a comment email says, gathered from the comment's event.</summary>
 public sealed record CommentEmail(
     Guid OrganizationId, Guid CommentId, string AuthorId,
-    string? ProjectKey, string? ItemKey, string? ItemTitle, string? Excerpt);
+    string? ProjectKey, string? ItemKey, string? ItemTitle, string? Excerpt, string? Emoji = null);

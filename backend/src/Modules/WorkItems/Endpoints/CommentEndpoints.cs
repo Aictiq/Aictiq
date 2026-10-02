@@ -13,12 +13,12 @@ using Aictiq.SharedKernel.Tenancy;
 namespace Aictiq.Modules.WorkItems.Endpoints;
 
 public sealed record CommentAuthorView(string Id, string DisplayName, string? AvatarKey, bool IsAgent);
-public sealed record CommentReactionView(string Emoji, int Count, bool ReactedByMe);
+public sealed record CommentReactionView(string Emoji, int Count, bool ReactedByMe, IReadOnlyList<CommentAuthorView> Users);
 public sealed record CommentRevisionView(Guid Id, string BodyMarkdown, string BodyHtml, string EditedBy, DateTimeOffset EditedAt);
 public sealed record CommentView(Guid Id, CommentAuthorView Author, string BodyMarkdown, string BodyHtml,
     DateTimeOffset CreatedAt, DateTimeOffset? EditedAt, DateTimeOffset? DeletedAt,
     IReadOnlyList<string> Mentions, IReadOnlyList<CommentReactionView> Reactions,
-    IReadOnlyList<CommentRevisionView> Revisions, Guid? ParentCommentId = null);
+    IReadOnlyList<CommentRevisionView> Revisions, Guid? ParentCommentId = null, bool CanReact = false);
 /// <param name="ParentCommentId">The comment being answered. A reply to a reply joins the
 /// same thread, under its first comment.</param>
 public sealed record CreateCommentRequest(string? BodyMarkdown, Guid? ParentCommentId = null);
@@ -34,9 +34,9 @@ public static class CommentEndpoints
     public static IEndpointRouteBuilder MapCommentEndpoints(this IEndpointRouteBuilder api)
     {
         var comments = api.MapGroup("/orgs/{orgSlug}/items/{itemKey}/comments").WithTags("Comments").RequireAuthorization();
-        comments.MapGet("/", List).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
-        comments.MapPost("/", Create).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
-        comments.MapPatch("/{commentId:guid}", Edit).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
+        comments.MapGet("/", List).Produces<PagedResult<CommentView>>().RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
+        comments.MapPost("/", Create).Produces<CommentView>(StatusCodes.Status201Created).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
+        comments.MapPatch("/{commentId:guid}", Edit).Produces<CommentView>().RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
         comments.MapDelete("/{commentId:guid}", Delete).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
         comments.MapPut("/{commentId:guid}/reactions", React).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
         comments.MapDelete("/{commentId:guid}/reactions/{emoji}", Unreact).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Write);
@@ -54,7 +54,8 @@ public static class CommentEndpoints
         var query = onItem.WithoutFactory(db, hidden).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
         var total = await query.CountAsync(ct);
         var comments = await query.Skip(Math.Max(0, page - 1) * take).Take(take).ToListAsync(ct);
-        return Results.Ok(new PagedResult<CommentView>(await ViewsAsync(db, directory, user.UserId!, comments, ct), Math.Max(page, 1), take, total));
+        var canReact = ScopeRequirements.IsSatisfiedBy(user.Scopes, Scopes.Write) && await ArchivedAsync(access, item, ct) is null;
+        return Results.Ok(new PagedResult<CommentView>(await ViewsAsync(db, directory, user.UserId!, comments, ct, canReact), Math.Max(page, 1), take, total));
     }
 
     private static async Task<IResult> Create(string itemKey, CreateCommentRequest request, WorkItemsDbContext db,
@@ -124,39 +125,90 @@ public static class CommentEndpoints
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
-        var comment = await db.Comments.FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
-        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
+        var visible = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
+        if (visible is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, visible, ct)) return Results.NotFound();
         var role = await access.GetProjectRoleAsync(user.UserId!, item.ProjectId, ct);
-        if (comment.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
-        if (comment.DeletedAt is null) { comment.DeletedAt = clock.GetUtcNow(); await db.SaveChangesAsync(ct); }
+        if (visible.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var comment = await LockCommentAsync(db, item, commentId, ct);
+        if (comment is null) return Results.NotFound();
+        if (comment.DeletedAt is null)
+        {
+            comment.DeletedAt = clock.GetUtcNow();
+            await db.CommentReactions.Where(x => x.CommentId == commentId).ExecuteDeleteAsync(ct);
+            await db.SaveChangesAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> React(string itemKey, Guid commentId, ReactToCommentRequest request, WorkItemsDbContext db,
-        IProjectAccess access, ICurrentUser user, IUserDirectory directory, ICurrentTenant tenant, TimeProvider clock, CancellationToken ct)
+        IProjectAccess access, ICurrentUser user, IUserDirectory directory, ICurrentTenant tenant, TimeProvider clock,
+        IRealtimePublisher realtime, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
-        if (string.IsNullOrWhiteSpace(request.Emoji) || request.Emoji.Trim().Length > 32) return Results.ValidationProblem(new Dictionary<string, string[]> { ["emoji"] = ["An emoji of 1-32 characters is required."] });
-        var comment = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
-        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
-        db.CommentReactions.Add(new CommentReaction { OrganizationId = tenant.OrganizationId!.Value, CommentId = commentId, UserId = user.UserId!, Emoji = request.Emoji.Trim(), CreatedAt = clock.GetUtcNow() });
-        try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { db.ChangeTracker.Clear(); }
+        if (request.Emoji is null || !CommentReaction.AllowedEmoji.Contains(request.Emoji)) return InvalidEmoji();
+        var visible = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
+        if (visible is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, visible, ct)) return Results.NotFound();
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var comment = await LockCommentAsync(db, item, commentId, ct);
+            if (comment is null) return Results.NotFound();
+            if (comment.DeletedAt is not null) return DeletedComment();
+            var reaction = await db.CommentReactions.FirstOrDefaultAsync(x => x.CommentId == commentId && x.UserId == user.UserId && x.Emoji == request.Emoji, ct);
+            if (reaction is { RemovedAt: null }) return Results.NoContent();
+            var now = clock.GetUtcNow();
+            if (reaction is null)
+            {
+                reaction = new CommentReaction { OrganizationId = tenant.OrganizationId!.Value, CommentId = commentId, UserId = user.UserId!, Emoji = request.Emoji!, CreatedAt = now };
+                reaction.Added(comment, item, now);
+                db.CommentReactions.Add(reaction);
+            }
+            else reaction.RemovedAt = null;
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        await ReactionsChangedAsync(realtime, item, commentId, ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> Unreact(string itemKey, Guid commentId, string emoji, WorkItemsDbContext db,
-        IProjectAccess access, ICurrentUser user, IUserDirectory directory, CancellationToken ct)
+        IProjectAccess access, ICurrentUser user, IUserDirectory directory, TimeProvider clock, IRealtimePublisher realtime, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
-        var comment = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
-        if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
-        var reaction = await db.CommentReactions.FirstOrDefaultAsync(x => x.CommentId == commentId && x.UserId == user.UserId && x.Emoji == emoji, ct);
-        if (reaction is not null) { db.CommentReactions.Remove(reaction); await db.SaveChangesAsync(ct); }
+        if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
+        if (!CommentReaction.AllowedEmoji.Contains(emoji)) return InvalidEmoji();
+        var visible = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
+        if (visible is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, visible, ct)) return Results.NotFound();
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var comment = await LockCommentAsync(db, item, commentId, ct);
+            if (comment is null) return Results.NotFound();
+            if (comment.DeletedAt is not null) return DeletedComment();
+            var reaction = await db.CommentReactions.FirstOrDefaultAsync(x => x.CommentId == commentId && x.UserId == user.UserId && x.Emoji == emoji, ct);
+            if (reaction is null || reaction.RemovedAt is not null) return Results.NoContent();
+            reaction.RemovedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        await ReactionsChangedAsync(realtime, item, commentId, ct);
         return Results.NoContent();
     }
+
+    // One lock also coordinates soft deletion, so a concurrent add cannot leave reactions
+    // on a tombstone. The normal tenant filter still applies to this composed query.
+    private static Task<Comment?> LockCommentAsync(WorkItemsDbContext db, WorkItem item, Guid commentId, CancellationToken ct) =>
+        db.Comments.FromSqlInterpolated($"SELECT * FROM work.comments WHERE id = {commentId} AND item_id = {item.Id} AND organization_id = {item.OrganizationId} FOR UPDATE")
+            .FirstOrDefaultAsync(ct);
+
+    private static Task ReactionsChangedAsync(IRealtimePublisher realtime, WorkItem item, Guid commentId, CancellationToken ct) =>
+        realtime.PublishAsync(item.ProjectId, "comment.reactions.changed", new { itemKey = item.Key, commentId }, ct);
+
+    private static IResult InvalidEmoji() => Results.ValidationProblem(new Dictionary<string, string[]> { ["emoji"] = ["Choose 👍, 👎, ❤️, 🎉, 👀 or ✅."] });
+    private static IResult DeletedComment() => Results.Problem("A deleted comment cannot be reacted to.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
 
     private static IResult? Validate(string? markdown) => string.IsNullOrWhiteSpace(markdown) || markdown.Trim().Length > 20_000
         ? Results.ValidationProblem(new Dictionary<string, string[]> { ["bodyMarkdown"] = ["Comment text of 1-20,000 characters is required."] }) : null;
@@ -200,22 +252,25 @@ public static class CommentEndpoints
     private static bool MatchesMention(string candidate, string token) =>
         candidate.Length > 0 && string.Equals(candidate, token, StringComparison.OrdinalIgnoreCase);
 
-    private static async Task<List<CommentView>> ViewsAsync(WorkItemsDbContext db, IUserDirectory directory, string currentUserId, IReadOnlyList<Comment> comments, CancellationToken ct)
+    private static async Task<List<CommentView>> ViewsAsync(WorkItemsDbContext db, IUserDirectory directory, string currentUserId, IReadOnlyList<Comment> comments, CancellationToken ct, bool canReact = true)
     {
         if (comments.Count == 0) return [];
         var ids = comments.Select(x => x.Id).ToArray();
-        var authors = await directory.GetAsync(comments.Select(x => x.AuthorId).Distinct().ToArray(), ct);
-        var reactions = await db.CommentReactions.AsNoTracking().Where(x => ids.Contains(x.CommentId)).ToListAsync(ct);
+        var reactions = await db.CommentReactions.AsNoTracking().Where(x => ids.Contains(x.CommentId) && x.RemovedAt == null).ToListAsync(ct);
+        var authors = await directory.GetAsync(comments.Select(x => x.AuthorId).Concat(reactions.Select(x => x.UserId)).Distinct().ToArray(), ct);
+        CommentAuthorView Person(string id) => authors.TryGetValue(id, out var person)
+            ? new(person.Id, person.DisplayName, person.AvatarKey, person.IsAgent)
+            : new(id, "Unknown user", null, false);
         var revisions = await db.CommentRevisions.AsNoTracking().Where(x => ids.Contains(x.CommentId)).OrderBy(x => x.EditedAt).ToListAsync(ct);
         return comments.Select(comment =>
         {
             var author = authors.TryGetValue(comment.AuthorId, out var summary) ? summary : new UserSummary(comment.AuthorId, "Unknown user", null, false);
             var grouped = reactions.Where(x => x.CommentId == comment.Id).GroupBy(x => x.Emoji).OrderBy(x => x.Key, StringComparer.Ordinal)
-                .Select(x => new CommentReactionView(x.Key, x.Count(), x.Any(y => y.UserId == currentUserId))).ToArray();
+                .Select(x => new CommentReactionView(x.Key, x.Count(), x.Any(y => y.UserId == currentUserId), x.Select(y => Person(y.UserId)).OrderBy(y => y.DisplayName).ToArray())).ToArray();
             var history = revisions.Where(x => x.CommentId == comment.Id).Select(x => new CommentRevisionView(x.Id, x.BodyMarkdown, x.BodyHtml, x.EditedBy, x.EditedAt)).ToArray();
             return comment.DeletedAt is null
-                ? new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), comment.BodyMarkdown, comment.BodyHtml, comment.CreatedAt, comment.EditedAt, null, comment.MentionedUserIds, grouped, history, comment.ParentCommentId)
-                : new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), "", "", comment.CreatedAt, comment.EditedAt, comment.DeletedAt, [], grouped, history, comment.ParentCommentId);
+                ? new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), comment.BodyMarkdown, comment.BodyHtml, comment.CreatedAt, comment.EditedAt, null, comment.MentionedUserIds, grouped, history, comment.ParentCommentId, canReact)
+                : new CommentView(comment.Id, new CommentAuthorView(author.Id, author.DisplayName, author.AvatarKey, author.IsAgent), "", "", comment.CreatedAt, comment.EditedAt, comment.DeletedAt, [], [], history, comment.ParentCommentId);
         }).ToList();
     }
 }
