@@ -15,9 +15,6 @@ vi.mock('@/api/templates', () => ({
   updateItemTemplate: vi.fn(),
   deleteItemTemplate: vi.fn(),
 }))
-vi.mock('@/api/refinement', () => ({
-  getRefinementSettings: vi.fn(async () => ({ enabled: false })),
-}))
 vi.mock('@/api/items', () => ({ createItem: vi.fn(async () => ({ id: 'item', key: 'WEB-1' })) }))
 vi.mock('@/api/labels', () => ({ listLabels: vi.fn(async () => []) }))
 

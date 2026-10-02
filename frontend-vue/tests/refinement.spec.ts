@@ -5,13 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import CreateTicketDialog from '@/components/items/CreateTicketDialog.vue'
 import RefinementPanel from '@/components/items/RefinementPanel.vue'
-import { draftTitle } from '@/lib/refinement'
 import { useOrganizationsStore } from '@/stores/organizations'
 
 /**
- * Refining a ticket: the dialog files a short description and hands it to the refine
- * playbook; the panel on the item shows the agent's questions or its finished ticket, and
- * confirming moves the ticket where the project sends refined work.
+ * Creation saves the ticket as written. Refinement starts on an existing ticket's details;
+ * its panel shows questions or the finished ticket and lets the person confirm it.
  */
 type Call = { method: string; url: string; body: unknown }
 
@@ -114,109 +112,72 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('draftTitle', () => {
-  it('takes the first line of prose, without Markdown', () => {
-    expect(draftTitle('![shot](/a.png)\n\n## The **login** button does nothing\nmore')).toBe(
-      'The login button does nothing',
-    )
-    expect(draftTitle('See [the docs](https://x.y) first')).toBe('See the docs first')
-  })
-
-  it('shortens a long line and names an empty one', () => {
-    expect(draftTitle('x'.repeat(200))).toHaveLength(80)
-    expect(draftTitle('  ![only an image](/a.png) ')).toBe('Untitled ticket')
-  })
-})
-
 describe('CreateTicketDialog', () => {
   async function mountDialog(canOperateFactory: boolean, enabled: boolean) {
     const calls = stubFetch([
+      ['GET', /\/item-templates\/$/, []],
       ['GET', /\/refinement-settings\/$/, settings(enabled)],
-      ['POST', /\/projects\/PROJ\/items\/$/, { ...item, title: 'The login button does nothing' }],
+      ['POST', /\/projects\/PROJ\/items\/$/, item],
       ['POST', /\/items\/PROJ-7\/refinement\/$/, refinement('refining')],
     ])
     const pinia = withOrganization(canOperateFactory)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const wrapper = mount(CreateTicketDialog, {
-      props: { slug: 'acme', projectKey: 'PROJ', open: true },
-      global: { plugins: [pinia, VueQueryPlugin], stubs: dialogStubs },
+      props: { slug: 'acme', projectKey: 'PROJ', open: true, teamId: 'team-1' },
+      global: { plugins: [pinia, [VueQueryPlugin, { queryClient }]], stubs: dialogStubs },
     })
     await flushPromises()
     return { wrapper, calls }
   }
 
-  it('offers Refine ticket only to factory operators of a project that set it up', async () => {
-    expect(
-      (await mountDialog(true, true)).wrapper.find('[data-testid="create-ticket-refine"]').exists(),
-    ).toBe(true)
-    vi.unstubAllGlobals()
-    expect(
-      (await mountDialog(false, true)).wrapper
-        .find('[data-testid="create-ticket-refine"]')
-        .exists(),
-    ).toBe(false)
-    vi.unstubAllGlobals()
-    expect(
-      (await mountDialog(true, false)).wrapper
-        .find('[data-testid="create-ticket-refine"]')
-        .exists(),
-    ).toBe(false)
-  })
-
-  it('needs a description to refine and a title to create by hand', async () => {
-    const { wrapper } = await mountDialog(true, true)
-    const refine = wrapper.find('[data-testid="create-ticket-refine"]')
-    const create = wrapper.find('[data-testid="create-ticket-submit"]')
-    expect(refine.attributes('disabled')).toBeDefined()
-    expect(create.attributes('disabled')).toBeDefined()
-
-    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
-    expect(refine.attributes('disabled')).toBeUndefined()
-    expect(create.attributes('disabled')).toBeDefined()
-  })
-
-  it('files the ticket with a draft title, then asks for a refinement', async () => {
-    const { wrapper, calls } = await mountDialog(true, true)
-    await wrapper.find('select').setValue('bug')
-    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
-    await wrapper.find('[data-testid="create-ticket-refine"]').trigger('click')
-    await flushPromises()
-
-    const created = calls.find((call) => call.method === 'POST' && call.url.endsWith('/items/'))
-    expect(created?.body).toMatchObject({
-      type: 'bug',
-      title: 'The login button does nothing',
-      descriptionMarkdown: 'The login button does nothing',
-    })
-    expect(
-      calls.some(
-        (call) => call.method === 'POST' && call.url.endsWith('/items/PROJ-7/refinement/'),
-      ),
-    ).toBe(true)
-    expect(wrapper.emitted('created')?.[0]?.[0]).toMatchObject({ key: 'PROJ-7' })
-  })
-
-  it('creates by hand without refining', async () => {
-    const { wrapper, calls } = await mountDialog(true, true)
-    await wrapper.find('#create-ticket-title').setValue('Login button broken')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    expect(calls.some((call) => call.url.includes('/refinement/') && call.method === 'POST')).toBe(
-      false,
-    )
-    expect(wrapper.emitted('created')).toHaveLength(1)
-  })
-
-  it('lets stakeholders create tickets without fetching refinement settings', async () => {
-    const { wrapper, calls } = await mountDialog(false, true)
+  it.each([
+    [true, true],
+    [false, true],
+    [true, false],
+  ])('creates normally for factory permission %s and refinement enabled %s', async (canOperate, enabled) => {
+    const { wrapper, calls } = await mountDialog(canOperate, enabled)
+    expect(wrapper.find('[data-testid="create-ticket-refine"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Refine ticket')
     expect(wrapper.find('#create-ticket-title').attributes('placeholder')).toBe('What is it?')
-    await wrapper.find('#create-ticket-title').setValue('Login button broken')
+
+    await wrapper.find('#create-ticket-type').setValue('bug')
+    await wrapper.find('#create-ticket-title').setValue('  Login button broken  ')
+    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.emitted('created')).toHaveLength(1)
+    const posts = calls.filter((call) => call.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(posts[0]).toMatchObject({
+      url: '/api/v1/orgs/acme/projects/PROJ/items/',
+      body: {
+        type: 'bug',
+        title: 'Login button broken',
+        descriptionMarkdown: 'The login button does nothing',
+        teamId: 'team-1',
+      },
+    })
+    expect(wrapper.emitted('created')?.[0]?.[0]).toMatchObject({ key: 'PROJ-7' })
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
     expect(calls.some((call) => call.url.includes('refinement'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('requires a title even with a description and refinement configured', async () => {
+    const { wrapper, calls } = await mountDialog(true, true)
+    const create = wrapper.find('[data-testid="create-ticket-submit"]')
+    expect(create.attributes('disabled')).toBeDefined()
+    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
+    await wrapper.find('#create-ticket-title').setValue('   ')
+    expect(create.attributes('disabled')).toBeDefined()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(calls.some((call) => call.method === 'POST')).toBe(false)
+    expect(wrapper.emitted('created')).toBeUndefined()
+
+    await wrapper.find('#create-ticket-title').setValue('Login button broken')
+    expect(create.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 })
 
@@ -316,27 +277,13 @@ describe('RefinementPanel', () => {
     expect(calls).toHaveLength(previousCalls)
   })
 
-  it('offers Refine ticket on an item that was never refined', async () => {
-    // A never-refined item answers 204 No Content.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input)
-        if (url.includes('/refinement-settings/'))
-          return new Response(JSON.stringify(settings(true)), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          })
-        return new Response(null, { status: 204 })
-      }),
-    )
-    const pinia = withOrganization(true)
-    const wrapper = mount(RefinementPanel, {
-      props: { slug: 'acme', projectKey: 'PROJ', item: item as never, dirty: false, busy: false },
-      global: { plugins: [pinia, VueQueryPlugin], stubs: { RouterLink: RouterLinkStub } },
-    })
-    await flushPromises()
+  it('starts refinement from the details of an item that was never refined', async () => {
+    const { wrapper, calls } = await mountPanel(null)
     expect(wrapper.find('[data-testid="refinement-panel"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="refinement-start"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="refinement-start"]').trigger('click')
+    await flushPromises()
+    expect(
+      calls.filter((call) => call.method === 'POST').map((call) => call.url),
+    ).toEqual(['/api/v1/orgs/acme/items/PROJ-7/refinement/'])
   })
 })
