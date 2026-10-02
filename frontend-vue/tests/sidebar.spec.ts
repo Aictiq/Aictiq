@@ -7,6 +7,7 @@ import AppSidebar from '@/components/shell/AppSidebar.vue'
 import type { Project, ProjectRole } from '@/api/projects'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
+import { type SessionUser, useSessionStore } from '@/stores/session'
 
 /**
  * The project section of the rail links to that project's settings, but only for the people
@@ -101,5 +102,31 @@ describe('AppSidebar agents link', () => {
     useOrganizationsStore().select(null)
     await flushPromises()
     expect(agentsLink().attributes('href')).toBe('/agents')
+  })
+})
+
+describe('AppSidebar inbox count', () => {
+  const inboxCount = (wrapper: Awaited<ReturnType<typeof render>>) =>
+    wrapper.find('a[href="/inbox"] .font-mono')
+
+  it('shows the same unread count as the notification bell', async () => {
+    useSessionStore().user = { unreadCount: 15 } as SessionUser
+    const wrapper = await render('member')
+
+    expect(inboxCount(wrapper).text()).toBe('15')
+  })
+
+  it('caps a large count like the bell does', async () => {
+    useSessionStore().user = { unreadCount: 120 } as SessionUser
+    const wrapper = await render('member')
+
+    expect(inboxCount(wrapper).text()).toBe('99+')
+  })
+
+  it('shows no count when nothing is unread', async () => {
+    useSessionStore().user = { unreadCount: 0 } as SessionUser
+    const wrapper = await render('member')
+
+    expect(inboxCount(wrapper).exists()).toBe(false)
   })
 })

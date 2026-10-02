@@ -87,14 +87,23 @@ interface NavItem {
   icon: typeof ListTodo
   to: string
   shortcut?: string
-  count?: number
+  count?: number | string
   tour?: string
 }
 
-const workspace: NavItem[] = [
-  { label: 'My work', icon: ListTodo, to: '/', shortcut: 'g then m' },
-  { label: 'Inbox', icon: Inbox, to: '/inbox', count: 0 },
-]
+// The inbox counts what the notification bell counts, and like the bell says nothing at zero.
+const workspace = computed<NavItem[]>(() => {
+  const unread = session.user?.unreadCount ?? 0
+  return [
+    { label: 'My work', icon: ListTodo, to: '/', shortcut: 'g then m' },
+    {
+      label: 'Inbox',
+      icon: Inbox,
+      to: '/inbox',
+      count: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined,
+    },
+  ]
+})
 
 // Project screens name their scope in the URL. That makes a browser reload and a pasted
 // link show the same project as the rail, rather than relying on a remembered selection.
