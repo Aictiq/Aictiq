@@ -22,7 +22,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="RuleId">The automation rule that dispatched the run, or null for a person.</param>
 /// <param name="RuleName">The rule's name, or null once the rule that started this run has been deleted.</param>
 /// <param name="Kind">An implement run delivers code; a refine run rewrites the ticket.</param>
-/// <param name="SessionId">The harness session a continue run resumes; operators only.</param>
+/// <param name="SessionId">The harness session a continue run resumes, and a person can resume by hand on the runner.</param>
 /// <param name="ContinuesRunId">The failed run this one continues, or null for a fresh run.</param>
 /// <param name="ContinuedByRunId">The run that continued this one, once there is one.</param>
 /// <param name="AutoContinued">The server queued this continue run itself after a transient failure.</param>
@@ -30,6 +30,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="Superseded">The item has a newer run, so neither Continue nor Retry applies (run detail only).</param>
 /// <param name="Chain">The runs from the first failure to the last continue, oldest first (run detail only).</param>
 /// <param name="ScheduledFor">When the run may start (UTC), or null when it was queued to start right away.</param>
+/// <param name="WorkspacePath">The run's checkout on its runner, where <paramref name="SessionId"/> resumes.</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -41,7 +42,7 @@ public sealed record RunView(
     long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement,
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
-    DateTimeOffset? ScheduledFor = null);
+    DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null);
 
 /// <summary>One run of a continue chain, with what it cost on its own.</summary>
 public sealed record RunChainLink(
@@ -58,8 +59,9 @@ public sealed record DispatchRunRequest(
 ///
 /// Two visibility tiers, deliberately. Anyone who can see the item can see the run - its
 /// status, its agent, its timings, its pull request; the run <em>is</em> the item's
-/// history. The raw detail - the prompt snapshot and the failure reason - belongs to the
-/// people who operate the factory, the same audience the live log is gated to.
+/// history, and so are the session and checkout a person resumes it from on the runner. The
+/// raw detail - the prompt snapshot and the failure reason - belongs to the people who
+/// operate the factory, the same audience the live log is gated to.
 /// </summary>
 public static class RunEndpoints
 {
@@ -577,8 +579,9 @@ public static class RunEndpoints
             includeDetails ? run.FailureReason : null,
             includeDetails ? run.PromptSnapshot : null,
             run.Version, run.Kind,
-            includeDetails ? run.SessionId : null,
-            run.ContinuesRunId, null, run.AutoContinued, ScheduledFor: run.ScheduledFor);
+            run.SessionId,
+            run.ContinuesRunId, null, run.AutoContinued, ScheduledFor: run.ScheduledFor,
+            WorkspacePath: run.WorkspacePath);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

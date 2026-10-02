@@ -108,7 +108,11 @@ export async function executeRun(
     // goes stale if nobody refreshes it while the workspace is being cloned.
     const beat = async () => {
       try {
-        const { cancelRequested } = await client.runHeartbeat(run.runId, sessionId)
+        const { cancelRequested } = await client.runHeartbeat(
+          run.runId,
+          sessionId,
+          workspace?.checkout,
+        )
         if (cancelRequested) {
           event('Cancel requested; stopping the harness')
           stop('cancelled')
@@ -310,26 +314,25 @@ export async function executeRun(
   if (report?.outcome === 'failed' && report.failureReason)
     event(`Run failed: ${report.failureReason}`)
   if (report && sessionId) report.sessionId = sessionId
-  // A run that failed once its harness had a session keeps its checkout, so a continue run
-  // can resume the conversation over the agent's own edits. Successful and cancelled runs,
-  // and a session that would not resume, clean up as before.
+  // A run that ended once its harness had a session keeps its checkout - succeeded, failed or
+  // cancelled - so a continue run, or a person on this machine, can resume the conversation
+  // over the agent's own edits. A session that would not resume cleans up as before.
   const retained =
     workspace !== undefined &&
-    report?.outcome === 'failed' &&
     sessionId !== undefined &&
-    report.failureReason !== 'session-unavailable'
+    report?.failureReason !== 'session-unavailable'
   if (retained) {
     workspace!.retain(sessionId!)
-    event(`Kept the workspace so this run can be continued: ${workspace!.checkout}`)
+    if (report) report.workspacePath = workspace!.checkout
+    event(`Kept the workspace so this run's session can be resumed: ${workspace!.checkout}`)
   }
   // A beat still in flight would otherwise reach the instance after the finish, and its
   // item heartbeat with a token the finish just revoked.
   await beating
   await log.close()
   if (!retained) await workspace?.cleanup()
-  // The item's earlier failures are moot once a run on it succeeds; past that, a runner keeps
-  // a few workspaces for a day.
-  await prune(report?.outcome === 'succeeded' ? { item: run } : {})
+  // Kept workspaces stay their five days; this only sweeps the expired ones.
+  await prune({})
   if (revoked) throw revoked
   if (!report) return null
   return (await sendFinish(client, run, report, local)) ? report : null

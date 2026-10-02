@@ -50,6 +50,8 @@ public sealed class Run : TenantEntity
 
     public const int MaxSessionIdLength = 200;
 
+    public const int MaxWorkspacePathLength = 1024;
+
     /// <summary>How many times one failed run - and the runs continuing it - is continued automatically.</summary>
     public const int MaxAutoContinues = 2;
 
@@ -157,6 +159,13 @@ public sealed class Run : TenantEntity
     /// whose machine holds the conversation and the kept checkout.
     /// </summary>
     public string? SessionId { get; set; }
+
+    /// <summary>
+    /// The absolute path of the run's checkout on its runner, reported with the session so a
+    /// person can resume the session there by hand. The runner keeps it for a few days after
+    /// the run; the server cannot tell when it is gone.
+    /// </summary>
+    public string? WorkspacePath { get; set; }
 
     /// <summary>The failed run this one picks up from, or null for a run that starts fresh.</summary>
     public Guid? ContinuesRunId { get; init; }

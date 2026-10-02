@@ -111,6 +111,8 @@ export interface FinishReport {
   failureReason?: string | null
   /** The harness session, so the run can be continued later. */
   sessionId?: string | null
+  /** The absolute checkout the session lives in, kept for a person to resume it by hand. */
+  workspacePath?: string | null
 }
 
 /** One stdout line of a harness, as the adapter reads it. */
