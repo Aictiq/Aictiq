@@ -158,8 +158,9 @@ public static partial class RunProtocolEndpoints
             //
             // The lock lives inside this transaction, so the row stays ours until the
             // assignment is saved; SKIP LOCKED hands a second poller the next run instead
-            // of waiting on this one. Raw SQL because EF would bury the locking clause in
-            // a subquery, where Postgres ignores it.
+            // of waiting on this one. A scheduled run is nobody's until its time comes, and is
+            // then ordered by that time rather than by when it was asked for. Raw SQL because
+            // EF would bury the locking clause in a subquery, where Postgres ignores it.
             Guid? claimedRunId;
             await using (var command = ((NpgsqlConnection)db.Database.GetDbConnection()).CreateCommand())
             {
@@ -167,17 +168,19 @@ public static partial class RunProtocolEndpoints
                 command.CommandText = """
                     SELECT id FROM automation.runs
                     WHERE organization_id = @organizationId AND status = 0 AND harness = ANY(@harnesses)
+                      AND (scheduled_for IS NULL OR scheduled_for <= @now)
                       AND (requested_runner_id IS NULL OR requested_runner_id = @runnerId
                            OR NOT EXISTS (SELECT 1 FROM automation.runners r
                                           WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
                       AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
-                    ORDER BY queued_at
+                    ORDER BY COALESCE(scheduled_for, queued_at)
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                     """;
                 command.Parameters.AddWithValue("organizationId", organizationId);
                 command.Parameters.AddWithValue("harnesses", harnesses);
                 command.Parameters.AddWithValue("runnerId", runnerId);
+                command.Parameters.AddWithValue("now", clock.GetUtcNow());
                 claimedRunId = await command.ExecuteScalarAsync(ct) as Guid?;
             }
 

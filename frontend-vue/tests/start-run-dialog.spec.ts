@@ -374,4 +374,73 @@ describe('StartRunDialog', () => {
     expect(wrapper.text()).toContain('This item already has a live claim or run.')
     expect(wrapper.emitted('dispatched')).toBeUndefined()
   })
+  describe('Start later', () => {
+    const routes = {
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2' },
+      '/members': members,
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 9, 2, 14, 30))
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('starts now by default and prefills now + 6 h, in local time, when turned on', async () => {
+      stubFetch(routes)
+      const wrapper = await mountDialog()
+      expect(wrapper.find('[data-testid="start-run-start-at"]').exists()).toBe(false)
+
+      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
+
+      const input = wrapper.find('[data-testid="start-run-start-at"]')
+      expect((input.element as HTMLInputElement).value).toBe('2026-10-02T20:30')
+      expect(wrapper.find('[data-testid="start-run-timezone"]').text()).toBe(
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      )
+    })
+
+    it('sends the chosen local time as UTC', async () => {
+      const fetchMock = stubFetch({
+        ...routes,
+        '/items/PROJ-1/runs': { id: 'r-1', scheduledFor: '2026-10-02T20:00:00Z' },
+      })
+      const wrapper = await mountDialog()
+      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
+      await wrapper.find('[data-testid="start-run-start-at"]').setValue('2026-10-02T22:00')
+      await wrapper.find('form#start-run').trigger('submit.prevent')
+      await flushPromises()
+
+      const [, init] = fetchMock.mock.calls.find(([input]) =>
+        String(input).endsWith('/items/PROJ-1/runs'),
+      )!
+      expect(JSON.parse(String(init?.body))).toEqual({
+        playbookId: 'p1',
+        agentId: 'a2',
+        runnerId: null,
+        scheduledFor: new Date(2026, 9, 2, 22, 0).toISOString(),
+      })
+      expect(wrapper.emitted('dispatched')).toHaveLength(1)
+    })
+
+    it('refuses a time in the past without asking the server', async () => {
+      const fetchMock = stubFetch(routes)
+      const wrapper = await mountDialog()
+      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
+      await wrapper.find('[data-testid="start-run-start-at"]').setValue('2026-10-02T09:00')
+      await wrapper.find('form#start-run').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Choose a start time in the future.')
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).endsWith('/items/PROJ-1/runs')),
+      ).toBe(false)
+      expect(wrapper.emitted('dispatched')).toBeUndefined()
+    })
+  })
 })

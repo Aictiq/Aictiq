@@ -220,7 +220,8 @@ public sealed class RunSweeper(
     /// <summary>
     /// Fails the continue runs still queued for a runner that cannot take them: deleted,
     /// disabled, or not seen for longer than <see cref="AutomationOptions.RunnerLostAfterMinutes"/>
-    /// past its online window. No other runner has the session, so waiting helps nobody;
+    /// past its online window. A scheduled run's wait counts from its start time, not from
+    /// when it was queued. No other runner has the session, so waiting helps nobody;
     /// <c>session-unavailable</c> tells the person to retry with a fresh run.
     /// </summary>
     private async Task SweepStrandedContinuesAsync(IServiceProvider services, CancellationToken cancellationToken)
@@ -233,8 +234,8 @@ public sealed class RunSweeper(
             .Where(run => run.Status == RunStatus.Queued && run.ContinuesRunId != null)
             .Where(run => !db.Runners.Any(runner => runner.Id == run.RequestedRunnerId
                 && runner.DisabledAt == null && runner.DeletedAt == null
-                && (run.QueuedAt >= queuedBefore || runner.LastSeenAt >= seenBefore)))
-            .OrderBy(run => run.QueuedAt)
+                && ((run.ScheduledFor ?? run.QueuedAt) >= queuedBefore || runner.LastSeenAt >= seenBefore)))
+            .OrderBy(run => run.ScheduledFor ?? run.QueuedAt)
             .Take(BatchSize)
             .Select(run => run.Id)
             .ToListAsync(cancellationToken);

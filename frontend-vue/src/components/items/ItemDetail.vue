@@ -65,7 +65,7 @@ import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
-import { isLiveRun, runDuration, runRequesterLabel, startRunButton } from '@/lib/runs'
+import { isLiveRun, runDuration, runRequesterLabel, runScheduledLabel, startRunButton } from '@/lib/runs'
 import { toApiError } from '@/utils/api'
 
 /**
@@ -982,6 +982,12 @@ function logged(updated: TimeTrackingItem) {
           >
             <RunStatusBadge :status="entry.status" />
             <span>{{ entry.agentName ?? 'Agent' }}</span>
+            <span
+              v-if="runScheduledLabel(entry)"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-scheduled"
+              >{{ runScheduledLabel(entry) }}</span
+            >
             <span class="text-muted-foreground truncate text-xs">
               {{ entry.playbookName ?? '' }}
             </span>

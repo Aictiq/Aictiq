@@ -7,6 +7,7 @@ import { avatarUrl } from '@/api/profile'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { Button } from '@/components/ui/button'
 import { canRelease, claimStatus, since, staleAfterMinutes } from '@/lib/claims'
+import { formatScheduledTime, isWaitingForSchedule } from '@/lib/runs'
 import { cn } from '@/lib/utils'
 
 /**
@@ -32,7 +33,12 @@ const props = withDefaults(
     projectRole?: string | null
     releasing?: boolean
     /** The live run holding this claim, when there is one. */
-    liveRun?: { status?: string; runnerName: string | null; startedAt: string | null } | null
+    liveRun?: {
+      status?: string
+      runnerName: string | null
+      startedAt: string | null
+      scheduledFor?: string | null
+    } | null
     /** Where "View log" goes - offered to factory operators only. */
     runLogTo?: string | null
     class?: string
@@ -55,6 +61,13 @@ const emit = defineEmits<{ release: [] }>()
 const status = computed(() => claimStatus(props))
 const name = computed(() => props.holder?.displayName ?? 'someone')
 const isAgent = computed(() => props.holder?.isAgent ?? false)
+/** The local start time of a queued run that is still waiting for it. */
+const scheduled = computed(() =>
+  props.liveRun?.status === 'queued' &&
+  isWaitingForSchedule({ status: 'queued', scheduledFor: props.liveRun.scheduledFor })
+    ? formatScheduledTime(props.liveRun.scheduledFor!)
+    : null,
+)
 const heartbeat = computed(() => since(props.claimHeartbeatAt ?? props.claimedAt))
 const mayRelease = computed(
   () =>
@@ -93,7 +106,10 @@ const mayRelease = computed(
     </span>
 
     <template v-if="liveRun">
-      <span v-if="liveRun.status === 'queued'" class="text-muted-foreground">
+      <span v-if="scheduled" class="text-muted-foreground" data-testid="claim-banner-scheduled">
+        has a run scheduled for {{ scheduled }}
+      </span>
+      <span v-else-if="liveRun.status === 'queued'" class="text-muted-foreground">
         has a run queued · waiting for a runner
       </span>
       <span v-else class="text-muted-foreground">

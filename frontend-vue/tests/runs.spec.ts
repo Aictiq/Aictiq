@@ -29,6 +29,7 @@ import {
   runDuration,
   runRequesterLabel,
   runSuccessRate,
+  runScheduledLabel,
   runWaitingMessage,
   startRunButton,
   TRUNCATED_SEQ,
@@ -313,6 +314,52 @@ describe('lib/runs', () => {
     it('says what a queued run is waiting for, and nothing once it is not', () => {
       expect(runWaitingMessage({ status: 'queued', harness: 'claude' })).toContain('claude')
       expect(runWaitingMessage({ status: 'running', harness: 'claude' })).toBeNull()
+    })
+
+    it('names the start time while a scheduled run waits for it', () => {
+      const now = new Date('2026-10-02T12:00:00Z')
+      const run = {
+        status: 'queued' as const,
+        harness: 'claude' as const,
+        scheduledFor: '2026-10-02T20:00:00Z',
+      }
+      expect(runWaitingMessage(run, now)).toMatch(
+        /^Scheduled for .+\. A runner that offers claude picks it up after that\.$/,
+      )
+      // Once the time has passed it waits like any queued run.
+      expect(runWaitingMessage(run, new Date('2026-10-02T21:00:00Z'))).toContain(
+        'Waiting for a runner',
+      )
+    })
+  })
+
+  describe('runScheduledLabel', () => {
+    const now = new Date('2026-10-02T12:00:00Z')
+
+    it('shows the local start time of a queued run that is still waiting', () => {
+      const label = runScheduledLabel(
+        { status: 'queued', scheduledFor: '2026-10-02T20:00:00Z' },
+        now,
+      )
+      expect(label).toBe(
+        `Scheduled for ${new Date('2026-10-02T20:00:00Z').toLocaleString(undefined, {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`,
+      )
+    })
+
+    it('says nothing for a run that starts now, has started, or whose time has come', () => {
+      expect(runScheduledLabel({ status: 'queued', scheduledFor: null }, now)).toBeNull()
+      expect(
+        runScheduledLabel({ status: 'assigned', scheduledFor: '2026-10-02T20:00:00Z' }, now),
+      ).toBeNull()
+      expect(
+        runScheduledLabel({ status: 'queued', scheduledFor: '2026-10-02T11:00:00Z' }, now),
+      ).toBeNull()
     })
   })
 

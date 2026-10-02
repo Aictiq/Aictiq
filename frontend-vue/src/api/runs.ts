@@ -54,6 +54,8 @@ export interface Run {
   playbookRevisionId: string | null
   maxMinutes: number
   queuedAt: string
+  /** When the run may start (UTC); null when it was queued to start as soon as a runner is free. */
+  scheduledFor?: string | null
   assignedAt: string | null
   startedAt: string | null
   finishedAt: string | null
@@ -133,6 +135,8 @@ export interface DispatchRunBody {
   agentId?: string | null
   /** Only this runner takes the run. Null lets any free runner take it. */
   runnerId?: string | null
+  /** When the run may start, as an ISO time with its offset. Null starts it now; a past time is refused. */
+  scheduledFor?: string | null
 }
 
 const runsBase = (slug: string) => `/orgs/${slug}/runs`

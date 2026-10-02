@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import ClaimBanner from '@/components/common/ClaimBanner.vue'
 import ClaimGlyph from '@/components/common/ClaimGlyph.vue'
 import { canRelease, claimStatus, since, staleAfterMinutes } from '@/lib/claims'
+import { formatScheduledTime } from '@/lib/runs'
 
 /**
  * A claim is a lease, not an assignment, and the difference is invisible in every other
@@ -126,6 +127,18 @@ describe('ClaimBanner', () => {
 
       expect(wrapper.text()).toContain('has a run queued')
       expect(wrapper.text()).not.toContain('is running')
+    })
+
+    it('names the start time of a scheduled run that is still waiting for it', () => {
+      const scheduledFor = new Date(Date.now() + 6 * 3_600_000).toISOString()
+      const wrapper = render({
+        liveRun: { status: 'queued', runnerName: null, startedAt: null, scheduledFor },
+      })
+
+      expect(wrapper.find('[data-testid="claim-banner-scheduled"]').text()).toBe(
+        `has a run scheduled for ${formatScheduledTime(scheduledFor)}`,
+      )
+      expect(wrapper.text()).not.toContain('waiting for a runner')
     })
 
     it('offers no Release: a run ends by being cancelled, not by breaking its claim', () => {

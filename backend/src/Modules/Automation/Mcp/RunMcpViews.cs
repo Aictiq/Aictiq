@@ -88,7 +88,7 @@ internal static class RunMcpViews
             run.RequestedBy, requestedByName = names.RequestedBy,
             run.RuleId, ruleName = names.Rule,
             run.Harness, run.MaxMinutes,
-            run.QueuedAt, run.AssignedAt, run.StartedAt, run.FinishedAt, run.LastHeartbeatAt,
+            run.QueuedAt, run.ScheduledFor, run.AssignedAt, run.StartedAt, run.FinishedAt, run.LastHeartbeatAt,
             cancelRequested = run.CancelRequestedAt is not null,
             run.OutcomeSummary, run.PullRequestUrl, run.ExitCode, run.CostUsd, run.InputTokens, run.OutputTokens,
             failureReason = visible.IsOperator ? run.FailureReason : null,

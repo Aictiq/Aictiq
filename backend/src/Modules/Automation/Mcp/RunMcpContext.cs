@@ -30,6 +30,7 @@ public sealed class RunMcpContext(
         text.AppendLine($"- Requested by: {names.RequestedBy ?? run.RequestedBy}");
         text.AppendLine($"- Runner: {names.Runner ?? "(none yet)"}");
         text.AppendLine($"- Queued: {run.QueuedAt:O}");
+        if (run.ScheduledFor is { } scheduled) text.AppendLine($"- Scheduled for: {scheduled:O}");
         if (run.StartedAt is { } started) text.AppendLine($"- Started: {started:O}");
         if (run.FinishedAt is { } finished) text.AppendLine($"- Finished: {finished:O}");
         if (run.CancelRequestedAt is not null) text.AppendLine("- Cancel requested: yes");
