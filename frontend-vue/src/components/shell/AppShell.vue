@@ -148,7 +148,7 @@ useCommands(() => [
           group: 'Items',
           label: `Create ticket in ${projects.current.key}`,
           icon: '+',
-          keywords: 'new item story bug epic refine ai',
+          keywords: 'new item story bug epic',
           run: () => createTicket.open(projects.current!.key),
         },
       ]

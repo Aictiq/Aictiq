@@ -446,18 +446,18 @@ when every template is deleted. Members, guests and archived projects see the li
 
 Then, from **Create ticket** on the Items, Backlog or Board page (or the command palette):
 
-1. Choose the type, describe the ticket in your own words, and paste or drop screenshots and
-   files into the description. A title is optional.
-2. Choose **Refine ticket**. Aictiq files the item in its initial state and opens it; a
-   panel above the description follows the run.
+1. Choose the type, enter a title, describe the ticket in your own words, and paste or drop
+   screenshots and files into the description.
+2. Choose **Create**. Aictiq files the item exactly as written and opens its details. To
+   refine it, choose **Refine ticket** there; a panel above the description follows the run.
 3. When the agent needs input, the panel lists its questions. Answer the ones you can and
    choose **Answer and refine**: the answers travel into the next run's prompt.
 4. When the ticket is ready, review it, edit anything, and choose **Confirm ticket**. The
    item moves to the configured state. **Ask for changes** sends a note back for another pass.
 
-**Create** still files a ticket exactly as written, and any existing item can be refined from
-its own page. A refine run claims the item without moving or assigning it, works in an isolated
-clone of the default branch (so the runner checkout needs an `origin` remote, as for direct
+Refinement is available only from an existing ticket's details. A refine run claims the item
+without moving or assigning it, works in an isolated clone of the default branch (so the
+runner checkout needs an `origin` remote, as for direct
 delivery), and leaves no item branch behind for the implement run that may follow. When it
 ends, Aictiq releases the claim and leaves the item where it is, whatever the playbook's
 success and failure states say. A run that ends without calling `submit_refinement` marks the
