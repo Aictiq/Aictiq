@@ -170,7 +170,7 @@ async function createPlaybook() {
         </Button>
       </div>
       <p class="text-muted-foreground text-xs">
-        Choosing one adds <strong>Refine ticket</strong> to ticket creation. Its instructions say
+        Choosing one adds <strong>Refine ticket</strong> to ticket details. Its instructions say
         how each item type is written up; a refine run reads the code but never changes it.
       </p>
     </div>
