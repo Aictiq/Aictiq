@@ -74,6 +74,7 @@ public static class WorkItemEndpoints
         // No {projectKey} here, so RequireItemProjectWritable stands in for RequireProjectWritable.
         items.MapPatch("/{itemKey}", Update).RequireOrgRole(OrgRole.Member).RequireItemProjectWritable().RequireScope(Scopes.Write);
         items.MapDelete("/{itemKey}", Delete).RequireOrgRole(OrgRole.Member).RequireItemProjectWritable().RequireScope(Scopes.Write);
+        items.MapPost("/{itemKey}/duplicate", Duplicate).RequireOrgRole(OrgRole.Member).RequireItemProjectWritable().RequireScope(Scopes.Write);
         items.MapGet("/{itemKey}/delete-preview", DeletePreview).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Read);
         items.MapPost("/{itemKey}/transition", Transition).RequireOrgRole(OrgRole.Member).RequireItemProjectWritable().RequireScope(Scopes.Write);
         items.MapPost("/{itemKey}/claim", Claim).RequireOrgRole(OrgRole.Member).RequireItemProjectWritable().RequireScope(Scopes.Write);
@@ -216,6 +217,43 @@ public static class WorkItemEndpoints
         item.Changed(user.UserId!, "created");
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return Results.Created($"/api/v1/orgs/{http.Request.RouteValues["orgSlug"]}/items/{item.Key}", (await ViewsAsync(db, user.UserId!, [item], await StatesAsync(db, [item], ct), ct))[0]);
+    }
+
+    /// <summary>
+    /// Copies an item and its direct children in one transaction. The copy keeps what
+    /// describes the work (type, description, priority, labels) and where it sits (parent,
+    /// team), and starts over on everything else: a new key, the initial workflow state, no
+    /// assignee, sprint, estimates, comments or history. Its title is prefixed "Copy of ".
+    /// </summary>
+    private static async Task<IResult> Duplicate(string itemKey, HttpContext http, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, Aictiq.SharedKernel.Tenancy.ICurrentTenant tenant, TimeProvider clock, CancellationToken ct)
+    {
+        var source = await FindWritable(db, access, user, itemKey, ct); if (source is null) return Results.NotFound();
+        await WorkflowEndpoints.EnsureDefaultAsync(db, tenant.OrganizationId!.Value, source.ProjectId, ct);
+        var defaultWorkflowId = await db.Workflows.Where(x => x.ProjectId == source.ProjectId && x.IsDefault).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (defaultWorkflowId == Guid.Empty) return Results.Problem("The project workflow is still being initialized.", statusCode: StatusCodes.Status409Conflict);
+        var initialState = await db.WorkflowStates.Where(x => x.WorkflowId == defaultWorkflowId && x.IsInitial).Select(x => x.Id).SingleAsync(ct);
+        var children = await db.Items.AsNoTracking().Where(x => x.ParentId == source.Id).OrderBy(x => x.Rank).ThenBy(x => x.Number).ToListAsync(ct);
+        var sourceIds = children.Select(x => x.Id).Append(source.Id).ToArray();
+        var labels = (await db.ItemLabels.AsNoTracking().Where(x => sourceIds.Contains(x.ItemId)).Select(x => new { x.ItemId, x.LabelId }).ToListAsync(ct)).ToLookup(x => x.ItemId, x => x.LabelId);
+        const string prefix = "Copy of ";
+        var title = (prefix + source.Title).Length <= 500 ? prefix + source.Title : (prefix + source.Title)[..500].TrimEnd();
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var now = clock.GetUtcNow(); var rank = await ItemRanking.AfterLastAsync(db, source.ProjectId, ct);
+        async Task<WorkItem> CopyAsync(WorkItem from, string copyTitle, Guid? parentId)
+        {
+            var copy = new WorkItem { OrganizationId = from.OrganizationId, ProjectId = from.ProjectId, ProjectKey = from.ProjectKey, Number = await NextNumberAsync(db, from.OrganizationId, from.ProjectId, ct), Type = from.Type, Title = copyTitle, DescriptionMarkdown = from.DescriptionMarkdown, DescriptionHtml = from.DescriptionHtml, StateId = initialState, Priority = from.Priority, TeamId = from.TeamId, ParentId = parentId, Rank = rank, CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
+            rank = ItemRanking.Between(rank, null);
+            db.Items.Add(copy);
+            foreach (var labelId in labels[from.Id].Distinct())
+                db.ItemLabels.Add(new ItemLabel { OrganizationId = copy.OrganizationId, ItemId = copy.Id, LabelId = labelId, AddedAt = now, AddedBy = user.UserId! });
+            await ItemWatcherRules.AddAsync(db, copy, user.UserId, ItemWatchReason.Author, now, ct);
+            copy.Changed(user.UserId!, "created");
+            return copy;
+        }
+        var duplicate = await CopyAsync(source, title, source.ParentId);
+        foreach (var child in children) await CopyAsync(child, child.Title, duplicate.Id);
+        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        return Results.Created($"/api/v1/orgs/{http.Request.RouteValues["orgSlug"]}/items/{duplicate.Key}", (await ViewsAsync(db, user.UserId!, [duplicate], await StatesAsync(db, [duplicate], ct), ct))[0]);
     }
 
     /// <summary>
