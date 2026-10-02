@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Workers;
 using Aictiq.SharedKernel;
+using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Paging;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -125,6 +126,48 @@ public sealed class RunContinuationTests(PostgresFixture postgres, GarageFixture
         var older = await RunAsync(run.Id);
         Assert.True(older.Superseded);
         Assert.True((await RunAsync(retry.Id)).Continuable);
+    }
+
+    [Fact]
+    public async Task run_viewers_see_the_session_and_checkout_to_resume_by_hand_but_not_the_operator_details()
+    {
+        var run = await DispatchAsync(ItemKey);
+        using var runner = RunnerClient(Runner.Secret);
+        await ClaimAsync(runner);
+        Assert.Equal(HttpStatusCode.NoContent, (await StartedAsync(runner, run.Id)).StatusCode);
+
+        // The heartbeat carries both as soon as the harness names its session.
+        const string checkout = "/home/runner/.local/share/aictiq/runner/r 1/repo";
+        var beat = await runner.PostAsJsonAsync($"/api/v1/runner/runs/{run.Id}/heartbeat",
+            new RunnerRunHeartbeatRequest("sess-1", checkout), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.OK, beat.StatusCode);
+        var running = await RunAsync(run.Id);
+        Assert.Equal(("sess-1", checkout), (running.SessionId, running.WorkspacePath));
+
+        // A path that could not be a checkout never reaches the copied command.
+        var relative = await runner.PostAsJsonAsync($"/api/v1/runner/runs/{run.Id}/finish",
+            new RunnerFinishRequest("succeeded", 0, "done", null, null, null, null, null, "sess-1", "repo\n; rm -rf ~"),
+            ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, relative.StatusCode);
+
+        var finish = await runner.PostAsJsonAsync($"/api/v1/runner/runs/{run.Id}/finish",
+            new RunnerFinishRequest("failed", 1, "stopped", null, null, null, null, "harness-exit-1", "sess-1", checkout),
+            ApiTestContext.Json, Ct);
+        Assert.True(finish.IsSuccessStatusCode, await finish.Content.ReadAsStringAsync(Ct));
+
+        var memberAuth = await Context.RegisterAsync($"viewer-{Guid.NewGuid():N}@test.local");
+        using var member = Context.ClientFor(memberAuth);
+        await AddMemberAsync(memberAuth.User.Id, OrgRole.Member, false);
+
+        var seen = (await member.GetFromJsonAsync<RunView>($"/api/v1/orgs/{Slug}/runs/{run.Id}", ApiTestContext.Json, Ct))!;
+        Assert.Equal(("sess-1", checkout), (seen.SessionId, seen.WorkspacePath));
+        Assert.Null(seen.FailureReason);
+        Assert.Null(seen.PromptSnapshot);
+
+        var listed = (await member.GetFromJsonAsync<PagedResult<RunView>>(
+            $"/api/v1/orgs/{Slug}/items/{ItemKey}/runs", ApiTestContext.Json, Ct))!.Items.Single();
+        Assert.Equal(("sess-1", checkout), (listed.SessionId, listed.WorkspacePath));
+        Assert.Null(listed.FailureReason);
     }
 
     [Fact]

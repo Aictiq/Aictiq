@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
-import { Bot, Check, Copy, GitBranch, Reply, Save, Trash2, X } from '@lucide/vue'
+import { Bot, Check, Copy, GitBranch, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
   attachmentAccept,
   attachmentUrl,
@@ -66,6 +66,7 @@ import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 import { isLiveRun, runDuration, runRequesterLabel, runScheduledLabel, startRunButton } from '@/lib/runs'
+import { resumeCommand } from '@/lib/resumeCommand'
 import { toApiError } from '@/utils/api'
 
 /**
@@ -743,6 +744,20 @@ function itemUrl() {
   return new URL(href, window.location.origin).toString()
 }
 const copyLink = () => copyWithToast(itemUrl(), 'Link copied')
+// Nothing stops Aictiq continuing the same run meanwhile; the warning travels with the command.
+const resumeConflictWarning =
+  'Continuing by hand while Aictiq continues this run (Continue or an automatic continue) writes to the same session and checkout.'
+async function copyResumeCommand(command: string, runnerName: string | null) {
+  try {
+    await copy(command)
+    toast.success(
+      `Resume command copied. Run it on ${runnerName ?? 'the run’s runner'}.`,
+      resumeConflictWarning,
+    )
+  } catch (error) {
+    toast.error(error, 'Could not copy to the clipboard.')
+  }
+}
 // The key's own copy button answers with a check for a moment, so a click that put the
 // key on the clipboard looks different from one that missed.
 const keyCopied = ref(false)
@@ -1008,6 +1023,24 @@ function logged(updated: TimeTrackingItem) {
                 class="text-muted-foreground text-xs"
                 >{{ runDuration(entry) }}</span
               >
+              <template v-if="resumeCommand(entry)">
+                <span
+                  v-if="entry.runnerName"
+                  class="text-muted-foreground text-xs"
+                  data-testid="run-resume-runner"
+                  >on {{ entry.runnerName }}</span
+                >
+                <button
+                  type="button"
+                  class="text-primary inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                  :title="`Copy a terminal command that resumes this run's session on its runner. ${resumeConflictWarning}`"
+                  data-testid="run-resume-command"
+                  @click="copyResumeCommand(resumeCommand(entry)!, entry.runnerName)"
+                >
+                  <SquareTerminal class="size-3.5" aria-hidden="true" />
+                  Copy resume command
+                </button>
+              </template>
               <RouterLink
                 v-if="mayOpenRunLog"
                 :to="factoryRunPath(props.slug, entry.id)"

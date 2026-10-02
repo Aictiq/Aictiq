@@ -68,15 +68,19 @@ export interface Workspace {
   /** removes the worktree (git worktree remove --force + prune in the source repo) or clone, then the run dir; no-op when keep; never throws */
   cleanup(): Promise<void>
   /**
-   * Leaves the workspace in place for a later continue run instead of cleaning it up, with a
-   * `kept.json` beside the checkout that the retention sweep reads. Never throws.
+   * Leaves the workspace in place for a later continue run, or a person resuming the session by
+   * hand, instead of cleaning it up, with a `kept.json` beside the checkout that the retention
+   * sweep reads. Never throws.
    */
   retain(sessionId: string): void
 }
 
-/** How long a failed run's workspace waits to be continued, and how many a runner holds. */
-export const KeptWorkspaceMaxAgeMs = 24 * 60 * 60 * 1000
-export const KeptWorkspaceMax = 5
+/**
+ * How long a finished run's workspace stays to be continued or resumed by hand, and how many a
+ * runner holds. The count is a disk backstop well above a normal runner's five days of runs.
+ */
+export const KeptWorkspaceMaxAgeMs = 5 * 24 * 60 * 60 * 1000
+export const KeptWorkspaceMax = 100
 
 /** `kept.json`: what the retention sweep needs to remove a kept workspace without its run. */
 export interface KeptWorkspace {
@@ -250,8 +254,9 @@ export async function reattachWorkspace(
 
 /**
  * Removes kept workspaces that are past their time, beyond the runner's limit (oldest first),
- * or - when `item` is given - kept for that item, whose next run made them stale. `except`
- * spares the workspaces a run is working in right now. Never throws.
+ * or - when `item` is given - worktrees kept for that item, which hold the branch its next run
+ * needs. Clones hold nothing another run needs and stay. `except` spares the workspaces a run
+ * is working in right now. Never throws.
  */
 export async function pruneKeptWorkspaces(
   root: string,
@@ -287,6 +292,7 @@ export async function pruneKeptWorkspaces(
     const age = now - Date.parse(entry.kept.keptAt)
     const stale =
       options.item !== undefined &&
+      entry.kept.source !== null &&
       entry.kept.organizationSlug === options.item.organizationSlug &&
       entry.kept.itemKey === options.item.itemKey
     // `except` workspaces are in use and do not count against the limit.

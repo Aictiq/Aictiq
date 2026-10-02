@@ -330,19 +330,31 @@ describe('executeRun', () => {
       options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); process.exit(3)`, [])
       const report = await executeRun(claimedRun(), options)
 
-      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-1' })
-      expect(instance.to('/finish')[0]!.body).toMatchObject({ sessionId: 'sess-1' })
+      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
+      expect(instance.to('/finish')[0]!.body).toMatchObject({ sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
       expect(calls).toMatchObject({ retained: ['sess-1'], cleaned: 0 })
     })
 
-    it('cleans up a successful run and the item’s kept workspaces', async () => {
+    it('keeps the workspace of a successful run with a session, and leaves the item’s other kept workspaces', async () => {
       const calls = tracked()
       options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); console.log('RESULT ok')`, [])
-      await executeRun(claimedRun(), options)
+      const report = await executeRun(claimedRun(), options)
 
-      expect(calls.retained).toEqual([])
-      expect(calls.cleaned).toBe(1)
-      expect(calls.pruned).toContainEqual({ organizationSlug: 'acme', itemKey: 'ACME-42' })
+      expect(report).toMatchObject({ outcome: 'succeeded', sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
+      expect(calls).toMatchObject({ retained: ['sess-1'], cleaned: 0 })
+      // The item's worktree is released before provisioning; after the run only expiry sweeps.
+      expect(calls.pruned).toEqual([{ organizationSlug: 'acme', itemKey: 'ACME-42' }, null])
+    })
+
+    it('sends the checkout with the session on the run heartbeat', async () => {
+      tracked()
+      options.adapters.fake = sessionAdapter(
+        `console.log('SESSION sess-1'); setTimeout(() => console.log('RESULT ok'), 300)`,
+        [],
+      )
+      await executeRun(claimedRun(), options)
+      const beats = instance.to('/runner/runs/' + claimedRun().runId + '/heartbeat')
+      expect(beats.map((beat) => beat.body)).toContainEqual({ sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
     })
 
     it('cleans up a failed run without a session: there is nothing to continue', async () => {
@@ -361,7 +373,12 @@ describe('executeRun', () => {
       }
       options.reattach = async (run, prompt) => {
         reattached = run.resume?.continuesRunId
-        return { ...stubWorkspace(), prompt, retain: () => {}, cleanup: async () => { calls.cleaned++ } }
+        return {
+          ...stubWorkspace(),
+          prompt,
+          retain: (id) => calls.retained.push(id),
+          cleanup: async () => { calls.cleaned++ },
+        }
       }
       options.adapters.fake = sessionAdapter(
         `let p = ''; process.stdin.on('data', (d) => (p += d)).on('end', () => { console.log('got ' + p); console.log('RESULT ok') })`,
@@ -378,7 +395,8 @@ describe('executeRun', () => {
       expect(contexts[0]!.prompt).toContain('Continue where you stopped')
       expect(contexts[0]!.prompt).toContain('harness-transient')
       expect(logLines().map((c) => c.text)).toContain('Continuing run run-0 (session sess-0)')
-      expect(calls.cleaned).toBe(1)
+      // Kept again, so the finished session can still be resumed by hand.
+      expect(calls).toMatchObject({ retained: ['sess-0'], cleaned: 0 })
     })
 
     it('keeps the workspace of a resumed run that fails before the harness names its session', async () => {

@@ -74,8 +74,10 @@ export interface Run {
   version: number
   /** An implement run delivers code; a refine run rewrites the ticket. */
   kind?: 'implement' | 'refine'
-  /** The harness session a continue run resumes. Operators only, single-run read only. */
+  /** The harness session a continue run resumes, and a person can resume by hand on the runner. */
   sessionId?: string | null
+  /** The run's checkout on its runner, where `sessionId` resumes. Null for runs from before runners reported it. */
+  workspacePath?: string | null
   /** The failed run this one continues; null for a run that started fresh. */
   continuesRunId?: string | null
   /** The run that continued this one, once there is one. */

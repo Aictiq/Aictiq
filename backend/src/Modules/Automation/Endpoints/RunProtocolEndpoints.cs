@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
 using Aictiq.Modules.Automation.Auth;
 using Aictiq.Modules.Automation.Domain;
 using Aictiq.SharedKernel;
@@ -35,7 +36,8 @@ public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, G
 public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
 
 /// <param name="SessionId">The harness session, sent once the runner knows it, so a run the sweeper ends can still be continued.</param>
-public sealed record RunnerRunHeartbeatRequest(string? SessionId);
+/// <param name="WorkspacePath">The absolute path of the run's checkout on the runner, sent with the session.</param>
+public sealed record RunnerRunHeartbeatRequest(string? SessionId, string? WorkspacePath = null);
 
 /// <param name="Source"><c>github</c> when the project has a binding, <c>local</c> when the runner is expected to find the working copy itself.</param>
 public sealed record RunRepoView(string Source, string? RepoFullName, string? CloneToken, string? LocalPathHint);
@@ -46,7 +48,8 @@ public sealed record RunnerLogRequest(IReadOnlyList<RunnerLogChunk>? Chunks);
 public sealed record RunnerLogChunk(int Seq, RunLogStream Stream, string? Text, DateTimeOffset? At);
 
 public sealed record RunnerFinishRequest(string? Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
-    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null);
+    decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null,
+    string? WorkspacePath = null);
 
 /// <summary>
 /// The half of the runner protocol that concerns runs: claim, release, started, log,
@@ -496,11 +499,14 @@ public static partial class RunProtocolEndpoints
         {
             sessionId = null;
         }
+
+        var workspacePath = WorkspacePath(request?.WorkspacePath);
         // One conditional UPDATE rather than a tracked save: a heartbeat must never lose a
         // version race to a person's cancel, and the answer (cancel requested?) is read
         // from the row as this very statement left it.
         var beat = await db.Database.SqlQuery<bool>($"""
-            UPDATE automation.runs SET last_heartbeat_at = {now}, session_id = COALESCE({sessionId}, session_id)
+            UPDATE automation.runs SET last_heartbeat_at = {now}, session_id = COALESCE({sessionId}, session_id),
+                workspace_path = COALESCE({workspacePath}, workspace_path)
             WHERE id = {runId} AND runner_id = {runnerId} AND status < 3
             RETURNING cancel_requested_at IS NOT NULL AS "Value"
             """).ToListAsync(ct);
@@ -576,6 +582,7 @@ public static partial class RunProtocolEndpoints
         run.OutputTokens = request.OutputTokens;
         run.FailureReason = failureReason;
         run.SessionId = Blank(request.SessionId) ?? run.SessionId;
+        run.WorkspacePath = WorkspacePath(request.WorkspacePath) ?? run.WorkspacePath;
         run.Finish(
             outcome == RunOutcomes.Succeeded ? RunStatus.Succeeded
                 : outcome == RunOutcomes.Failed ? RunStatus.Failed
@@ -698,6 +705,11 @@ public static partial class RunProtocolEndpoints
             errors["sessionId"] = ["Use 200 characters or fewer."];
         }
 
+        if (Blank(request.WorkspacePath) is { } path && WorkspacePath(path) is null)
+        {
+            errors["workspacePath"] = ["An absolute path of at most 1,024 characters."];
+        }
+
         if (request.InputTokens is < 0 || request.OutputTokens is < 0)
         {
             errors["inputTokens"] = ["Token counts cannot be negative."];
@@ -707,6 +719,20 @@ public static partial class RunProtocolEndpoints
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// A checkout path worth storing: absolute (POSIX or Windows), single-line and bounded. It
+    /// ends up in a shell command a person copies, so anything else is dropped rather than kept.
+    /// </summary>
+    private static string? WorkspacePath(string? value) =>
+        value is { Length: > 0 and <= Run.MaxWorkspacePathLength }
+        && (value.StartsWith('/') || WindowsPath().IsMatch(value))
+        && !value.Any(char.IsControl)
+            ? value
+            : null;
+
+    [GeneratedRegex(@"^[A-Za-z]:[\\/]")]
+    private static partial Regex WindowsPath();
 
     private static IResult Conflict(string detail) => Results.Problem(
         title: "Conflict.", detail: detail,

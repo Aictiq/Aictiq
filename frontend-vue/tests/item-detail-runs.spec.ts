@@ -224,4 +224,38 @@ describe('ItemDetail runs and the operator line', () => {
 
     Object.assign(runs.items[0]!, original)
   })
+
+  it('lets a stakeholder copy the resume command of a recent run with a kept checkout', async () => {
+    const original = { ...runs.items[0]! }
+    Object.assign(runs.items[0]!, {
+      runnerName: 'build-box',
+      sessionId: 'sess-1',
+      workspacePath: '/srv/runner/r 1/repo',
+      finishedAt: new Date().toISOString(),
+    })
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    const wrapper = await mountDetail(false)
+    const section = wrapper.find('[data-testid="item-runs"]')
+    expect(section.find('[data-testid="run-resume-runner"]').text()).toBe('on build-box')
+    const action = section.find('[data-testid="run-resume-command"]')
+    expect(action.attributes('title')).toContain('same session and checkout')
+    await action.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith("cd '/srv/runner/r 1/repo' && claude --resume 'sess-1'")
+
+    Object.assign(runs.items[0]!, original)
+  })
+
+  it('offers no resume command for a run without a stored checkout or past five days', async () => {
+    const original = { ...runs.items[0]! }
+    Object.assign(runs.items[0]!, { sessionId: 'sess-1', workspacePath: null, finishedAt: new Date().toISOString() })
+    expect((await mountDetail(true)).find('[data-testid="run-resume-command"]').exists()).toBe(false)
+
+    Object.assign(runs.items[0]!, { workspacePath: '/srv/repo', finishedAt: '2026-09-01T00:09:00Z' })
+    expect((await mountDetail(true)).find('[data-testid="run-resume-command"]').exists()).toBe(false)
+
+    Object.assign(runs.items[0]!, original)
+  })
 })

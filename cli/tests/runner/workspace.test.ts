@@ -570,30 +570,36 @@ describe('kept workspaces', () => {
     expect(existsSync(ws.checkout)).toBe(true)
   })
 
-  it('removes kept workspaces after a day, beyond five, and for an item whose next run succeeded', async () => {
+  it('removes kept workspaces after five days, beyond the limit, and worktrees holding the branch of an item’s next run', async () => {
     const now = Date.parse('2026-10-01T12:00:00Z')
-    const keep = (name: string, hoursAgo: number, itemKey = 'APP-1') => {
+    const keep = (name: string, hoursAgo: number, itemKey = 'APP-1', source: string | null = null) => {
       const dir = join(root, name)
       mkdirSync(join(dir, 'repo'), { recursive: true })
       writeFileSync(
         join(dir, 'kept.json'),
         JSON.stringify({
-          runId: name, organizationSlug: 'acme', itemKey, sessionId: 's', source: null,
+          runId: name, organizationSlug: 'acme', itemKey, sessionId: 's', source,
           keptAt: new Date(now - hoursAgo * 3_600_000).toISOString(),
         }),
       )
     }
-    keep('expired', 25)
+    keep('expired', 5 * 24 + 1)
+    keep('four-days', 4 * 24)
     for (let i = 1; i <= 6; i++) keep(`run-${i}`, i)
-    keep('other-item', 0.5, 'APP-2')
+    keep('other-clone', 0.5, 'APP-2')
+    keep('other-worktree', 0.25, 'APP-2', local)
     mkdirSync(join(root, 'in-flight', 'repo'), { recursive: true })
 
-    const removed = await pruneKeptWorkspaces(root, { now })
-    expect(removed.sort()).toEqual(['expired', 'run-5', 'run-6'])
+    expect(await pruneKeptWorkspaces(root, { now })).toEqual(['expired'])
+    expect(existsSync(join(root, 'four-days'))).toBe(true)
     expect(existsSync(join(root, 'in-flight'))).toBe(true)
 
+    expect((await pruneKeptWorkspaces(root, { now, max: 5 })).sort()).toEqual(['four-days', 'run-4', 'run-5', 'run-6'])
+
+    // A clone holds no branch the item's next run needs; only the worktree has to go.
     expect(await pruneKeptWorkspaces(root, { now, item: { organizationSlug: 'acme', itemKey: 'APP-2' } }))
-      .toEqual(['other-item'])
+      .toEqual(['other-worktree'])
+    expect(existsSync(join(root, 'other-clone'))).toBe(true)
     expect(existsSync(join(root, 'run-1'))).toBe(true)
   })
 })

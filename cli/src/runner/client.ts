@@ -93,11 +93,18 @@ export class RunnerClient {
     await this.send(`/runner/runs/${runId}/log`, { chunks })
   }
 
-  /** `sessionId`, once the harness has one, lets the instance continue a run its sweeper ends. */
-  async runHeartbeat(runId: string, sessionId?: string): Promise<{ cancelRequested: boolean }> {
+  /**
+   * `sessionId`, once the harness has one, lets the instance continue a run its sweeper ends;
+   * `workspacePath` is the checkout it lives in.
+   */
+  async runHeartbeat(
+    runId: string,
+    sessionId?: string,
+    workspacePath?: string,
+  ): Promise<{ cancelRequested: boolean }> {
     return this.send<{ cancelRequested: boolean }>(
       `/runner/runs/${runId}/heartbeat`,
-      sessionId ? { sessionId } : undefined,
+      sessionId ? { sessionId, ...(workspacePath ? { workspacePath } : {}) } : undefined,
     )
   }
 

@@ -124,6 +124,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.PullRequestUrl).HasMaxLength(Run.MaxPullRequestUrlLength);
             b.Property(x => x.FailureReason).HasMaxLength(Run.MaxFailureReasonLength);
             b.Property(x => x.SessionId).HasMaxLength(Run.MaxSessionIdLength);
+            b.Property(x => x.WorkspacePath).HasMaxLength(Run.MaxWorkspacePathLength);
             b.Property(x => x.CostUsd).HasPrecision(12, 2);
             b.Property(x => x.Status).HasConversion<short>();
             b.Property(x => x.Kind).HasConversion<short>();

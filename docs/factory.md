@@ -398,6 +398,24 @@ latest run can be continued. The run page links each run in the chain and adds u
 tokens. If the runner is offline or no longer has the workspace, the continue run fails with
 `session-unavailable`; use Retry.
 
+### Resume a session by hand
+
+In ItemDetail, under **Agent runs**, each finished run with a session shows **Copy resume
+command** for 5 days, next to the name of the runner that ran it. Anyone who can see the item's
+runs sees it. The copied command opens the harness in that session, inside the run's checkout on
+that runner, so run it on that machine as the runner's user:
+
+| Harness | Command |
+| --- | --- |
+| Claude Code | `cd '<checkout>' && claude --resume '<session>'` |
+| Codex | `cd '<checkout>' && codex resume '<session>'` |
+| OpenCode | `cd '<checkout>' && opencode --session '<session>'` |
+
+The path and session are quoted for bash, zsh and fish. If the runner already removed the
+checkout, `cd` fails. Working by hand while Aictiq continues the same run (Continue or an
+automatic continue) writes to the same session and checkout; Aictiq warns about this but does
+not block it. Runs from before this feature have no stored checkout and show no command.
+
 ## 6. Add rules when manual runs are reliable
 
 Under **Factory → Rules**, a project Admin can express: “when an item enters this state,
@@ -502,11 +520,14 @@ them back. Everything else about the run survives.
 A run log is also capped at 8 MiB by default (`Automation:MaxLogBytes`), independently of
 retention; a capped log remains visibly marked as truncated.
 
-Runner workspaces live under `~/.local/share/aictiq/runner/<run-id>/` by default and are
-removed after each run, except for a run that failed with a session to continue. The runner
-keeps such a workspace for 24 hours, at most 5 at a time (the oldest go first), and removes it
-when the run is continued or the item's next run succeeds. A kept checkout can hold uncommitted
-work and a push token; it stays in the run directory, which only the runner's user can read.
+Runner workspaces live under `~/.local/share/aictiq/runner/<run-id>/` by default. A run that
+ended with a harness session, whether it succeeded, failed or was cancelled, keeps its workspace
+for 5 days so the session can be continued or resumed by hand; other runs remove theirs when
+they finish. A runner holds at most 100 kept workspaces (the oldest go first), and a new run on
+a Runner-local item removes that item's kept worktree, because the worktree holds the branch the
+new run needs. Keeping every session for 5 days uses more disk on busy runners. A kept checkout
+can hold uncommitted work and a push token; it stays in the run directory, which only the
+runner's user can read.
 `aictiq runner start --keep-workspaces` is a debugging option, not a retention policy; it keeps
 every workspace and sweeps none, so clean them yourself because they contain repository data.
 Attachment files live in the same run directory under `attachments/`, outside the checkout;
@@ -521,7 +542,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | `no-remote` | A direct-delivery run's Runner-local checkout has no `origin` remote. The agent works in an isolated clone that is removed after the run, so without a remote its commits would be lost. | Add the remote (`git remote add origin <url>`) in the mapped checkout, or switch the playbook's **Delivery** to **Branch and pull request**, which works in a local-only repository. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `harness-rate-limited`, `harness-transient`, `harness-crashed` | The harness hit a rate limit, the model API was overloaded or unreachable, or the harness died on its own. | Aictiq continues the run automatically up to twice. After that, use **Continue** once the limit resets, or **Retry**. |
-| `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (continued, older than 24 hours, or removed). | Use **Retry** to start a fresh run. |
+| `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (older than 5 days, or removed). | Use **Retry** to start a fresh run. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then **Continue** the run (each continue gets the full limit again) or start a new one. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
 | Runner exits with code 5 | Its `jrn_` secret was disabled, deleted, or rotated. Retrying cannot repair the credential. | Register or rotate the runner in Aictiq, then run `aictiq runner register` with the newly shown secret. |
