@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, ExternalLink } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, ExternalLink, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
-import type { RunStatus } from '@/api/runs'
-import { listRuns } from '@/api/runs'
+import type { ListRunsOptions, RunKind, RunStatsGrouping, RunStatus } from '@/api/runs'
+import { getRunStats, listRuns } from '@/api/runs'
 import { listAgents } from '@/api/agents'
 import { listProjects } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
+import RunStats, { type RunStatsDrill } from '@/components/factory/RunStats.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
@@ -22,12 +23,22 @@ import {
   runScheduledLabel,
   runStatuses,
 } from '@/lib/runs'
+import {
+  defaultRunRange,
+  runRangeLabel,
+  runRanges,
+  runWindow,
+  startOfLocalDay,
+  type RunRange,
+} from '@/lib/runStats'
 import { factoryPath } from '@/router/paths'
 
 /**
- * The Factory's Runs tab: every run in the organization, newest first, filtered down to
- * the one someone is looking for. The filters live in the URL - "the failed runs on
- * PROJ this week" is a link someone pastes, not a state to recreate by hand.
+ * The Factory's Runs tab: how the factory is doing, then every run in the organization,
+ * newest first, filtered down to the one someone is looking for. The filters live in the
+ * URL - "the failed runs on PROJ this week" is a link someone pastes, not a state to
+ * recreate by hand - and the statistics and the list read the same ones, so a figure
+ * always counts the runs listed under it.
  *
  * Live status is a quiet refetch, not a push: this page is not inside any one project's
  * hub group, and a run that flips from queued to running a few seconds late is fine.
@@ -38,13 +49,29 @@ const router = useRouter()
 
 const slug = computed(() => org.slug.value)
 
+const runKinds: { value: RunKind; label: string }[] = [
+  { value: 'implement', label: 'Implement' },
+  { value: 'refine', label: 'Refine' },
+]
+
 interface Filters {
   project: string
   agent: string
   status: string
   item: string
+  kind: string
+  playbook: string
+  runner: string
+  range: RunRange
+  /** `yyyy-mm-dd` - a day range picked from a chart, which takes over from the preset. */
+  fromDay: string
+  toDay: string
+  failure: string
   page: number
 }
+
+const text = (value: unknown) => (typeof value === 'string' ? value : '')
+const day = (value: unknown) => (typeof value === 'string' && startOfLocalDay(value) ? value : '')
 
 function filtersFromRoute(): Filters {
   const query = route.query
@@ -52,12 +79,27 @@ function filtersFromRoute(): Filters {
     typeof query.status === 'string' && (runStatuses as string[]).includes(query.status)
       ? query.status
       : ''
+  const kind =
+    typeof query.kind === 'string' && runKinds.some((option) => option.value === query.kind)
+      ? query.kind
+      : ''
+  const range =
+    typeof query.range === 'string' && (runRanges as readonly string[]).includes(query.range)
+      ? (query.range as RunRange)
+      : defaultRunRange
   const page = Number.parseInt(String(query.page ?? ''), 10)
   return {
-    project: typeof query.project === 'string' ? query.project : '',
-    agent: typeof query.agent === 'string' ? query.agent : '',
+    project: text(query.project),
+    agent: text(query.agent),
     status,
-    item: typeof query.itemKey === 'string' ? query.itemKey : '',
+    item: text(query.itemKey),
+    kind,
+    playbook: text(query.playbook),
+    runner: text(query.runner),
+    range,
+    fromDay: day(query.from),
+    toDay: day(query.to),
+    failure: text(query.failure),
     page: Number.isFinite(page) && page > 0 ? page : 1,
   }
 }
@@ -79,18 +121,88 @@ function applyFilters(next: Partial<Filters>) {
   if (merged.status) query.status = merged.status
   // `itemKey`, not `item`: `?item=` is the app-wide item peek, and would open it over the list.
   if (merged.item) query.itemKey = merged.item
+  if (merged.kind) query.kind = merged.kind
+  if (merged.playbook) query.playbook = merged.playbook
+  if (merged.runner) query.runner = merged.runner
+  if (merged.range !== defaultRunRange) query.range = merged.range
+  if (merged.fromDay) query.from = merged.fromDay
+  if (merged.toDay) query.to = merged.toDay
+  if (merged.failure) query.failure = merged.failure
   if (merged.page > 1) query.page = String(merged.page)
   // A filter change restarts the list; the route is the one place the state lives.
   void router.replace({ query })
 }
 
-const hasFilters = computed(
-  () =>
-    filters.value.project !== '' ||
-    filters.value.agent !== '' ||
-    filters.value.status !== '' ||
-    filters.value.item !== '',
+const noFilters = {
+  project: '',
+  agent: '',
+  status: '',
+  item: '',
+  kind: '',
+  playbook: '',
+  runner: '',
+  range: defaultRunRange,
+  fromDay: '',
+  toDay: '',
+  failure: '',
+  page: 1,
+} satisfies Filters
+
+/** Narrowing beyond the default view. The default 30 days is not a filter someone set. */
+const hasFilters = computed(() => {
+  const current = filters.value
+  return (Object.keys(noFilters) as (keyof Filters)[]).some(
+    (key) => key !== 'page' && current[key] !== noFilters[key],
+  )
+})
+
+const hasDays = computed(() => filters.value.fromDay !== '' || filters.value.toDay !== '')
+
+const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+const daysLabel = computed(() => {
+  const from = startOfLocalDay(filters.value.fromDay)
+  const to = startOfLocalDay(filters.value.toDay)
+  if (from && to && filters.value.fromDay === filters.value.toDay) return dayFormat.format(from)
+  return `${from ? dayFormat.format(from) : '…'} – ${to ? dayFormat.format(to) : 'now'}`
+})
+
+function onRangeChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'custom') return
+  applyFilters({ range: value as RunRange, fromDay: '', toDay: '', page: 1 })
+}
+
+function onDrill(drill: RunStatsDrill) {
+  const next: Partial<Filters> = { page: 1 }
+  if (drill.status) next.status = drill.status
+  if (drill.fromDay) next.fromDay = drill.fromDay
+  if (drill.toDay) next.toDay = drill.toDay
+  if (drill.agent) next.agent = drill.agent
+  if (drill.project) next.project = drill.project
+  if (drill.playbook) next.playbook = drill.playbook
+  if (drill.runner) next.runner = drill.runner
+  if (drill.failure) next.failure = drill.failure
+  applyFilters(next)
+}
+
+// The window is worked out once per filter change, not on every render: a rolling "now"
+// in the query key would refetch for ever.
+const timeWindow = computed(() =>
+  runWindow(filters.value.range, { from: filters.value.fromDay, to: filters.value.toDay }),
 )
+
+const filterOptions = computed<ListRunsOptions>(() => ({
+  project: filters.value.project || undefined,
+  agent: filters.value.agent || undefined,
+  status: (filters.value.status || undefined) as RunStatus | undefined,
+  item: filters.value.item || undefined,
+  kind: (filters.value.kind || undefined) as RunKind | undefined,
+  playbook: filters.value.playbook || undefined,
+  runner: filters.value.runner || undefined,
+  from: timeWindow.value.from,
+  to: timeWindow.value.to,
+  failure: filters.value.failure || undefined,
+}))
 
 const projects = useQuery({
   queryKey: computed(() => ['projects', slug.value, 'factory-filter']),
@@ -101,25 +213,21 @@ const agents = useQuery({
   queryFn: () => listAgents(slug.value),
 })
 
-const runs = useQuery({
-  queryKey: computed(() => [
-    'runs',
-    slug.value,
-    filters.value.project,
-    filters.value.agent,
-    filters.value.status,
-    filters.value.item,
-    filters.value.page,
-  ]),
+const groupBy = ref<RunStatsGrouping>('agent')
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+const stats = useQuery({
+  queryKey: computed(() => ['runs', slug.value, 'stats', filterOptions.value, groupBy.value]),
   queryFn: () =>
-    listRuns(slug.value, {
-      project: filters.value.project || undefined,
-      agent: filters.value.agent || undefined,
-      status: (filters.value.status || undefined) as RunStatus | undefined,
-      item: filters.value.item || undefined,
-      page: filters.value.page,
-      pageSize: 25,
-    }),
+    getRunStats(slug.value, { ...filterOptions.value, groupBy: groupBy.value, tz: timeZone }),
+  placeholderData: keepPreviousData,
+  refetchInterval: (query) => ((query.state.data?.active ?? 0) > 0 ? 30_000 : false),
+})
+
+const runs = useQuery({
+  queryKey: computed(() => ['runs', slug.value, filterOptions.value, filters.value.page]),
+  queryFn: () =>
+    listRuns(slug.value, { ...filterOptions.value, page: filters.value.page, pageSize: 25 }),
   placeholderData: keepPreviousData,
   // A page with live work on it keeps itself fresh; a quiet page does not need to.
   refetchInterval: (query) => {
@@ -131,6 +239,18 @@ const runs = useQuery({
 const runsPage = computed(() => runs.data.value)
 const runRows = computed(() => runsPage.value?.items ?? [])
 const totalPages = computed(() => Math.max(1, Math.ceil((runsPage.value?.totalCount ?? 0) / 25)))
+
+// The default 30 days can be empty in an organization that ran agents before then; only an
+// organization that never ran anything gets the first-run steps.
+const everRan = useQuery({
+  queryKey: computed(() => ['runs', slug.value, 'ever']),
+  queryFn: () => listRuns(slug.value, { pageSize: 1 }),
+  enabled: computed(() => !hasFilters.value && runs.isSuccess.value && runRows.value.length === 0),
+})
+const neverRan = computed(() => !hasFilters.value && everRan.data.value?.totalCount === 0)
+
+const playbookOptions = computed(() => stats.data.value?.playbooks ?? [])
+const runnerOptions = computed(() => stats.data.value?.runners ?? [])
 
 const itemPath = (run: { itemKey: string }) =>
   `/o/${slug.value}/p/${projectKeyOf(run.itemKey)}/items/${run.itemKey}`
@@ -198,22 +318,112 @@ watch(
         class="border-input bg-background w-44 rounded border px-2 py-1.5 text-sm"
         @change="applyFilters({ item: itemInput.trim(), page: 1 })"
       />
+      <select
+        v-model="filters.kind"
+        aria-label="Filter by kind"
+        class="border-input bg-background w-36 rounded border px-2 py-1.5 text-sm"
+        @change="applyFilters({ kind: filters.kind, page: 1 })"
+      >
+        <option value="">Any kind</option>
+        <option v-for="kind in runKinds" :key="kind.value" :value="kind.value">
+          {{ kind.label }}
+        </option>
+      </select>
+      <select
+        v-model="filters.playbook"
+        aria-label="Filter by playbook"
+        class="border-input bg-background w-44 rounded border px-2 py-1.5 text-sm"
+        @change="applyFilters({ playbook: filters.playbook, page: 1 })"
+      >
+        <option value="">All playbooks</option>
+        <option v-for="playbook in playbookOptions" :key="playbook.id" :value="playbook.id">
+          {{ playbook.name }}
+        </option>
+        <option
+          v-if="
+            filters.playbook &&
+            !playbookOptions.some((playbook) => playbook.id === filters.playbook)
+          "
+          :value="filters.playbook"
+        >
+          Other playbook
+        </option>
+      </select>
+      <select
+        v-model="filters.runner"
+        aria-label="Filter by runner"
+        class="border-input bg-background w-40 rounded border px-2 py-1.5 text-sm"
+        @change="applyFilters({ runner: filters.runner, page: 1 })"
+      >
+        <option value="">All runners</option>
+        <option v-for="runner in runnerOptions" :key="runner.id" :value="runner.id">
+          {{ runner.name }}
+        </option>
+        <option
+          v-if="filters.runner && !runnerOptions.some((runner) => runner.id === filters.runner)"
+          :value="filters.runner"
+        >
+          Other runner
+        </option>
+      </select>
+      <select
+        :value="hasDays ? 'custom' : filters.range"
+        aria-label="Filter by date range"
+        class="border-input bg-background w-40 rounded border px-2 py-1.5 text-sm"
+        @change="onRangeChange"
+      >
+        <option v-for="range in runRanges" :key="range" :value="range">
+          {{ runRangeLabel[range] }}
+        </option>
+        <option v-if="hasDays" value="custom">{{ daysLabel }}</option>
+      </select>
+      <span
+        v-if="filters.failure"
+        class="border-border bg-muted inline-flex max-w-72 items-center gap-1 rounded border py-1 pr-1 pl-2 text-xs"
+        data-testid="runs-filter-failure"
+      >
+        <span class="truncate"
+          >Failure: <span class="font-mono">{{ filters.failure }}</span></span
+        >
+        <button
+          type="button"
+          class="hover:bg-background rounded p-0.5"
+          aria-label="Remove the failure reason filter"
+          @click="applyFilters({ failure: '', page: 1 })"
+        >
+          <X class="size-3" aria-hidden="true" />
+        </button>
+      </span>
       <Button
         v-if="hasFilters"
         variant="ghost"
         size="sm"
         data-testid="runs-filters-clear"
-        @click="applyFilters({ project: '', agent: '', status: '', item: '', page: 1 })"
+        @click="applyFilters(noFilters)"
       >
         Clear
       </Button>
     </div>
 
+    <RunStats
+      v-model:group-by="groupBy"
+      :stats="stats.data.value"
+      :loading="stats.isPending.value"
+      :error="stats.isError.value"
+      :window="timeWindow"
+      @drill="onDrill"
+    />
+
     <UiPageState v-if="runs.isPending.value" state="loading" />
     <p v-else-if="runs.isError.value" class="text-destructive text-sm">Runs could not be loaded.</p>
 
+    <UiPageState
+      v-else-if="runRows.length === 0 && !hasFilters && everRan.isPending.value"
+      state="loading"
+    />
+
     <EmptyState
-      v-else-if="runRows.length === 0 && !hasFilters"
+      v-else-if="runRows.length === 0 && neverRan"
       title="No runs yet"
       icon="◇"
       description="Three steps and the factory is working: register a runner (a machine with the harness signed in), write a playbook (the wiki page an agent follows), then hand any item to an agent from its page."
@@ -231,8 +441,12 @@ watch(
 
     <EmptyState
       v-else-if="runRows.length === 0"
-      title="No runs match these filters"
-      description="Nothing has run with this project, agent, status and item together."
+      :title="hasFilters ? 'No runs match these filters' : 'No runs in the last 30 days'"
+      :description="
+        hasFilters
+          ? 'Nothing has run with these filters together.'
+          : 'Pick a longer date range to see older runs.'
+      "
       icon="◇"
     />
 

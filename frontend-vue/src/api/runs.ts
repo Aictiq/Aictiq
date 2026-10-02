@@ -17,13 +17,7 @@ import { apiFetch } from '@/utils/api'
  * claimed and exactly one live run per item is a database guarantee.
  */
 export type RunStatus =
-  | 'queued'
-  | 'assigned'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'timedOut'
+  'queued' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timedOut'
 
 export interface Run {
   id: string
@@ -73,7 +67,7 @@ export interface Run {
   /** xmin. */
   version: number
   /** An implement run delivers code; a refine run rewrites the ticket. */
-  kind?: 'implement' | 'refine'
+  kind?: RunKind
   /** The harness session a continue run resumes, and a person can resume by hand on the runner. */
   sessionId?: string | null
   /** The run's checkout on its runner, where `sessionId` resumes. Null for runs from before runners reported it. */
@@ -126,8 +120,97 @@ export interface ListRunsOptions {
   status?: RunStatus
   /** Item key, e.g. `PROJ-12`. */
   item?: string
+  kind?: RunKind
+  /** Playbook id. */
+  playbook?: string
+  /** The runner that took the run. */
+  runner?: string
+  /** Runs queued at or after this ISO instant. */
+  from?: string
+  /** Runs queued before this ISO instant. */
+  to?: string
+  /** Failed and timed-out runs with exactly this failure reason. Operators only; matches nothing for anyone else. */
+  failure?: string
   page?: number
   pageSize?: number
+}
+
+export type RunKind = 'implement' | 'refine'
+
+export type RunStatsGrouping = 'agent' | 'project' | 'playbook' | 'runner'
+
+export interface RunStatsOptions extends Omit<ListRunsOptions, 'page' | 'pageSize'> {
+  groupBy?: RunStatsGrouping
+  /** The IANA time zone the days are counted in. */
+  tz?: string
+}
+
+/** Runs and cost of one status on one day, the day in the requested time zone. */
+export interface RunStatsDay {
+  /** `yyyy-mm-dd`. */
+  day: string
+  status: RunStatus
+  runs: number
+  costUsd: number
+}
+
+export interface RunStatsGroup {
+  /**
+   * What the matching filter takes: the agent's user id, the project key, or the playbook
+   * or runner id. Null for runs no runner took.
+   */
+  key: string | null
+  name: string | null
+  runs: number
+  finished: number
+  succeeded: number
+  costUsd: number
+  averageCostUsd: number | null
+  medianDurationSeconds: number | null
+}
+
+export interface RunStatsFailure {
+  /** Null for runs that failed without saying why. */
+  reason: string | null
+  runs: number
+}
+
+export interface RunStatsOption {
+  id: string
+  name: string
+}
+
+/**
+ * How the factory performed over the runs the filters pick out. Cost and duration figures
+ * only count finished runs; the run totals count every run.
+ */
+export interface RunStats {
+  total: number
+  /** Queued, assigned or running. */
+  active: number
+  /** Succeeded, failed, cancelled or timed out: what the success rate divides by. */
+  finished: number
+  succeeded: number
+  totalCostUsd: number
+  averageCostUsd: number | null
+  inputTokens: number
+  outputTokens: number
+  medianDurationSeconds: number | null
+  p90DurationSeconds: number | null
+  /** From when a run could start (queued, or its scheduled time) to when it started. */
+  medianQueueWaitSeconds: number | null
+  pullRequests: number
+  /** Only days with runs. */
+  days: RunStatsDay[]
+  groupBy: RunStatsGrouping
+  /** Most runs first. */
+  groups: RunStatsGroup[]
+  /** Null for anyone but a factory operator: the failure reason is operator detail. */
+  failureReasons: RunStatsFailure[] | null
+  /** Every playbook among the visible runs in the date range, for the filter. */
+  playbooks: RunStatsOption[]
+  /** Every runner among the visible runs in the date range, for the filter. */
+  runners: RunStatsOption[]
 }
 
 export interface DispatchRunBody {
@@ -151,9 +234,13 @@ export const dispatchRun = (slug: string, itemKey: string, body: DispatchRunBody
 export const listItemRuns = (slug: string, itemKey: string, page = 1, pageSize = 25) =>
   apiFetch<Paged<Run>>(`/orgs/${slug}/items/${itemKey}/runs`, { query: { page, pageSize } })
 
-/** An organization's runs, newest first, filtered by project, agent, status and/or item. */
+/** An organization's runs, newest first, filtered by project, agent, status, item, kind, playbook, runner and time. */
 export const listRuns = (slug: string, options: ListRunsOptions = {}) =>
   apiFetch<Paged<Run>>(runsBase(slug), { query: { ...options } })
+
+/** Statistics over every run the same filters list, not just a page of them. */
+export const getRunStats = (slug: string, options: RunStatsOptions = {}) =>
+  apiFetch<RunStats>(`${runsBase(slug)}/stats`, { query: { ...options } })
 
 export const getRun = (slug: string, runId: string) => apiFetch<Run>(`${runsBase(slug)}/${runId}`)
 
