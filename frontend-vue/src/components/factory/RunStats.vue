@@ -233,14 +233,16 @@ const kpis = computed(() => {
           <div v-if="!hasDays" class="text-muted-foreground grid h-56 place-items-center text-xs">
             No runs in this range.
           </div>
-          <VChart
-            v-else
-            class="h-56 w-full cursor-pointer"
-            :option="runsOption"
-            autoresize
-            data-testid="chart-runs-per-day"
-            @click="onRunsClick"
-          />
+          <!-- vue-echarts' own unlayered height: 100% outranks a utility class on the chart itself. -->
+          <div v-else class="h-56">
+            <VChart
+              class="cursor-pointer"
+              :option="runsOption"
+              autoresize
+              data-testid="chart-runs-per-day"
+              @click="onRunsClick"
+            />
+          </div>
         </section>
 
         <section class="border-border bg-card rounded-lg border p-3">
@@ -248,14 +250,15 @@ const kpis = computed(() => {
           <div v-if="!hasDays" class="text-muted-foreground grid h-56 place-items-center text-xs">
             No runs in this range.
           </div>
-          <VChart
-            v-else
-            class="h-56 w-full cursor-pointer"
-            :option="costOption"
-            autoresize
-            data-testid="chart-cost-per-day"
-            @click="onCostClick"
-          />
+          <div v-else class="h-56">
+            <VChart
+              class="cursor-pointer"
+              :option="costOption"
+              autoresize
+              data-testid="chart-cost-per-day"
+              @click="onCostClick"
+            />
+          </div>
         </section>
 
         <section
