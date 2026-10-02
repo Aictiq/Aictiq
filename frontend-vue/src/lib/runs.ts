@@ -179,9 +179,82 @@ export function chainTotals(chain: RunChainLink[]): {
 }
 
 /** What the run detail says while nothing has picked the run up yet. */
-export function runWaitingMessage(run: Pick<Run, 'status' | 'harness'>): string | null {
+export function runWaitingMessage(
+  run: Pick<Run, 'status' | 'harness' | 'scheduledFor'>,
+  now: Date = new Date(),
+): string | null {
   if (run.status !== 'queued') return null
+  const scheduled = runScheduledLabel(run, now)
+  if (scheduled) return `${scheduled}. A runner that offers ${run.harness} picks it up after that.`
   return `Waiting for a runner that offers ${run.harness}…`
+}
+
+// ── Scheduled runs ──────────────────────────────────────────────────────────────────
+
+/** How long after now a newly scheduled run starts unless the person changes it: overnight, roughly. */
+export const DEFAULT_SCHEDULE_DELAY_HOURS = 6
+
+/** The browser's timezone, e.g. `Europe/Sarajevo` - what a scheduled time is entered and shown in. */
+export function localTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'
+}
+
+const pad = (value: number) => String(value).padStart(2, '0')
+
+/** A `datetime-local` input's value for a moment, in the browser's timezone, to the minute. */
+export function toDateTimeLocalValue(date: Date): string {
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  )
+}
+
+/**
+ * The moment a `datetime-local` value names, read in the browser's timezone, or null when it
+ * is empty or not a time. The browser parses a date-time without an offset as local time.
+ */
+export function fromDateTimeLocalValue(value: string): Date | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/** What the Start at field holds when scheduling is turned on: now + 6 h. */
+export function defaultScheduleValue(now: Date = new Date()): string {
+  return toDateTimeLocalValue(new Date(now.getTime() + DEFAULT_SCHEDULE_DELAY_HOURS * 3_600_000))
+}
+
+/** "Thu 2 Oct, 22:00" in the browser's locale and timezone. */
+export function formatScheduledTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** A queued run still waiting for its start time - no runner may take it yet. */
+export function isWaitingForSchedule(
+  run: Pick<Run, 'status' | 'scheduledFor'>,
+  now: Date = new Date(),
+): boolean {
+  return (
+    run.status === 'queued' &&
+    !!run.scheduledFor &&
+    new Date(run.scheduledFor).getTime() > now.getTime()
+  )
+}
+
+/** "Scheduled for Thu 2 Oct, 22:00" while a run waits for its start time; null otherwise. */
+export function runScheduledLabel(
+  run: Pick<Run, 'status' | 'scheduledFor'>,
+  now: Date = new Date(),
+): string | null {
+  return isWaitingForSchedule(run, now)
+    ? `Scheduled for ${formatScheduledTime(run.scheduledFor!)}`
+    : null
 }
 
 // ── The log ─────────────────────────────────────────────────────────────────────────

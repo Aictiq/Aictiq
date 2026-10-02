@@ -120,6 +120,13 @@ public sealed class Run : TenantEntity
 
     public DateTimeOffset QueuedAt { get; init; }
 
+    /// <summary>
+    /// When a person asked the run to start, in UTC, or null to start as soon as a runner is
+    /// free. The run stays <see cref="RunStatus.Queued"/> and no runner claims it before then;
+    /// its wait counts from here rather than from <see cref="QueuedAt"/>.
+    /// </summary>
+    public DateTimeOffset? ScheduledFor { get; init; }
+
     public DateTimeOffset? AssignedAt { get; set; }
 
     public DateTimeOffset? StartedAt { get; set; }

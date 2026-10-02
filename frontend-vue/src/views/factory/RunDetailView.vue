@@ -27,6 +27,7 @@ import {
   projectKeyOf,
   runDuration,
   runRequesterLabel,
+  runScheduledLabel,
 } from '@/lib/runs'
 import { ApiError } from '@/utils/api'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
@@ -208,6 +209,12 @@ const tokens = computed(() => {
       <div class="border-border rounded-lg border p-4">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
           <RunStatusBadge :status="run.status" />
+          <span
+            v-if="runScheduledLabel(run)"
+            class="text-muted-foreground text-xs"
+            data-testid="run-scheduled"
+            >{{ runScheduledLabel(run) }}</span
+          >
           <RouterLink
             :to="itemPath"
             class="hover:bg-muted inline-flex items-center gap-1.5 rounded px-1 py-0.5"
@@ -289,6 +296,10 @@ const tokens = computed(() => {
           <div>
             <dt class="inline">Queued&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.queuedAt ? new Date(run.queuedAt).toLocaleString() : '-' }}</dd>
+          </div>
+          <div v-if="run.scheduledFor">
+            <dt class="inline">Start at&nbsp;</dt>
+            <dd class="text-foreground inline">{{ new Date(run.scheduledFor).toLocaleString() }}</dd>
           </div>
           <div v-if="run.startedAt">
             <dt class="inline">Started&nbsp;</dt>

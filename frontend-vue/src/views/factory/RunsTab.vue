@@ -14,7 +14,14 @@ import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import { useOrgScope } from '@/composables/useSettingsScope'
-import { isLiveRun, projectKeyOf, runDuration, runRequesterLabel, runStatuses } from '@/lib/runs'
+import {
+  isLiveRun,
+  projectKeyOf,
+  runDuration,
+  runRequesterLabel,
+  runScheduledLabel,
+  runStatuses,
+} from '@/lib/runs'
 import { factoryPath } from '@/router/paths'
 
 /**
@@ -252,6 +259,12 @@ watch(
             <span v-if="requesterLabel(run)" class="text-muted-foreground shrink-0 text-xs italic">
               {{ requesterLabel(run) }}
             </span>
+            <span
+              v-if="runScheduledLabel(run)"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-scheduled"
+              >{{ runScheduledLabel(run) }}</span
+            >
             <span
               v-if="run.continuesRunId"
               class="text-muted-foreground shrink-0 text-xs"

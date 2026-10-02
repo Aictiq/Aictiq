@@ -359,6 +359,23 @@ the run still finishes and the skipped transition is recorded in item history.
 Anyone who can see the item can see the run's status and linked pull request. Only a factory
 operator can start or cancel runs or read the prompt snapshot, log, and failure reason.
 
+### Schedule a run for later
+
+To let the agent work later, for example overnight, select **Start later** in the Hand to
+agent dialog. The **Start at** field is prefilled with 6 hours from now. You enter the time in
+your browser's timezone, which is shown next to the field. Aictiq stores it in UTC and refuses a
+time in the past.
+
+A scheduled run is created as `queued` and claims the item straight away, so nobody can start a
+second run on it. No runner takes the run before its start time. After that time, the next free
+matching runner takes it, or the chosen runner if you picked one. While the run waits, the item
+and run pages show **Scheduled for** and the local start time. Cancel the run from the run
+page, as you would any queued run. The sweeper does not treat a waiting scheduled run as stuck.
+
+Over the API, send `scheduledFor` with an offset, such as `"2026-10-02T22:00:00+02:00"`, in
+the body of `POST /api/v1/orgs/{org}/items/{key}/runs`. The CLI and rules always start runs
+immediately.
+
 ### Continue a failed run
 
 The runner records each run's harness session (Claude Code's session, Codex's thread,

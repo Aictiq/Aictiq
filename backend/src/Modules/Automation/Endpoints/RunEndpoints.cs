@@ -29,6 +29,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="Continuable">The run can be continued now (run detail only).</param>
 /// <param name="Superseded">The item has a newer run, so neither Continue nor Retry applies (run detail only).</param>
 /// <param name="Chain">The runs from the first failure to the last continue, oldest first (run detail only).</param>
+/// <param name="ScheduledFor">When the run may start (UTC), or null when it was queued to start right away.</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -39,7 +40,8 @@ public sealed record RunView(
     string? OutcomeSummary, string? PullRequestUrl, int? ExitCode, decimal? CostUsd, long? InputTokens,
     long? OutputTokens, string? FailureReason, string? PromptSnapshot, uint Version, RunKind Kind = RunKind.Implement,
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
-    bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null);
+    bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
+    DateTimeOffset? ScheduledFor = null);
 
 /// <summary>One run of a continue chain, with what it cost on its own.</summary>
 public sealed record RunChainLink(
@@ -47,7 +49,9 @@ public sealed record RunChainLink(
     decimal? CostUsd, long? InputTokens, long? OutputTokens);
 
 /// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
-public sealed record DispatchRunRequest(Guid? PlaybookId, string? AgentId, Guid? RunnerId = null);
+/// <param name="ScheduledFor">When the run may start, with its offset; null to start now. Must be in the future.</param>
+public sealed record DispatchRunRequest(
+    Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null);
 
 /// <summary>
 /// A person's window on the factory: dispatch, watch, cancel.
@@ -94,7 +98,8 @@ public static class RunEndpoints
     {
         var project = http.ResolvedProject()!;
         var result = await dispatcher.DispatchAsync(
-            project, itemKey, request.PlaybookId, request.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct);
+            project, itemKey, request.PlaybookId, request.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct,
+            scheduledFor: request.ScheduledFor);
         switch (result.Outcome)
         {
             case DispatchOutcome.ItemNotFound:
@@ -573,7 +578,7 @@ public static class RunEndpoints
             includeDetails ? run.PromptSnapshot : null,
             run.Version, run.Kind,
             includeDetails ? run.SessionId : null,
-            run.ContinuesRunId, null, run.AutoContinued);
+            run.ContinuesRunId, null, run.AutoContinued, ScheduledFor: run.ScheduledFor);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

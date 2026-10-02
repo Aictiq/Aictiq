@@ -21,7 +21,15 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { orgSettingsPath, projectSettingsPath } from '@/router/paths'
-import { readRunChoice, writeRunChoice } from '@/lib/runs'
+import {
+  defaultScheduleValue,
+  formatScheduledTime,
+  fromDateTimeLocalValue,
+  localTimeZone,
+  readRunChoice,
+  toDateTimeLocalValue,
+  writeRunChoice,
+} from '@/lib/runs'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -30,6 +38,8 @@ import { ApiError } from '@/utils/api'
  * after item). With more than one runner, a third choice sends the run to one machine;
  * the default, any free runner, is what every run did before there was a choice. Dispatching claims the item for the agent in the same transaction, so a
  * claim that got there first is the server's 409, shown here rather than guessed at.
+ * "Start later" holds the run until a time the person picks in their own timezone - the
+ * item is claimed now all the same, so nobody starts a second run while it waits.
  */
 const props = defineProps<{
   slug: string
@@ -54,6 +64,11 @@ const agentId = ref<string | null>(null)
 const runners = ref<RunnerChoice[]>([])
 /** Null is "any free runner". */
 const runnerId = ref<string | null>(null)
+/** Off is "start now", as every run did before there was a choice. */
+const scheduled = ref(false)
+/** A `datetime-local` value, in the browser's timezone. */
+const startAt = ref('')
+const timeZone = localTimeZone()
 const submitting = ref(false)
 const error = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
@@ -73,6 +88,21 @@ const compatibleRunners = computed(() => runners.value.filter((runner) => canRun
 /** One runner is no choice: every run goes to it anyway. */
 const showRunners = computed(() => runners.value.length > 1)
 
+const minStartAt = computed(() => toDateTimeLocalValue(new Date()))
+
+/** Why the chosen start time cannot be sent, or null when it can - the API says the same. */
+const startAtError = computed(() => {
+  if (!scheduled.value) return null
+  const at = fromDateTimeLocalValue(startAt.value)
+  if (!at) return 'Choose a date and time.'
+  if (at.getTime() <= Date.now()) return 'Choose a start time in the future.'
+  return null
+})
+
+watch(scheduled, (on) => {
+  startAt.value = on ? defaultScheduleValue() : ''
+})
+
 const chosenRunner = computed(() => runners.value.find((runner) => runner.id === runnerId.value) ?? null)
 
 // A playbook with another harness may rule the chosen runner out.
@@ -86,6 +116,7 @@ watch(
     if (!open) return
     error.value = null
     fieldErrors.value = {}
+    scheduled.value = false
     loadFailed.value = false
     loading.value = true
     try {
@@ -129,6 +160,11 @@ watch(
 
 async function submit() {
   if (submitting.value || !playbookId.value || !agentId.value) return
+  if (startAtError.value) {
+    fieldErrors.value = { scheduledFor: [startAtError.value] }
+    return
+  }
+  const scheduledFor = scheduled.value ? fromDateTimeLocalValue(startAt.value) : null
   submitting.value = true
   error.value = null
   fieldErrors.value = {}
@@ -137,16 +173,25 @@ async function submit() {
       playbookId: playbookId.value,
       agentId: agentId.value,
       runnerId: showRunners.value ? runnerId.value : null,
+      // Left out entirely when starting now, so the request is the one it always was.
+      ...(scheduledFor ? { scheduledFor: scheduledFor.toISOString() } : {}),
     })
     writeRunChoice(props.projectKey, {
       playbookId: playbookId.value,
       agentId: agentId.value,
       runnerId: runnerId.value,
     })
-    toast.success(
-      'Run queued',
-      `It starts when a runner picks it up - follow it from the item's Runs section.`,
-    )
+    if (run.scheduledFor) {
+      toast.success(
+        'Run scheduled',
+        `It starts after ${formatScheduledTime(run.scheduledFor)} - cancel it from the run's page until then.`,
+      )
+    } else {
+      toast.success(
+        'Run queued',
+        `It starts when a runner picks it up - follow it from the item's Runs section.`,
+      )
+    }
     emit('update:open', false)
     emit('dispatched', run)
   } catch (caught) {
@@ -174,7 +219,7 @@ async function submit() {
         <DialogTitle>Hand {{ itemKey }} to an agent</DialogTitle>
         <DialogDescription>
           The agent claims the item, follows the playbook on a runner, and reports back here
-          with its pull request. It starts as soon as a runner is free.
+          with its pull request. It starts as soon as a runner is free, or later if you schedule it.
         </DialogDescription>
       </DialogHeader>
 
@@ -258,6 +303,39 @@ async function submit() {
             {{ message }}
           </p>
         </div>
+        <div class="space-y-1.5">
+          <label class="flex items-center gap-2 text-sm font-medium">
+            <input
+              v-model="scheduled"
+              type="checkbox"
+              data-testid="start-run-schedule"
+              class="accent-primary size-4"
+            />
+            Start later
+          </label>
+          <template v-if="scheduled">
+            <label for="start-run-start-at" class="sr-only">Start at</label>
+            <div class="flex items-center gap-2">
+              <input
+                id="start-run-start-at"
+                v-model="startAt"
+                type="datetime-local"
+                :min="minStartAt"
+                data-testid="start-run-start-at"
+                class="border-input bg-background min-w-0 flex-1 rounded border px-2 py-1.5 text-sm"
+              />
+              <span class="text-muted-foreground shrink-0 text-xs" data-testid="start-run-timezone">
+                {{ timeZone }}
+              </span>
+            </div>
+            <p class="text-muted-foreground text-xs">
+              The item is claimed now; no runner takes the run before this time.
+            </p>
+          </template>
+          <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </div>
         <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
       </form>
 
@@ -272,7 +350,7 @@ async function submit() {
         </Button>
         <Button type="submit" form="start-run" :disabled="submitting || !playbookId || !agentId">
           <Loader2 v-if="submitting" class="animate-spin" aria-hidden="true" />
-          Hand to agent
+          {{ scheduled ? 'Schedule run' : 'Hand to agent' }}
         </Button>
       </DialogFooter>
     </DialogContent>

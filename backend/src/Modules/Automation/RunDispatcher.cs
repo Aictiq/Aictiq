@@ -116,11 +116,20 @@ public sealed class RunDispatcher(
     /// an isolated clone of the default branch, so it leaves no item branch behind for the
     /// implement run that may follow.
     /// </param>
+    /// <param name="scheduledFor">
+    /// When the run may start, or null for now. It must be in the future; the item is claimed
+    /// straight away all the same, so nobody starts a second run on it while this one waits.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
-        DispatchActor actor, CancellationToken ct, RefineContext? refine = null)
+        DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
+
+        if (scheduledFor is { } startAt && startAt <= clock.GetUtcNow())
+        {
+            return DispatchResult.Invalid("scheduledFor", "Choose a start time in the future.");
+        }
 
         if (await billing.IsReadOnlyAsync(organizationId, ct))
         {
@@ -220,6 +229,7 @@ public sealed class RunDispatcher(
             WorkOnDefaultBranch = onDefaultBranch,
             MaxMinutes = Math.Clamp(playbook.MaxMinutes, 5, 720),
             QueuedAt = now,
+            ScheduledFor = scheduledFor?.ToUniversalTime(),
         };
         db.Runs.Add(run);
         try
@@ -236,7 +246,7 @@ public sealed class RunDispatcher(
         await realtime.PublishAsync(project.Id, "run.changed", new
         {
             runId = run.Id, itemId = item.Id, itemKey = item.Key, status = "queued", agentId = agentUserId,
-            kind = refine is null ? "implement" : "refine",
+            kind = refine is null ? "implement" : "refine", scheduledFor = run.ScheduledFor,
         }, ct);
         AutomationMetrics.Started.Add(1);
 
