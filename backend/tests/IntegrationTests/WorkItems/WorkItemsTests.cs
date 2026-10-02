@@ -205,6 +205,66 @@ public sealed class WorkItemCoreTests(PostgresFixture postgres, GarageFixture ga
 }
 
 [Trait("Category", "WorkItems")]
+public sealed class WorkItemDuplicateTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
+{
+    [Fact]
+    public async Task duplicate_copies_the_item_and_its_children_into_the_initial_state_and_leaves_the_original_alone()
+    {
+        var labelResponse = await Client.PostAsJsonAsync($"/api/v1/orgs/work-items/projects/{Project.Key}/labels",
+            new CreateLabelRequest("frontend", null, null, null), ApiTestContext.Json, CancellationToken);
+        labelResponse.EnsureSuccessStatusCode();
+        var label = (await labelResponse.Content.ReadFromJsonAsync<LabelView>(ApiTestContext.Json, CancellationToken))!;
+        var created = await Client.PostAsJsonAsync($"/api/v1/orgs/work-items/projects/{Project.Key}/items/",
+            new CreateWorkItemRequest(WorkItemType.Story, "Checkout", "Pay **once**", null, WorkItemPriority.High, UserId, null, null, 5, null, null, null, null, [label.Id]),
+            ApiTestContext.Json, CancellationToken);
+        created.EnsureSuccessStatusCode();
+        var story = (await created.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, CancellationToken))!;
+        var task = await CreateAsync(WorkItemType.Task, "Wire the button", parentId: story.Id, estimateHours: 3);
+        var active = (await WorkflowsAsync()).Single().States.Single(s => s.Name == "Active");
+        var moved = await Client.PostAsJsonAsync(ItemPath(story.Key, "transition"), new TransitionRequest(active.Id, story.Version), ApiTestContext.Json, CancellationToken);
+        moved.EnsureSuccessStatusCode();
+        story = (await moved.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, CancellationToken))!;
+        (await Client.PostAsJsonAsync(ItemPath(story.Key, "comments"), new CreateCommentRequest("Original only"), ApiTestContext.Json, CancellationToken)).EnsureSuccessStatusCode();
+
+        var response = await Client.PostAsync(ItemPath(story.Key, "duplicate"), null, CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var copy = (await response.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, CancellationToken))!;
+        Assert.NotEqual(story.Key, copy.Key);
+        Assert.Equal("Copy of Checkout", copy.Title);
+        Assert.Equal(WorkItemType.Story, copy.Type);
+        Assert.Equal("Pay **once**", copy.DescriptionMarkdown);
+        Assert.Equal(WorkItemPriority.High, copy.Priority);
+        Assert.Equal(label.Id, Assert.Single(copy.Labels).Id);
+        Assert.Equal(WorkflowStateCategory.Proposed, copy.StateCategory);
+        Assert.Null(copy.AssigneeId);
+        Assert.Null(copy.Points);
+        Assert.Equal(1, copy.Rollup.TotalCount);
+
+        var children = (await Client.GetFromJsonAsync<List<WorkItemView>>(ItemPath(copy.Key, "children"), ApiTestContext.Json, CancellationToken))!;
+        var child = Assert.Single(children);
+        Assert.NotEqual(task.Key, child.Key);
+        Assert.Equal("Wire the button", child.Title);
+        Assert.Equal(WorkItemType.Task, child.Type);
+        Assert.Equal(WorkflowStateCategory.Proposed, child.StateCategory);
+
+        var comments = (await Client.GetFromJsonAsync<PagedResult<CommentView>>(ItemPath(copy.Key, "comments"), ApiTestContext.Json, CancellationToken))!;
+        Assert.Empty(comments.Items);
+        var original = (await Client.GetFromJsonAsync<WorkItemView>(ItemPath(story.Key), ApiTestContext.Json, CancellationToken))!;
+        Assert.Equal(story.Version, original.Version);
+        Assert.Equal("Checkout", original.Title);
+        Assert.Equal(1, original.Rollup.TotalCount);
+    }
+
+    [Fact]
+    public async Task duplicate_of_an_unknown_item_is_not_found()
+    {
+        var response = await Client.PostAsync(ItemPath($"{Project.Key}-999", "duplicate"), null, CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+}
+
+[Trait("Category", "WorkItems")]
 public sealed class WorkItemHierarchyTests(PostgresFixture postgres, GarageFixture garage) : WorkItemsTestBase(postgres, garage)
 {
     [Fact]

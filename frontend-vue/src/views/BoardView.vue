@@ -25,15 +25,14 @@ import {
   type WorkItem,
   type WorkItemType,
 } from '@/api/items'
-import { avatarUrl } from '@/api/profile'
 import { listProjectMembers } from '@/api/projects'
 import ItemTypeIcon from '@/components/common/ItemTypeIcon.vue'
 import ClaimGlyph from '@/components/common/ClaimGlyph.vue'
 import KeyChip from '@/components/common/KeyChip.vue'
 import LabelChip from '@/components/common/LabelChip.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
-import UserAvatar from '@/components/common/UserAvatar.vue'
 import UserSelect from '@/components/common/UserSelect.vue'
+import AssigneeSelect from '@/components/items/AssigneeSelect.vue'
 import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 import { useItemModal } from '@/composables/useItemModal'
@@ -144,9 +143,6 @@ const projectMembersQuery = useQuery({
 const board = computed(() => boardQuery.data.value)
 const workflowStates = computed(() => workflowQuery.data.value?.states ?? [])
 const projectMembers = computed(() => projectMembersQuery.data.value ?? [])
-const membersById = computed(
-  () => new Map(projectMembers.value.map((member) => [member.userId, member])),
-)
 // The assignee filter is applied by the server, so column counts and WIP stay exact.
 const visibleBoard = board
 const cards = computed(() => visibleBoard.value?.columns.flatMap((column) => column.cards) ?? [])
@@ -207,9 +203,6 @@ function lanes(cards: WorkItem[]) {
       return groups
     }, {}),
   ).map(([name, grouped]) => ({ name, cards: grouped }))
-}
-function assigneeName(assigneeId: string | null) {
-  return assigneeId ? (membersById.value.get(assigneeId)?.displayName ?? assigneeId) : 'Unassigned'
 }
 const isOnlyMine = computed(
   () => assigneeFilterIds.value.length === 1 && assigneeFilterIds.value[0] === session.user?.id,
@@ -294,8 +287,7 @@ watch(board, () => {
   for (const card of cards.value) if (expanded.has(card.id)) void loadChildren(card)
 })
 
-async function changeAssignee(card: WorkItem, event: Event) {
-  const assigneeId = (event.target as HTMLSelectElement).value || null
+async function changeAssignee(card: WorkItem, assigneeId: string | null) {
   if (card.assigneeId === assigneeId || assigningCardIds.value.has(card.id)) return
   assigningCardIds.value = new Set([...assigningCardIds.value, card.id])
   try {
@@ -844,37 +836,15 @@ watch(
                         >{{ cardHours(card) }}h</span
                       >
                       <div class="ml-auto flex min-w-0 items-center gap-1">
-                        <UserAvatar
-                          v-if="card.assigneeId"
-                          :name="assigneeName(card.assigneeId)"
-                          :is-agent="membersById.get(card.assigneeId)?.isAgent"
-                          :src="
-                            avatarUrl(card.assigneeId, membersById.get(card.assigneeId)?.avatarKey)
-                          "
-                          size="sm"
-                        /><label class="sr-only" :for="`assignee-${card.id}`"
-                          >Assignee for {{ card.key }}</label
-                        ><select
-                          :id="`assignee-${card.id}`"
-                          :value="card.assigneeId ?? ''"
-                          class="border-input bg-background max-w-32 rounded border px-1 py-0.5 text-xs"
+                        <AssigneeSelect
+                          :model-value="card.assigneeId"
+                          :members="projectMembers"
+                          :label="`Assignee for ${card.key}`"
                           :disabled="
                             assigningCardIds.has(card.id) || projectMembersQuery.isPending.value
                           "
-                          @click.stop
-                          @mousedown.stop
-                          @keydown.stop
-                          @change.stop="changeAssignee(card, $event)"
-                        >
-                          <option value="">Unassigned</option>
-                          <option
-                            v-for="member in projectMembers"
-                            :key="member.userId"
-                            :value="member.userId"
-                          >
-                            {{ member.displayName }}
-                          </option>
-                        </select>
+                          @change="changeAssignee(card, $event)"
+                        />
                       </div>
                     </div>
                     <div
