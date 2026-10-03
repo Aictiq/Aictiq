@@ -129,4 +129,4 @@ The AI software factory.
 - [Architecture](../ARCHITECTURE.md) - module boundaries, contracts and the request path.
 - [Engineering invariants](./invariants.md) - the rules these tables enforce.
 - [Security model](./security.md) - what the constraints above are defending.
-- [Performance](./performance.md) - the indexes that matter and why others were rejected.
+- [Performance](./performance.md) - the budget, current baseline and what guards it.
