@@ -7,7 +7,7 @@ import type { GlobalOptions } from '../context.js'
 import { CliError, ExitCode } from '../errors.js'
 import { print, printJson, renderFields, renderTable } from '../output.js'
 import { promptSecret } from '../prompt.js'
-import { version } from '../version.js'
+import { packageRoot, version } from '../version.js'
 import { RunnerClient, RunnerHttpError } from '../runner/client.js'
 import {
   profileKey,
@@ -20,10 +20,17 @@ import {
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
 import { harnesses, probeHarnesses } from '../runner/harness/index.js'
-import { serviceDefinition, servicePlatform, startedAsService, type ServicePlatform } from '../runner/service.js'
+import {
+  serviceDefinition,
+  servicePlatform,
+  startedAsService,
+  UpdateExitCode,
+  type ServicePlatform,
+} from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
 import type { RunnerCapabilities } from '../runner/types.js'
+import { cliEntryPath, PackageName, rerun, SelfUpdater, UpdateCheckIntervalMs } from '../runner/update.js'
 import {
   DefaultAttachmentMaxBytes,
   DefaultAttachmentMaxCount,
@@ -305,8 +312,14 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     .option('--parallel <n>', 'Runs of one organization executed at the same time', '1')
     .option('--keep-workspaces', 'Leave each run’s checkout on disk after it finishes')
     .option('--workspace-root <path>', 'Where run checkouts are created')
+    .option('--no-auto-update', 'Only log a newer CLI on npm; never install it and restart')
     .action(
-      async (options: { parallel: string; keepWorkspaces?: boolean; workspaceRoot?: string }) => {
+      async (options: {
+        parallel: string
+        keepWorkspaces?: boolean
+        workspaceRoot?: string
+        autoUpdate: boolean
+      }) => {
         const config = requireConfig()
         const parallel = Number.parseInt(options.parallel, 10)
         if (!Number.isInteger(parallel) || parallel < 1 || parallel > 16) {
@@ -320,67 +333,112 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         const workspaceRoot = resolve(options.workspaceRoot ?? defaultWorkspaceRoot())
         // Workspaces failed runs kept for a continue expire while the runner is down too.
         if (options.keepWorkspaces !== true) await pruneKeptWorkspaces(workspaceRoot)
-        const supervisor = new RunnerSupervisor({
-          readConfig: () => readRunnerConfig(),
-          local: log,
-          learned: (profile) => {
-            // Re-read rather than write what this process holds: `register` or `root` may
-            // have changed the file since.
-            const current = readRunnerConfig()
-            const stored = current?.profiles.find((p) => p.token === profile.token)
-            if (!current || !stored || stored.organization === profile.organization) return
-            stored.organization = profile.organization
-            writeRunnerConfig(current)
-          },
-          createLoop: (profile, floor, onHello) => {
-            const client = new RunnerClient({ baseUrl: profile.url, token: profile.token })
-            const local = (message: string) => log(`[${profileLabel(profile)}] ${message}`)
-            return new RunnerLoop({
-              client,
-              parallel,
-              probe: async () => {
-                // Re-read, like each run does: a new mapping or root shows up in the web UI's
-                // setup guide on the next heartbeat. Only this profile's are reported.
-                const own = readRunnerConfig()?.profiles.find((p) => p.token === profile.token) ?? profile
-                return {
-                  ...(await probe(parallel, config.machineId, own)),
-                  service: startedAsService(),
-                }
-              },
-              local,
-              floor,
-              floorKey: profileKey(profile),
-              onHello,
-              execute: (run, hello, shutdown) => {
-                // Re-read per run, so a new mapping or root applies without restarting the
-                // runner. Only this profile's: another organization's roots never apply.
-                const current = readRunnerConfig()
-                const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
-                return executeRun(run, {
-                  client,
-                  hello,
-                  adapters: harnesses,
-                  runnerToken: profile.token,
-                  shutdown,
-                  local,
-                  workspace: {
-                    root: workspaceRoot,
-                    repositories: own.workspaces,
-                    repoRoots: own.repoRoots,
-                    keep: options.keepWorkspaces === true,
-                    mcpServer: mcpServerCommand(),
-                    attachmentMaxCount: (current ?? config).attachments.maxCount,
-                    attachmentMaxBytes: (current ?? config).attachments.maxBytes,
-                  },
-                })
-              },
-            })
-          },
-        })
+        const createSupervisor = () =>
+          new RunnerSupervisor({
+            readConfig: () => readRunnerConfig(),
+            local: log,
+            learned: (profile) => {
+              // Re-read rather than write what this process holds: `register` or `root` may
+              // have changed the file since.
+              const current = readRunnerConfig()
+              const stored = current?.profiles.find((p) => p.token === profile.token)
+              if (!current || !stored || stored.organization === profile.organization) return
+              stored.organization = profile.organization
+              writeRunnerConfig(current)
+            },
+            createLoop: (profile, floor, onHello) => {
+              const client = new RunnerClient({ baseUrl: profile.url, token: profile.token })
+              const local = (message: string) => log(`[${profileLabel(profile)}] ${message}`)
+              return new RunnerLoop({
+                client,
+                parallel,
+                probe: async () => {
+                  // Re-read, like each run does: a new mapping or root shows up in the web UI's
+                  // setup guide on the next heartbeat. Only this profile's are reported.
+                  const own = readRunnerConfig()?.profiles.find((p) => p.token === profile.token) ?? profile
+                  return {
+                    ...(await probe(parallel, config.machineId, own)),
+                    service: startedAsService(),
+                  }
+                },
+                local,
+                floor,
+                floorKey: profileKey(profile),
+                onHello,
+                execute: (run, hello, shutdown) => {
+                  // Re-read per run, so a new mapping or root applies without restarting the
+                  // runner. Only this profile's: another organization's roots never apply.
+                  const current = readRunnerConfig()
+                  const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
+                  return executeRun(run, {
+                    client,
+                    hello,
+                    adapters: harnesses,
+                    runnerToken: profile.token,
+                    shutdown,
+                    local,
+                    workspace: {
+                      root: workspaceRoot,
+                      repositories: own.workspaces,
+                      repoRoots: own.repoRoots,
+                      keep: options.keepWorkspaces === true,
+                      mcpServer: mcpServerCommand(),
+                      attachmentMaxCount: (current ?? config).attachments.maxCount,
+                      attachmentMaxBytes: (current ?? config).attachments.maxBytes,
+                    },
+                  })
+                },
+              })
+            },
+          })
+
+        // runner.json is read again at each check, so `"autoUpdate": false` applies without a restart.
+        const autoUpdate = () => options.autoUpdate && readRunnerConfig()?.autoUpdate !== false
+        const updater = new SelfUpdater({ current: version, packageRoot, entry: cliEntry(), log })
+        /** The version to install once the runs in flight are done, when a check found one. */
+        let target: string | null = null
+        let supervisor = createSupervisor()
+        let interrupted = false
+
+        const check = async (): Promise<void> => {
+          const result = await updater.check()
+          if (result.status === 'unavailable') {
+            log(`Update check failed (${result.reason}); staying on ${version}`)
+            return
+          }
+          if (result.status === 'current') {
+            log(`Update check: ${version} is up to date (latest on npm: ${result.latest})`)
+            return
+          }
+          if (!autoUpdate()) {
+            log(
+              `Update check: ${PackageName} ${result.latest} is available (running ${version}); auto-update is off, so run \`aictiq runner update\``,
+            )
+            return
+          }
+          if (interrupted || target) return
+          try {
+            await updater.installation()
+          } catch (error) {
+            log(
+              `Update check: ${PackageName} ${result.latest} is available (running ${version}), but ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return
+          }
+          target = result.latest
+          const inFlight = supervisor.inFlight
+          log(
+            `Update check: ${PackageName} ${result.latest} is available (running ${version}); claiming no new runs${
+              inFlight > 0 ? ` and waiting for ${inFlight} in flight` : ''
+            } before upgrading`,
+          )
+          supervisor.stop()
+        }
 
         let interrupts = 0
         const onSignal = (signal: NodeJS.Signals) => {
           interrupts++
+          interrupted = true
           if (interrupts === 1 && supervisor.inFlight > 0) {
             log(
               `${signal}: finishing ${supervisor.inFlight} run(s) in flight; send it again to cancel them`,
@@ -395,16 +453,87 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         }
         process.on('SIGINT', onSignal)
         process.on('SIGTERM', onSignal)
+        let upgraded: { from: string; to: string } | null = null
         try {
-          await supervisor.run()
+          // Before claiming anything, so an outdated runner upgrades without a run to wait for.
+          await check()
+          const timer = setInterval(() => void check(), UpdateCheckIntervalMs)
+          try {
+            while (!upgraded && !interrupted) {
+              if (!target) await supervisor.run()
+              if (interrupted || !target) break
+              try {
+                upgraded = await updater.install(target)
+              } catch (error) {
+                // Back to work on this version; the next check (hours away) tries again.
+                log(
+                  `Upgrade to ${target} failed (${error instanceof Error ? error.message : String(error)}); staying on ${version}`,
+                )
+                target = null
+                supervisor = createSupervisor()
+              }
+            }
+          } finally {
+            clearInterval(timer)
+          }
         } catch (error) {
           throw asCliError(error)
         } finally {
           process.off('SIGINT', onSignal)
           process.off('SIGTERM', onSignal)
         }
+        if (!upgraded) return
+        if (interrupted) {
+          log(`Upgraded ${PackageName} ${upgraded.from} → ${upgraded.to}; stopped, so not restarting`)
+          return
+        }
+
+        log(`Upgraded ${PackageName} ${upgraded.from} → ${upgraded.to}; restarting`)
+        if (startedAsService()) {
+          // The service definition starts the same entry again, which is now the new version.
+          process.exitCode = UpdateExitCode
+          return
+        }
+        process.exitCode = await rerun(cliEntry(), process.argv.slice(2))
       },
     )
+
+  runner
+    .command('update')
+    .description(`Install the latest ${PackageName} from npm now, with the package manager it was installed with`)
+    .action(async () => {
+      const log = (message: string) => {
+        if (!globals().json) process.stderr.write(`${message}\n`)
+      }
+      const updater = new SelfUpdater({ current: version, packageRoot, entry: cliEntry(), log })
+      const result = await updater.check()
+      if (result.status === 'unavailable') {
+        throw new CliError(`Cannot check for updates: ${result.reason}`, ExitCode.Error)
+      }
+      let to = version
+      if (result.status === 'newer') {
+        try {
+          to = (await updater.install(result.latest)).to
+        } catch (error) {
+          throw new CliError(
+            `Upgrade to ${result.latest} failed: ${error instanceof Error ? error.message : String(error)}`,
+            ExitCode.Error,
+          )
+        }
+      }
+      if (globals().json) {
+        printJson({ from: version, to, latest: result.latest, upgraded: to !== version })
+        return
+      }
+      print(
+        to === version
+          ? `${PackageName} ${version} is up to date (latest on npm: ${result.latest}).`
+          : [
+              `Upgraded ${PackageName} ${version} → ${to}.`,
+              'A running `aictiq runner start` keeps its version until it restarts; with auto-update on it restarts at its next check, once its runs finish.',
+            ].join('\n'),
+      )
+    })
 
   runner
     .command('install-service')
@@ -504,7 +633,7 @@ function selectProfile(config: RunnerConfig, org: string | undefined): RunnerPro
 
 /** The CLI that is running now, so the agent's MCP bridge is this exact version. */
 function cliEntry(): string {
-  return resolve(process.argv[1] ?? 'aictiq')
+  return cliEntryPath()
 }
 
 function mcpServerCommand(): { command: string; args: string[] } {

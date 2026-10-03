@@ -183,7 +183,8 @@ aictiq runner map ACME ~/src/aictiq [--org <slug>]  # project key → local clon
 aictiq runner map ACME --remove [--org <slug>]
 aictiq runner remove <org>            # stop running for one organization on this machine
 aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
-aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>]
+aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>] [--no-auto-update]
+aictiq runner update                  # install the latest @aictiq/cli now and report old → new
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
 
@@ -218,6 +219,21 @@ seconds later), and reports the outcome with the last pull request URL the harne
 (or `gh pr view` of the branch). The first SIGINT/SIGTERM stops claiming and waits for runs
 in flight; a second cancels them. A disabled, deleted or rotated runner stops that
 organization's profile; the process exits with code 5 once no profile works.
+
+`start` keeps itself up to date. When it starts, and every 6 hours after that, it compares
+its version with the `latest` dist-tag of `@aictiq/cli` on the npm registry (or
+`npm_config_registry`) and logs the result. If a newer version is out, it stops claiming
+runs, waits for the runs in flight to finish, installs that version globally with the
+package manager it came from (`npm install --global` or `pnpm add --global`), and restarts:
+a service exits with code 75, which every `install-service` definition restarts on, and a
+runner in a terminal starts itself again with the same arguments. Nothing happens when the
+running version is already the latest or newer (a local build). If the registry is
+unreachable, the install fails (for example, no permission to write the global prefix; the
+runner never prompts or uses sudo), or the CLI is not a global npm/pnpm install, the runner
+logs a warning, goes back to work on its current version, and tries again at the next check.
+Turn installing off with `--no-auto-update` or `"autoUpdate": false` in `runner.json`; the
+check and its log line still happen. `aictiq runner update` runs the same check and install
+on demand. A running `start` picks up the new version at its next check.
 
 ## Development
 
