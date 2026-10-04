@@ -3,7 +3,7 @@ using Aictiq.SharedKernel.Domain;
 namespace Aictiq.Modules.Notifications.Domain;
 
 /// <summary>Stored as its number: new kinds go on the end.</summary>
-public enum NotificationKind : short { Assigned, Mentioned, Commented, Transitioned, Claimed, SprintStarted, SprintCompleted, WikiMentioned, InviteAccepted, Replied, Reacted }
+public enum NotificationKind : short { Assigned, Mentioned, Commented, Transitioned, Claimed, SprintStarted, SprintCompleted, WikiMentioned, InviteAccepted, Replied, Reacted, RunSucceeded, RunFailed, RunNeedsInput }
 
 public sealed class Notification : TenantEntity
 {
@@ -26,6 +26,18 @@ public sealed class NotificationPreference : EntityBase
     public NotificationKind Kind { get; init; }
     public bool InApp { get; set; } = true;
     public EmailNotificationMode EmailMode { get; set; } = EmailNotificationMode.Immediate;
+
+    /// <summary>Null follows the organization's default, and failing that <see cref="EmailMode"/>.</summary>
+    public EmailNotificationMode? TelegramMode { get; set; }
+    public EmailNotificationMode? SlackMode { get; set; }
+    public EmailNotificationMode? DiscordMode { get; set; }
+
+    public EmailNotificationMode? ChatMode(ChatChannelType type) => type switch
+    {
+        ChatChannelType.Telegram => TelegramMode,
+        ChatChannelType.Slack => SlackMode,
+        _ => DiscordMode
+    };
 }
 
 /// <summary>Email is intentionally a three-state choice; a boolean cannot distinguish

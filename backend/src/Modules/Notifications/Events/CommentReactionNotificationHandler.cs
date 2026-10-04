@@ -11,7 +11,7 @@ namespace Aictiq.Modules.Notifications.Events;
 
 /// <summary>Only the comment author hears about the first addition of an emoji.</summary>
 public sealed class CommentReactionNotificationHandler(NotificationsDbContext db, IUserRealtimePublisher realtime,
-    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
+    NotificationEmailService email, ChatNotificationService chat, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
     : IDomainEventHandler<CommentReactionAdded>
 {
     public async Task HandleAsync(CommentReactionAdded e, CancellationToken ct)
@@ -41,8 +41,9 @@ public sealed class CommentReactionNotificationHandler(NotificationsDbContext db
         }
         // Reuse the saved notification on replay: if a worker stopped between the inbox
         // write and email queueing, retry still finishes mail. The queue uses its id too.
-        await email.QueueCommentAsync([notification],
-            new CommentEmail(e.OrganizationId, e.CommentId, e.ActorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt, e.Emoji), ct);
+        var comment = new CommentEmail(e.OrganizationId, e.CommentId, e.ActorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt, e.Emoji);
+        await email.QueueCommentAsync([notification], comment, ct);
+        await chat.QueueCommentAsync([notification], comment, ct);
         await realtime.PublishToUserAsync(notification.UserId, "notification.new", new { eventId = e.EventId }, ct);
 
         Task<Notification?> FindAsync() => db.Notifications.FirstOrDefaultAsync(x => x.UserId == e.CommentAuthorId && x.EventId == e.EventId, ct);

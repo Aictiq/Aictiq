@@ -29,6 +29,11 @@ public sealed record NotificationPreferenceView
     public bool InApp { get; init; }
     [JsonIgnore] public bool Email => EmailMode != EmailNotificationMode.Off;
     [JsonPropertyName("email")] public EmailNotificationMode EmailMode { get; init; }
+
+    /// <summary>Chat channel modes; null follows the organization default, then email.</summary>
+    [JsonPropertyName("telegram")] public EmailNotificationMode? TelegramMode { get; init; }
+    [JsonPropertyName("slack")] public EmailNotificationMode? SlackMode { get; init; }
+    [JsonPropertyName("discord")] public EmailNotificationMode? DiscordMode { get; init; }
 }
 public sealed record PutNotificationPreferencesRequest(IReadOnlyList<NotificationPreferenceView>? Preferences);
 
@@ -42,6 +47,7 @@ public static class NotificationEndpoints
         me.MapGet("/notification-preferences", Preferences).RequireScope(Scopes.Read);
         me.MapPut("/notification-preferences", PutPreferences).RequireScope(Scopes.Write);
         api.MapGet("/email/unsubscribe", Unsubscribe).AllowAnonymous().WithTags("Notifications");
+        api.MapChatChannelEndpoints();
         return api;
     }
     // Nullable, like every other optional query flag: a non-nullable bool is *required*
@@ -49,8 +55,8 @@ public static class NotificationEndpoints
     // got a 400 rather than its list.
     private static async Task<IResult> List(bool? unread, NotificationsDbContext db, ICurrentUser user, CancellationToken ct) => Results.Ok(await db.Notifications.IgnoreQueryFilters().AsNoTracking().Where(x => x.UserId == user.UserId && (unread != true || x.ReadAt == null)).OrderByDescending(x => x.CreatedAt).Take(200).Select(x => new NotificationView(x.Id, x.Kind, x.ProjectId, x.ItemId, x.ItemKey, x.Message, x.CreatedAt, x.ReadAt, x.OrganizationId, x.RunId)).ToListAsync(ct));
     private static async Task<IResult> MarkRead(MarkNotificationsReadRequest request, NotificationsDbContext db, ICurrentUser user, TimeProvider clock, CancellationToken ct) { var query = db.Notifications.IgnoreQueryFilters().Where(x => x.UserId == user.UserId && x.ReadAt == null); if (!request.All) { var ids = request.Ids?.Distinct().ToArray() ?? []; if (ids.Length == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["ids"] = ["Provide notification ids or all=true."] }); query = query.Where(x => ids.Contains(x.Id)); } var count = await query.ExecuteUpdateAsync(x => x.SetProperty(n => n.ReadAt, clock.GetUtcNow()), ct); return Results.Ok(new { read = count }); }
-    private static async Task<IResult> Preferences(NotificationsDbContext db, ICurrentUser user, CancellationToken ct) => Results.Ok(await db.Preferences.AsNoTracking().Where(x => x.UserId == user.UserId).Select(x => new NotificationPreferenceView(x.Kind, x.InApp, x.EmailMode)).ToListAsync(ct));
-    private static async Task<IResult> PutPreferences(PutNotificationPreferencesRequest request, NotificationsDbContext db, ICurrentUser user, CancellationToken ct) { foreach (var value in request.Preferences ?? []) { var preference = await db.Preferences.SingleOrDefaultAsync(x => x.UserId == user.UserId && x.Kind == value.Kind, ct); if (preference is null) db.Preferences.Add(new NotificationPreference { UserId = user.UserId!, Kind = value.Kind, InApp = value.InApp, EmailMode = value.EmailMode }); else { preference.InApp = value.InApp; preference.EmailMode = value.EmailMode; } } await db.SaveChangesAsync(ct); return await Preferences(db, user, ct); }
+    private static async Task<IResult> Preferences(NotificationsDbContext db, ICurrentUser user, CancellationToken ct) => Results.Ok(await db.Preferences.AsNoTracking().Where(x => x.UserId == user.UserId).Select(x => new NotificationPreferenceView(x.Kind, x.InApp, x.EmailMode) { TelegramMode = x.TelegramMode, SlackMode = x.SlackMode, DiscordMode = x.DiscordMode }).ToListAsync(ct));
+    private static async Task<IResult> PutPreferences(PutNotificationPreferencesRequest request, NotificationsDbContext db, ICurrentUser user, CancellationToken ct) { foreach (var value in request.Preferences ?? []) { var preference = await db.Preferences.SingleOrDefaultAsync(x => x.UserId == user.UserId && x.Kind == value.Kind, ct); if (preference is null) db.Preferences.Add(preference = new NotificationPreference { UserId = user.UserId!, Kind = value.Kind }); preference.InApp = value.InApp; preference.EmailMode = value.EmailMode; preference.TelegramMode = value.TelegramMode; preference.SlackMode = value.SlackMode; preference.DiscordMode = value.DiscordMode; } await db.SaveChangesAsync(ct); return await Preferences(db, user, ct); }
     private static async Task<IResult> Unsubscribe(string? token, NotificationsDbContext db, NotificationUnsubscribeTokens tokens, CancellationToken ct)
     {
         if (!tokens.TryRead(token, out var userId, out var kind)) return Results.BadRequest(new { error = "The unsubscribe link is invalid or expired." });

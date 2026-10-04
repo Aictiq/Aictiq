@@ -91,6 +91,54 @@ Run-completion updates also include an optional `runId`. When the notification�
 organization grants `canOperateFactory`, link to `/o/{slug}/factory/runs/{runId}`;
 otherwise open the related item. Older notifications have no run ID.
 
+## Notification preferences and chat channels
+
+`GET`/`PUT /api/v1/me/notification-preferences` exchange one entry per kind:
+
+```json
+{ "kind": "runFailed", "inApp": true, "email": "off",
+  "telegram": "immediate", "slack": "digest", "discord": null }
+```
+
+Kinds: `assigned`, `mentioned`, `commented`, `transitioned`, `claimed`, `sprintStarted`,
+`sprintCompleted`, `wikiMentioned`, `inviteAccepted`, `replied`, `reacted`,
+`runSucceeded`, `runFailed`, `runNeedsInput`. Modes are `off`, `immediate` and `digest`.
+A `null` chat mode follows the organization default and then `email`. `PUT` writes every
+field of each entry it sends, so a client that omits the chat fields clears them back to
+`null`. With `inApp: false`, the kind is not sent on any channel.
+
+Personal channels, at most one per platform:
+
+| Method | Path | |
+|---|---|---|
+| `GET` | `/api/v1/me/notification-channels` | `{ telegramAvailable, telegramBotUsername, channels }` |
+| `POST` | `/api/v1/me/notification-channels` | `{ "type": "slack" \| "discord", "webhookUrl": "…" }` or `{ "type": "telegram" }`. Replaces an existing channel of that type. |
+| `POST` | `/api/v1/me/notification-channels/{id}/test` | Sends a test message now: `200 { ok: true }` or `422 { error }`. A success clears `broken`. |
+| `DELETE` | `/api/v1/me/notification-channels/{id}` | `204`. |
+
+A channel is `{ id, type, status, target, lastError, connectedAt, createdAt }`. `status` is
+`pending` (a Telegram channel waiting for its code), `active` or `broken`. `target` is
+masked, for example `hooks.slack.com/…a1b2`. The webhook URL or chat id is never
+returned. `POST` responds with `{ channel, connectCode, connectUrl, expiresAt }`; the
+code and its `t.me` link are only returned for Telegram, and only in that response.
+Slack URLs must start with `https://hooks.slack.com/services/` and Discord URLs with
+`https://discord.com/api/webhooks/`. Other URLs get `400` with `errors.webhookUrl`.
+Telegram gets `400` when `telegramAvailable` is false.
+
+Organization channels and defaults (org admins; `read` scope for `GET`, `admin` for writes):
+
+| Method | Path | |
+|---|---|---|
+| `GET` | `/api/v1/orgs/{slug}/notification-channels` | `{ telegramAvailable, telegramBotUsername, kinds, channels }`. `kinds` lists the org-wide kinds. |
+| `POST` | `/api/v1/orgs/{slug}/notification-channels` | `{ type, name, webhookUrl? }`. The Telegram link is a `startgroup` link. |
+| `PATCH` | `/api/v1/orgs/{slug}/notification-channels/{id}` | `{ name?, modes?: { "<kind>": "<mode>" } }`. Only org-wide kinds are accepted; a missing kind is `off`. |
+| `POST` | `/api/v1/orgs/{slug}/notification-channels/{id}/test` | As above. |
+| `DELETE` | `/api/v1/orgs/{slug}/notification-channels/{id}` | `204`. |
+| `GET`/`PUT` | `/api/v1/orgs/{slug}/notification-defaults` | `[{ kind, email, telegram, slack, discord }]` with nullable modes. `PUT { "defaults": [...] }` replaces the set. Kinds left out, or with every mode `null`, have no default. |
+
+The org-wide kinds are `transitioned`, `sprintStarted`, `sprintCompleted`, `runSucceeded`,
+`runFailed` and `runNeedsInput`.
+
 ## Comment reactions
 
 Comments and replies support the fixed set 👍 👎 ❤️ 🎉 👀 ✅. Use

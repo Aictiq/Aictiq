@@ -20,8 +20,8 @@ public sealed class Sprint : TenantEntity
     public DateTimeOffset? CompletedAt { get; set; }
     public uint Version { get; private set; }
 
-    public void Complete() => Raise(new SprintCompleted(OrganizationId, Id, TeamId));
-    public void Started() => Raise(new SprintStarted(OrganizationId, Id, TeamId));
+    public void Complete(Guid? projectId = null) => Raise(new SprintCompleted(OrganizationId, Id, TeamId) { Name = Name, ProjectId = projectId });
+    public void Started(Guid? projectId = null) => Raise(new SprintStarted(OrganizationId, Id, TeamId) { Name = Name, ProjectId = projectId });
     public void Changed(Guid projectId, string actorId) => Raise(new SprintChanged(projectId, Id, TeamId, actorId));
 }
 

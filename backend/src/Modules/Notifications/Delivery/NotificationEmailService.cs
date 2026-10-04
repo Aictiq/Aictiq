@@ -26,16 +26,14 @@ public sealed class NotificationEmailService(
         var actor = transition is null ? null : (await users.GetAsync([transition.ActorId], ct)).GetValueOrDefault(transition.ActorId);
         var states = transition is null ? new Dictionary<Guid, string>() :
             await workflows.GetStateNamesAsync(transition.ProjectId, [transition.FromStateId, transition.ToStateId], ct);
-        var preferences = await db.Preferences.AsNoTracking().Where(p => ids.Contains(p.UserId)).ToListAsync(ct);
-        var modes = preferences.ToDictionary(p => (p.UserId, p.Kind), p => p.EmailMode);
+        var modes = await NotificationModes.LoadAsync(db, ids, notifications.Select(n => n.OrganizationId).Distinct().ToArray(), ct);
         var organizationDetails = new Dictionary<Guid, OrganizationRef?>();
         foreach (var notification in notifications)
         {
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent ||
                 await presence.IsActiveAsync(notification.UserId, TimeSpan.FromMinutes(options.Value.PresenceMinutes), ct))
                 continue;
-            if (modes.TryGetValue((notification.UserId, notification.Kind), out var mode) &&
-                mode != EmailNotificationMode.Immediate)
+            if (modes.Email(notification.UserId, notification.OrganizationId, notification.Kind) != EmailNotificationMode.Immediate)
                 continue;
             if (transition is not null && await access.GetProjectRoleAsync(notification.UserId, transition.ProjectId, ct) is null)
                 continue;
@@ -47,6 +45,11 @@ public sealed class NotificationEmailService(
             var variables = Variables(notification, recipient, unsubscribe.Create(notification.UserId, notification.Kind),
                 emailOptions.Value.BaseUrl, organization?.Slug);
             var template = "notification";
+            // A run's own notification opens the run, for whoever may see runs.
+            if (notification.RunId is { } runId && ChatNotificationService.IsRunKind(notification.Kind) && organization is not null
+                && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl)
+                && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
+                variables["notificationUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/runs/{runId}";
             if (transition?.ItemTitle is not null)
             {
                 template = "transition";
@@ -99,8 +102,7 @@ public sealed class NotificationEmailService(
         if (!options.Value.EmailEnabled || notifications.Count == 0) return;
         var ids = notifications.Select(n => n.UserId).Append(comment.AuthorId).Distinct().ToArray();
         var profiles = await users.GetDeliveryProfilesAsync(ids, ct);
-        var preferences = await db.Preferences.AsNoTracking().Where(p => ids.Contains(p.UserId)).ToListAsync(ct);
-        var modes = preferences.ToDictionary(p => (p.UserId, p.Kind), p => p.EmailMode);
+        var modes = await NotificationModes.LoadAsync(db, ids, [comment.OrganizationId], ct);
         var organization = await organizations.FindByIdAsync(comment.OrganizationId, ct);
         var actorName = profiles.TryGetValue(comment.AuthorId, out var author) ? author.DisplayName : "Someone";
         var itemUrl = CommentLink(organization?.Slug, comment, emailOptions.Value.BaseUrl);
@@ -108,7 +110,7 @@ public sealed class NotificationEmailService(
         foreach (var notification in notifications)
         {
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent) continue;
-            if (modes.TryGetValue((notification.UserId, notification.Kind), out var mode) && mode != EmailNotificationMode.Immediate)
+            if (modes.Email(notification.UserId, notification.OrganizationId, notification.Kind) != EmailNotificationMode.Immediate)
                 continue;
             var template = notification.Kind switch
             {

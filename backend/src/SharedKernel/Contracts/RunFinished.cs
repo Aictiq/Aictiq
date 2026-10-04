@@ -45,4 +45,10 @@ public sealed record RunFinished(
     /// is then the agent's reply in that comment's thread rather than a new one.
     /// </summary>
     public Guid? TriggerCommentId { get; init; }
+
+    /// <summary>The person who dispatched the run, or null when an automation rule did.</summary>
+    public string? RequestedBy { get; init; }
+
+    /// <summary>A refine run that submitted <c>needs_input</c>: a person must answer its questions.</summary>
+    public bool NeedsInput { get; init; }
 }

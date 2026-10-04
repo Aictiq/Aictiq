@@ -10,12 +10,12 @@ namespace Aictiq.Modules.Notifications.Events;
 
 /// <summary>Mentions are explicit recipients, and a reply is addressed to whoever started the
 /// thread; watchers receive the companion comment notification. Only the first two are
-/// mailed: a watcher sees routine discussion in the inbox, while a comment written to
+/// mailed (and sent to chat channels): a watcher sees routine discussion in the inbox, while a comment written to
 /// someone reaches them by email. Actor exclusion and the database unique key make outbox
 /// retries safe.</summary>
 public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemWatchers watchers, IUserRealtimePublisher realtime,
-    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
-    : CommentNotifier(db, realtime, email, access, directory, clock), IDomainEventHandler<CommentAdded>
+    NotificationEmailService email, ChatNotificationService chat, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
+    : CommentNotifier(db, realtime, email, chat, access, directory, clock), IDomainEventHandler<CommentAdded>
 {
     public async Task HandleAsync(CommentAdded e, CancellationToken cancellationToken)
     {
@@ -35,8 +35,8 @@ public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemW
 
 /// <summary>An edit that tags someone new tells only them - never the watchers again.</summary>
 public sealed class CommentMentionsNotificationHandler(NotificationsDbContext db, IUserRealtimePublisher realtime,
-    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
-    : CommentNotifier(db, realtime, email, access, directory, clock), IDomainEventHandler<CommentMentionsAdded>
+    NotificationEmailService email, ChatNotificationService chat, IProjectAccess access, IUserDirectory directory, AmbientCurrentTenant tenant, TimeProvider clock)
+    : CommentNotifier(db, realtime, email, chat, access, directory, clock), IDomainEventHandler<CommentMentionsAdded>
 {
     public async Task HandleAsync(CommentMentionsAdded e, CancellationToken cancellationToken)
     {
@@ -48,9 +48,9 @@ public sealed class CommentMentionsNotificationHandler(NotificationsDbContext db
     }
 }
 
-/// <summary>Writes one inbox row per recipient and mails the ones the comment was addressed to.</summary>
+/// <summary>Writes one inbox row per recipient and mails - and chats - the ones the comment was addressed to.</summary>
 public abstract class CommentNotifier(NotificationsDbContext db, IUserRealtimePublisher realtime,
-    NotificationEmailService email, IProjectAccess access, IUserDirectory directory, TimeProvider clock)
+    NotificationEmailService email, ChatNotificationService chat, IProjectAccess access, IUserDirectory directory, TimeProvider clock)
 {
     /// <summary>
     /// A comment an agent wrote, or one in a thread an agent started, is the factory at work,
@@ -92,7 +92,9 @@ public abstract class CommentNotifier(NotificationsDbContext db, IUserRealtimePu
         try
         {
             await db.SaveChangesAsync(cancellationToken);
-            await email.QueueCommentAsync(created.Where(n => n.Kind is NotificationKind.Mentioned or NotificationKind.Replied).ToArray(), comment, cancellationToken);
+            var addressed = created.Where(n => n.Kind is NotificationKind.Mentioned or NotificationKind.Replied).ToArray();
+            await email.QueueCommentAsync(addressed, comment, cancellationToken);
+            await chat.QueueCommentAsync(addressed, comment, cancellationToken);
             foreach (var notification in created)
                 await realtime.PublishToUserAsync(notification.UserId, "notification.new", new { eventId }, cancellationToken);
         }
