@@ -71,8 +71,20 @@ public sealed record ItemsBulkUpdated(
     Guid OrganizationId, Guid ProjectId, IReadOnlyList<string> Keys, string ActorId) : DomainEvent, IIntegrationEvent;
 
 public sealed record SprintScopeChanged(Guid OrganizationId, Guid SprintId, Guid ItemId, bool Added, decimal? Points = null, decimal? RemainingHours = null) : DomainEvent, IIntegrationEvent;
-public sealed record SprintStarted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent;
-public sealed record SprintCompleted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent;
+/// <summary><see cref="Name"/> and <see cref="ProjectId"/> let shared notification channels name and link the
+/// sprint; events written before they existed carry nulls.</summary>
+public sealed record SprintStarted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent
+{
+    public string? Name { get; init; }
+    public Guid? ProjectId { get; init; }
+}
+
+/// <inheritdoc cref="SprintStarted"/>
+public sealed record SprintCompleted(Guid OrganizationId, Guid SprintId, Guid TeamId) : DomainEvent, IIntegrationEvent
+{
+    public string? Name { get; init; }
+    public Guid? ProjectId { get; init; }
+}
 public sealed record ClaimReleased(Guid OrganizationId, Guid ProjectId, Guid ItemId, string Key) : DomainEvent, IIntegrationEvent;
 
 /// <summary>The first addition of this user's emoji to this comment, never a re-addition.</summary>

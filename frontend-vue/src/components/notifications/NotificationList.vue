@@ -3,6 +3,7 @@ import { RouterLink } from 'vue-router'
 import type { Notification } from '@/api/notifications'
 import { factoryRunPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
+import { notificationKindLabel } from '@/utils/notifications'
 
 defineProps<{ entries: Notification[] }>()
 const emit = defineEmits<{ select: [entry: Notification] }>()
@@ -38,7 +39,7 @@ function destination(entry: Notification) {
             entry.message
           }}</span>
           <span class="text-muted-foreground mt-1 block text-xs">
-            {{ entry.itemKey ?? (entry.kind === 'reacted' ? 'Reacted to your comment' : entry.kind) }} · {{ new Date(entry.createdAt).toLocaleString() }}
+            {{ entry.itemKey ?? (entry.kind === 'reacted' ? 'Reacted to your comment' : notificationKindLabel(entry.kind)) }} · {{ new Date(entry.createdAt).toLocaleString() }}
           </span>
         </span>
         <span

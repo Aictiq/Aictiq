@@ -98,7 +98,10 @@ public static class Extensions
                         tracing.Filter = context =>
                             !context.Request.Path.StartsWithSegments("/health")
                     )
-                    .AddHttpClientInstrumentation();
+                    // Chat webhook URLs and Telegram API paths are credentials; the
+                    // Notifications module marks those requests so their URLs are not recorded.
+                    .AddHttpClientInstrumentation(http => http.FilterHttpRequestMessage = request =>
+                        !request.Options.TryGetValue(new HttpRequestOptionsKey<bool>("aictiq.secret-url"), out var secret) || !secret);
             });
 
         builder.AddOpenTelemetryExporters();

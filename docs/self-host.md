@@ -424,6 +424,52 @@ someone says they never got an email:
 `EMAIL_SMTP_PORT=1025` and `EMAIL_SMTP_STARTTLS=false`. `dotnet run --project
 backend/src/AppHost` wires the same thing up automatically in development.
 
+## Telegram, Slack and Discord
+
+Slack and Discord need nothing from you: people paste the incoming-webhook URL their
+workspace gives them, and Workers posts to it. Only those platforms' webhook hosts are
+accepted, so a pasted URL can never point the server at your internal network.
+
+Telegram needs a bot, and a self-hosted instance must bring its own. Without one,
+Telegram is not offered in settings or accepted by the API.
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and note its token
+   and username. To let it be added to group chats for shared channels, leave **Allow
+   Groups** on.
+2. Set:
+
+| Setting | Env var (compose) | |
+|---|---|---|
+| `Notifications:Telegram:BotToken` | `TELEGRAM_BOT_TOKEN` | The token from BotFather. A secret. |
+| `Notifications:Telegram:BotUsername` | `TELEGRAM_BOT_USERNAME` | Without the `@`. Used in the instructions and `t.me` links. |
+| `Notifications:Telegram:WebhookSecret` | `TELEGRAM_WEBHOOK_SECRET` | A random string (`openssl rand -hex 32`). Telegram sends it with every update, and updates without it are refused. |
+
+3. Register the bot's webhook with Telegram, once, against the public API address:
+
+```sh
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=$AICTIQ_URL/api/v1/telegram/webhook" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET" \
+  -d 'allowed_updates=["message"]'
+```
+
+The address must be reachable from the internet over HTTPS. Telegram does not call
+`localhost`. The webhook only links chats: when someone sends `/start <code>`, it records
+that chat for the code's channel and replies. Messages are sent by the Workers process
+through `api.telegram.org`, which must be reachable outbound.
+
+Chat messages queue in `notify.chat_outbox` and settle like email (`sent`, `skipped`,
+`failed`). A channel that fails `Notifications:Chat:MaxAttempts` (5) times in a row is
+marked broken. Its queued messages are skipped until its owner sends a successful test.
+Digest lines wait in `notify.chat_digest_entries` until the 08:00 sweep.
+
+Webhook URLs, chat ids and outgoing-webhook secrets are encrypted with ASP.NET Data
+Protection. The key ring lives in `notify.data_protection_keys`, so the API and Workers
+share it and it survives redeploys. Back it up with the database: a restored database
+without its keys cannot decrypt them, and every channel would need connecting again.
+HTTP client logging and tracing are off for chat requests, because their URLs are
+credentials.
+
 ## Rate limits
 
 The API rate-limits by client address, except for requests carrying a personal access
