@@ -438,7 +438,7 @@ public static class PlaybookEndpoints
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > Playbook.MaxNameLength)
             errors["name"] = ["A name of 1-100 characters is required."];
         if (!Harnesses.IsSupported(harness))
-            errors["harness"] = ["Choose claude, codex, or opencode."];
+            errors["harness"] = ["Choose claude, codex, opencode, or cursor."];
         if (maxMinutes is < 5 or > 720)
             errors["maxMinutes"] = ["Choose between 5 and 720 minutes."];
         var states = new[] { successStateId, failureStateId }.Where(id => id.HasValue)

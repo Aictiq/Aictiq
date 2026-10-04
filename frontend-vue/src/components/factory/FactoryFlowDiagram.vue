@@ -41,7 +41,7 @@ const stages: Stage[] = [
   {
     title: 'Agent works',
     where: 'Your machine',
-    body: 'Claude Code, Codex or OpenCode follows the playbook as the agent, with the Aictiq MCP server and a token that only works for this run.',
+    body: 'Claude Code, Codex, OpenCode or Cursor follows the playbook as the agent, with the Aictiq MCP server and a token that only works for this run.',
     icon: Bot,
   },
   {
