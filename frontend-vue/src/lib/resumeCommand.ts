@@ -13,6 +13,7 @@ const harnessCommands: Record<string, string> = {
   claude: 'claude --resume',
   codex: 'codex resume',
   opencode: 'opencode --session',
+  cursor: 'agent --resume',
 }
 
 /**
