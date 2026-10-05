@@ -75,8 +75,9 @@ export const cursor: HarnessAdapter = {
         '--approve-mcps',
         '--workspace',
         context.workspace,
-        '--add-dir',
-        context.attachmentsDir,
+        // The runner only creates the attachments directory when the item has attachments,
+        // and Cursor refuses to start with an --add-dir that does not exist.
+        ...(existsSync(context.attachmentsDir) ? ['--add-dir', context.attachmentsDir] : []),
         // Cursor keeps its chats per workspace path; the kept workspace is the same path.
         ...(context.resumeSessionId ? ['--resume', context.resumeSessionId] : []),
         // Cursor takes its prompt as an argument only, so it gets the path of the 0600 prompt

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
 import { versionOf } from './claude.js'
 import { failedOutcome } from './failure.js'
@@ -42,7 +43,9 @@ export const opencode: HarnessAdapter = {
             context.workspace,
             '--file',
             context.promptFile,
-            context.attachmentsDir,
+            // The runner only creates the attachments directory when the item has
+            // attachments, and OpenCode exits with "File not found" for a missing one.
+            ...(existsSync(context.attachmentsDir) ? [context.attachmentsDir] : []),
           ],
       env: {
         OPENCODE_CONFIG_CONTENT: JSON.stringify({

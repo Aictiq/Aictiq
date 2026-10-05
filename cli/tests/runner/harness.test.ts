@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { claude } from '../../src/runner/harness/claude.js'
 import { codex } from '../../src/runner/harness/codex.js'
@@ -53,7 +55,9 @@ describe('harness invocations', () => {
   })
 
   it('passes OpenCode a prompt file and an MCP config override', () => {
-    const invocation = opencode.invocation(context)
+    const attachmentsDir = mkdtempSync(join(tmpdir(), 'aictiq-opencode-attachments-'))
+    const invocation = opencode.invocation({ ...context, attachmentsDir })
+    rmSync(attachmentsDir, { recursive: true, force: true })
     expect(invocation.args).toEqual([
       'run',
       'Follow the instructions in the attached file.',
@@ -63,7 +67,7 @@ describe('harness invocations', () => {
       '/work/run',
       '--file',
       '/tmp/aictiq-prompt',
-      '/work/attachments',
+      attachmentsDir,
     ])
     expect(JSON.parse(invocation.env?.OPENCODE_CONFIG_CONTENT ?? '')).toEqual({
       $schema: 'https://opencode.ai/config.json',
@@ -75,6 +79,11 @@ describe('harness invocations', () => {
         },
       },
     })
+  })
+
+  it('attaches no directory to OpenCode when the item has no attachments', () => {
+    // OpenCode exits with "File not found" for a missing --file path.
+    expect(opencode.invocation(context).args.slice(-2)).toEqual(['--file', '/tmp/aictiq-prompt'])
   })
 })
 
@@ -138,7 +147,11 @@ describe('session ids and resume invocations', () => {
     expect(new Set(ids)).toEqual(new Set([id]))
   })
 
-  const resuming: InvocationContext = { ...context, prompt: 'Continue where you stopped.', resumeSessionId: 'sess-1' }
+  const resuming: InvocationContext = {
+    ...context,
+    prompt: 'Continue where you stopped.',
+    resumeSessionId: 'sess-1',
+  }
 
   it('resumes Claude by session id with the continue message on stdin', () => {
     const invocation = claude.invocation(resuming)

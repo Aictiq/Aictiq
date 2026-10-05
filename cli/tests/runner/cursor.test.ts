@@ -30,8 +30,14 @@ const fixture = readFileSync(new URL('../fixtures/harness/cursor.jsonl', import.
 const session = 'd1c7a0e2-5b7f-4c1e-9a3d-6f2b8e4c9a10'
 
 describe('cursor invocation', () => {
+  let attachmentsDir: string
+  beforeEach(() => {
+    attachmentsDir = mkdtempSync(join(tmpdir(), 'aictiq-cursor-attachments-'))
+  })
+  afterEach(() => rmSync(attachmentsDir, { recursive: true, force: true }))
+
   it('runs headless with edits allowed and points at the prompt file instead of passing it', () => {
-    const invocation = cursor.invocation(context)
+    const invocation = cursor.invocation({ ...context, attachmentsDir })
     expect(invocation.command).toBe('agent')
     expect(invocation.args).toEqual([
       '-p',
@@ -43,11 +49,20 @@ describe('cursor invocation', () => {
       '--workspace',
       '/work/run',
       '--add-dir',
-      '/work/attachments',
+      attachmentsDir,
       'Read /tmp/aictiq-prompt and follow the instructions in it.',
     ])
     expect(invocation.args.join(' ')).not.toContain(context.prompt)
     expect(invocation.stdin).toBeUndefined()
+  })
+
+  it('leaves out --add-dir when the item has no attachments', () => {
+    // Cursor exits with "Workspace directory does not exist" for a missing --add-dir.
+    const invocation = cursor.invocation({
+      ...context,
+      attachmentsDir: join(attachmentsDir, 'none'),
+    })
+    expect(invocation.args).not.toContain('--add-dir')
   })
 
   it('resumes the chat by id', () => {
