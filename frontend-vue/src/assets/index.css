@@ -209,6 +209,14 @@
     @apply outline-ring outline-2 outline-offset-2;
   }
 
+  /* Native option lists inherit the select's light text in dark mode but some browsers
+   * paint the popup itself light, leaving the options unreadable. Pin both sides. */
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+
   /* The mono face carries labels, counts and keys - small, wide-tracked, uppercase. */
   .font-label {
     @apply text-muted-foreground font-mono uppercase;
