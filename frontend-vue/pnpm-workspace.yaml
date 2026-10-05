@@ -11,3 +11,12 @@ allowBuilds:
 # Don't pull a package version published in the last two days - the window in which
 # most npm supply-chain compromises are caught and unpublished.
 minimumReleaseAge: 2880
+
+# Advisories pnpm audit skips. Each entry needs a reason and is dropped once a fix ships.
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion on deeply nested brace patterns; no patched release
+    # yet. It is reached only through dev tooling (shadcn-vue's CLI and the ESLint
+    # TypeScript config, via fast-glob/micromatch), which expands our own fixed globs and
+    # never untrusted input, and none of it ships in the bundle.
+    - GHSA-vfj7-8cjw-p6xm
