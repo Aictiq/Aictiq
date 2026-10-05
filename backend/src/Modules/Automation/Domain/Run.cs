@@ -166,7 +166,7 @@ public sealed class Run : TenantEntity
 
     /// <summary>
     /// The harness's own session (Claude's session id, Codex's thread id, OpenCode's session
-    /// id), reported by the runner. It is what a continue run resumes - on the same runner,
+    /// id, Cursor's chat id), reported by the runner. It is what a continue run resumes - on the same runner,
     /// whose machine holds the conversation and the kept checkout.
     /// </summary>
     public string? SessionId { get; set; }

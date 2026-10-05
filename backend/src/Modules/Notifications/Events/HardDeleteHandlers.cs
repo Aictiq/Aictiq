@@ -28,7 +28,7 @@ public sealed class NotificationsProjectDeletedHandler(NotificationsDbContext db
 }
 
 /// <summary>
-/// Every notification of a deleted organization, and the per-person settings of the agent
+/// Every notification, shared channel and default of a deleted organization, and the per-person settings of the agent
 /// accounts deleted with it. A person's own preferences are theirs, not the organization's.
 /// </summary>
 public sealed class NotificationsOrganizationDeletedHandler(NotificationsDbContext db, AmbientCurrentTenant tenant)
@@ -37,12 +37,20 @@ public sealed class NotificationsOrganizationDeletedHandler(NotificationsDbConte
     public async Task HandleAsync(OrganizationDeleted @event, CancellationToken cancellationToken)
     {
         using (tenant.Use(@event.OrganizationId))
+        {
             await db.Notifications.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+            await db.OrgChannels.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+            await db.OrgDefaults.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        }
+        await db.ConnectCodes.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.ChatDigestEntries.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.ChatOutbox.Where(x => x.OrganizationId == @event.OrganizationId && x.Status == "pending").ExecuteDeleteAsync(cancellationToken);
 
         var agents = @event.AgentIds.ToArray();
         if (agents.Length == 0) return;
         await db.Preferences.Where(x => agents.Contains(x.UserId)).ExecuteDeleteAsync(cancellationToken);
         await db.Digests.Where(x => agents.Contains(x.UserId)).ExecuteDeleteAsync(cancellationToken);
         await db.Presence.Where(x => agents.Contains(x.UserId)).ExecuteDeleteAsync(cancellationToken);
+        await db.UserChannels.Where(x => agents.Contains(x.UserId)).ExecuteDeleteAsync(cancellationToken);
     }
 }

@@ -161,6 +161,7 @@ describe('router', () => {
     expect(router.resolve('/o/acme/settings/agents').name).toBe('org-settings-agents')
     expect(router.resolve('/o/acme/settings/billing').name).toBe('org-settings-billing')
     expect(router.resolve('/o/acme/settings/integrations').name).toBe('org-settings-integrations')
+    expect(router.resolve('/o/acme/settings/notifications').name).toBe('org-settings-notifications')
     expect(router.resolve('/o/acme/settings/audit').name).toBe('org-settings-audit')
   })
 

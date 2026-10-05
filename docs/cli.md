@@ -187,8 +187,8 @@ aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>]
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
 
-`start` detects `claude`, `codex` and `opencode` on `PATH` and reports them, so the instance
-only hands over runs the machine can execute. Each run gets
+`start` detects `claude`, `codex`, `opencode` and Cursor's `agent` (or `cursor-agent`) on
+`PATH` and reports them, so the instance only hands over runs the machine can execute. Each run gets
 `~/.local/share/aictiq/runner/<run-id>/`: `repo/` is a git worktree of the mapped clone (or
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
 MCP configuration sit beside it, outside anything the agent could commit. The harness runs
@@ -196,6 +196,14 @@ there as the user who started the runner, with `AICTIQ_URL`, `AICTIQ_TOKEN` (the
 agent token, revoked when the run ends) and `AICTIQ_ITEM` in its environment. The runner's own
 `AICTIQ_*` variables are removed first. There is no sandbox: **one OS user is one trust
 domain**.
+
+Cursor reads MCP servers only from a `.cursor/mcp.json` file, so for a `cursor` run the runner
+adds the Aictiq server to the checkout's `.cursor/mcp.json` while the harness runs and puts the
+file back afterwards. The file names the `AICTIQ_*` variables (`${env:AICTIQ_TOKEN}`), never
+their values, and git is told to ignore it for the run (`.git/info/exclude`, or
+`--skip-worktree` when the repository tracks its own `.cursor/mcp.json`), so no commit picks
+it up. Cursor runs with `-p --force --trust --approve-mcps`; usage is billed to the Cursor
+account or `CURSOR_API_KEY` the runner's user signed in with.
 
 One machine can run for several organizations. Each has a profile in `runner.json` with its
 own secret, `workspaces` and `repoRoots`, and `--org` picks the profile for `map` and `root`

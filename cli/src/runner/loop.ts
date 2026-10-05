@@ -4,7 +4,7 @@ import type { Floor } from './floor.js'
 import type { ClaimedRun, RunnerCapabilities, RunnerHello } from './types.js'
 
 /** Every harness the CLI has an adapter for, offered when none is detected (see below). */
-export const KnownHarnesses = ['claude', 'codex', 'opencode'] as const
+export const KnownHarnesses = ['claude', 'codex', 'opencode', 'cursor'] as const
 
 export interface RunnerLoopOptions {
   client: RunnerClient

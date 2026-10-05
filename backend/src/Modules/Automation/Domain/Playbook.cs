@@ -7,8 +7,9 @@ public static class Harnesses
     public const string Claude = "claude";
     public const string Codex = "codex";
     public const string OpenCode = "opencode";
+    public const string Cursor = "cursor";
 
-    public static bool IsSupported(string? harness) => harness is Claude or Codex or OpenCode;
+    public static bool IsSupported(string? harness) => harness is Claude or Codex or OpenCode or Cursor;
 }
 
 /// <summary>Project instructions backed by a versioned wiki page.</summary>

@@ -284,7 +284,7 @@ const origin = typeof window === 'undefined' ? '' : window.location.origin
 const registerCommand = computed(() => `aictiq runner register --url ${origin} --token jrn_…`)
 const hint = computed(() => settings.value?.localPathHint ?? '')
 
-const harnessTab = ref<'claude' | 'codex' | 'opencode'>('claude')
+const harnessTab = ref<'claude' | 'codex' | 'opencode' | 'cursor'>('claude')
 const harnessGuides = {
   claude: {
     label: 'Claude Code',
@@ -302,6 +302,12 @@ const harnessGuides = {
     label: 'OpenCode',
     commands: 'npm install -g opencode-ai\nopencode auth login\nopencode --version',
     docs: 'https://opencode.ai/docs',
+  },
+  cursor: {
+    label: 'Cursor',
+    commands:
+      'curl https://cursor.com/install -fsS | bash\nagent login     # or set CURSOR_API_KEY for headless runs\nagent --version',
+    docs: 'https://cursor.com/docs/cli/headless',
   },
 } as const
 

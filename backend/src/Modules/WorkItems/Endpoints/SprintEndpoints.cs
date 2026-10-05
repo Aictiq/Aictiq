@@ -111,7 +111,7 @@ public static class SprintEndpoints
         var changed = await db.Sprints.Where(x => x.Id == sprintId && x.State == SprintState.Planned && !db.Sprints.Any(other => other.TeamId == x.TeamId && other.State == SprintState.Active))
             .ExecuteUpdateAsync(set => set.SetProperty(x => x.State, SprintState.Active).SetProperty(x => x.StartedAt, clock.GetUtcNow()), ct);
         if (changed == 0) return Results.Problem("A sprint is already active or this sprint changed.", statusCode: 409);
-        db.ChangeTracker.Clear(); var started = await db.Sprints.SingleAsync(x => x.Id == sprintId, ct); started.Started(); started.Changed(team.ProjectId, user.UserId!); await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear(); var started = await db.Sprints.SingleAsync(x => x.Id == sprintId, ct); started.Started(team.ProjectId); started.Changed(team.ProjectId, user.UserId!); await db.SaveChangesAsync(ct);
         return Results.Ok((await ViewsAsync(db, [started], ct))[0]);
     }
 
@@ -140,7 +140,7 @@ public static class SprintEndpoints
         var completedStates = await db.WorkflowStates.Where(x => x.Category == WorkflowStateCategory.Completed).Select(x => x.Id).ToListAsync(ct);
         var unfinished = await db.Items.Where(x => x.SprintId == sprint.Id && !completedStates.Contains(x.StateId)).ToListAsync(ct);
         foreach (var item in unfinished) { db.SprintScopeLog.Add(new SprintScopeLog { OrganizationId = item.OrganizationId, SprintId = sprint.Id, ItemId = item.Id, Change = SprintScopeChange.Removed, Points = item.Points, RemainingHours = item.RemainingHours, At = now }); item.SprintId = target?.Id; if (target is not null) db.SprintScopeLog.Add(new SprintScopeLog { OrganizationId = item.OrganizationId, SprintId = target.Id, ItemId = item.Id, Change = SprintScopeChange.Added, Points = item.Points, RemainingHours = item.RemainingHours, At = now }); }
-        sprint.State = SprintState.Completed; sprint.CompletedAt = now; sprint.Complete(); sprint.Changed(team.ProjectId, user.UserId!);
+        sprint.State = SprintState.Completed; sprint.CompletedAt = now; sprint.Complete(team.ProjectId); sprint.Changed(team.ProjectId, user.UserId!);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return Results.Ok((await ViewsAsync(db, [sprint], ct))[0]);
     }

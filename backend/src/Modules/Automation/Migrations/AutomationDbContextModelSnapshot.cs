@@ -209,7 +209,7 @@ namespace Aictiq.Modules.Automation.Migrations
 
                     b.ToTable("playbooks", "automation", t =>
                         {
-                            t.HasCheckConstraint("ck_playbooks_harness", "harness IN ('claude', 'codex', 'opencode')");
+                            t.HasCheckConstraint("ck_playbooks_harness", "harness IN ('claude', 'codex', 'opencode', 'cursor')");
 
                             t.HasCheckConstraint("ck_playbooks_max_minutes", "max_minutes BETWEEN 5 AND 720");
 

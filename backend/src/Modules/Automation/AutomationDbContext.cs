@@ -87,7 +87,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.ToTable(table =>
             {
                 table.HasCheckConstraint("ck_playbooks_name", "length(btrim(name)) BETWEEN 1 AND 100");
-                table.HasCheckConstraint("ck_playbooks_harness", "harness IN ('claude', 'codex', 'opencode')");
+                table.HasCheckConstraint("ck_playbooks_harness", "harness IN ('claude', 'codex', 'opencode', 'cursor')");
                 table.HasCheckConstraint("ck_playbooks_max_minutes", "max_minutes BETWEEN 5 AND 720");
             });
         });
