@@ -75,8 +75,9 @@ export const cursor: HarnessAdapter = {
         '--approve-mcps',
         '--workspace',
         context.workspace,
-        '--add-dir',
-        context.attachmentsDir,
+        // The runner only creates the attachments directory when the item has attachments,
+        // and Cursor refuses to start with an --add-dir that does not exist.
+        ...(existsSync(context.attachmentsDir) ? ['--add-dir', context.attachmentsDir] : []),
         // Cursor keeps its chats per workspace path; the kept workspace is the same path.
         ...(context.resumeSessionId ? ['--resume', context.resumeSessionId] : []),
         // Cursor takes its prompt as an argument only, so it gets the path of the 0600 prompt
@@ -117,7 +118,9 @@ export const cursor: HarnessAdapter = {
         .filter((part) => part?.type === 'text' && typeof part.text === 'string')
         .map((part) => part!.text as string)
         .join('')
-      return { log: text.trim() ? text : null, ...sessionId }
+      // Each event is one whole message, so the last one is the agent's final answer: the
+      // summary. Cursor's `result` is every message run together, without separators.
+      return text.trim() ? { log: text, result: text, ...sessionId } : { log: null, ...sessionId }
     }
 
     // A tool call arrives started and completed; log it once, when it starts. The completed
@@ -129,7 +132,9 @@ export const cursor: HarnessAdapter = {
       const [kind, value] = Object.entries(call ?? {})[0] ?? ['tool', {}]
       const name = toolName(kind, recordOf(value))
       const args = recordOf(value)?.args ?? {}
-      return { log: `→ ${name} ${limit(JSON.stringify(args), 200)}`, ...sessionId }
+      // An MCP call wraps the tool's own arguments with its name, server and call id.
+      const shown = kind === 'mcpToolCall' ? (recordOf(args)?.args ?? {}) : args
+      return { log: `→ ${name} ${limit(JSON.stringify(shown), 200)}`, ...sessionId }
     }
 
     if (event.type === 'result') {
@@ -143,7 +148,10 @@ export const cursor: HarnessAdapter = {
         log: `[result] ${typeof event.subtype === 'string' ? event.subtype : 'unknown'}${event.is_error === true ? ' (error)' : ''} in ${numberOf(event.duration_ms)}ms`,
         inputTokens: input || undefined,
         outputTokens: numberOrUndefined(usage?.outputTokens),
-        ...(typeof event.result === 'string' ? { result: event.result } : {}),
+        // Only an error result is used: it carries the error, not the messages again.
+        ...(event.is_error === true && typeof event.result === 'string'
+          ? { result: event.result }
+          : {}),
         ...sessionId,
       }
     }

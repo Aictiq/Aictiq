@@ -47,6 +47,11 @@ export interface RunnerConfig {
   name?: string
   profiles: RunnerProfile[]
   attachments: RunnerAttachmentConfig
+  /**
+   * False turns off installing a newer CLI on its own; `runner start` still checks and logs
+   * it. Absent means on. `--no-auto-update` turns it off for one start.
+   */
+  autoUpdate?: boolean
 }
 
 export function runnerConfigPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -97,6 +102,7 @@ export function readRunnerConfig(path = runnerConfigPath()): RunnerConfig | null
       maxCount: validLimit(rawLimits.maxCount, DefaultAttachmentMaxCount),
       maxBytes: validLimit(rawLimits.maxBytes, DefaultAttachmentMaxBytes),
     },
+    ...(typeof raw.autoUpdate === 'boolean' ? { autoUpdate: raw.autoUpdate } : {}),
   }
 }
 
@@ -106,6 +112,7 @@ export function writeRunnerConfig(config: RunnerConfig, path = runnerConfigPath(
     machineId: config.machineId,
     ...(config.name ? { name: config.name } : {}),
     attachments: config.attachments,
+    ...(config.autoUpdate === undefined ? {} : { autoUpdate: config.autoUpdate }),
     profiles: config.profiles.map((profile) => ({
       ...(profile.organization ? { organization: profile.organization } : {}),
       url: profile.url,

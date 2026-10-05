@@ -7,7 +7,8 @@ import { posix } from 'node:path'
  *
  * Every variant runs as the person who generated it, with their harness sign-ins and git
  * credentials: one runner is one trust domain. Every variant also stops for good on exit 5
- * (the runner secret was revoked), because restarting cannot fix that.
+ * (the runner secret was revoked), because restarting cannot fix that, and every variant
+ * restarts on exit 75 ({@link UpdateExitCode}), which a runner uses after upgrading itself.
  */
 export type ServicePlatform = 'linux' | 'macos' | 'windows'
 
@@ -24,6 +25,13 @@ export interface ServiceOptions {
 }
 
 export const RevokedExitCode = 5
+
+/**
+ * The runner installed a newer CLI and exits to be started again on it. Non-zero, so every
+ * definition below restarts it: systemd's `Restart=on-failure`, launchd's `SuccessfulExit`
+ * false and the Task Scheduler loop. 75 is EX_TEMPFAIL: "try again", not a crash.
+ */
+export const UpdateExitCode = 75
 
 /**
  * Every definition sets this, so a runner can report that a service manager started it. The
@@ -74,6 +82,8 @@ Restart=on-failure
 RestartSec=10
 # Exit ${RevokedExitCode} means the secret was revoked; restarting cannot fix that.
 RestartPreventExitStatus=${RevokedExitCode}
+# Exit ${UpdateExitCode} means the runner upgraded itself; start it again on the new version.
+RestartForceExitStatus=${UpdateExitCode}
 KillMode=mixed
 TimeoutStopSec=15min
 Environment=PATH=${path}

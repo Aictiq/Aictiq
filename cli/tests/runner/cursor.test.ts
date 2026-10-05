@@ -30,8 +30,14 @@ const fixture = readFileSync(new URL('../fixtures/harness/cursor.jsonl', import.
 const session = 'd1c7a0e2-5b7f-4c1e-9a3d-6f2b8e4c9a10'
 
 describe('cursor invocation', () => {
+  let attachmentsDir: string
+  beforeEach(() => {
+    attachmentsDir = mkdtempSync(join(tmpdir(), 'aictiq-cursor-attachments-'))
+  })
+  afterEach(() => rmSync(attachmentsDir, { recursive: true, force: true }))
+
   it('runs headless with edits allowed and points at the prompt file instead of passing it', () => {
-    const invocation = cursor.invocation(context)
+    const invocation = cursor.invocation({ ...context, attachmentsDir })
     expect(invocation.command).toBe('agent')
     expect(invocation.args).toEqual([
       '-p',
@@ -43,11 +49,20 @@ describe('cursor invocation', () => {
       '--workspace',
       '/work/run',
       '--add-dir',
-      '/work/attachments',
+      attachmentsDir,
       'Read /tmp/aictiq-prompt and follow the instructions in it.',
     ])
     expect(invocation.args.join(' ')).not.toContain(context.prompt)
     expect(invocation.stdin).toBeUndefined()
+  })
+
+  it('leaves out --add-dir when the item has no attachments', () => {
+    // Cursor exits with "Workspace directory does not exist" for a missing --add-dir.
+    const invocation = cursor.invocation({
+      ...context,
+      attachmentsDir: join(attachmentsDir, 'none'),
+    })
+    expect(invocation.args).not.toContain('--add-dir')
   })
 
   it('resumes the chat by id', () => {
@@ -76,11 +91,20 @@ describe('cursor stream-json parser', () => {
 
   it('reads the session, the token counts and the final result', () => {
     expect(new Set(parsed.map((line) => line.sessionId))).toEqual(new Set([session]))
-    expect(parsed.at(-1)).toMatchObject({
-      inputTokens: 1200 + 8000 + 500,
-      outputTokens: 340,
-      result: "I'll read the instructions first.Done: the change is pushed.",
+    expect(parsed.at(-1)).toMatchObject({ inputTokens: 1200 + 8000 + 500, outputTokens: 340 })
+    // Cursor's `result` runs every message together; the summary is the last message alone.
+    const results = parsed.filter((line) => line.result !== undefined).map((line) => line.result)
+    expect(results.at(-1)).toBe('Done: the change is pushed.')
+  })
+
+  it('keeps the text of an error result', () => {
+    const line = JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      result: 'Out of credits',
     })
+    expect(cursor.parse(line).result).toBe('Out of credits')
   })
 
   it('names an MCP call by its server and tool', () => {
@@ -89,11 +113,17 @@ describe('cursor stream-json parser', () => {
       subtype: 'started',
       tool_call: {
         mcpToolCall: {
-          args: { providerIdentifier: 'aictiq', toolName: 'get_item', args: { key: 'A-1' } },
+          args: {
+            name: 'aictiq-get_item',
+            args: { key: 'A-1' },
+            toolCallId: 'call-1',
+            providerIdentifier: 'aictiq',
+            toolName: 'get_item',
+          },
         },
       },
     })
-    expect(cursor.parse(line).log).toMatch(/^→ aictiq\.get_item /)
+    expect(cursor.parse(line).log).toBe('→ aictiq.get_item {"key":"A-1"}')
   })
 
   it('keeps malformed output as a log line', () => {

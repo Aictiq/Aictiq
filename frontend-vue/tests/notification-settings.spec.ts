@@ -161,6 +161,42 @@ describe('personal notification settings', () => {
     await flushPromises()
     expect(discord.get('[role="status"]').text()).toBe('Unknown Webhook')
   })
+
+  it('shows a broken channel as active once a test gets through', async () => {
+    api.listChatChannels
+      .mockResolvedValueOnce({
+        telegramAvailable: false,
+        telegramBotUsername: null,
+        channels: [
+          channel({
+            id: 'd1',
+            type: 'discord',
+            status: 'broken',
+            lastError: 'Discord answered 500.',
+          }),
+        ],
+      })
+      .mockResolvedValue({
+        telegramAvailable: false,
+        telegramBotUsername: null,
+        channels: [channel({ id: 'd1', type: 'discord', status: 'active' })],
+      })
+    api.testChatChannel.mockResolvedValue(undefined)
+    const wrapper = mount(NotificationSettingsView)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="channel-discord"]').text()).toContain('Broken')
+
+    await wrapper
+      .get('[data-testid="channel-discord"]')
+      .findAll('button')
+      .find((b) => b.text() === 'Send test')!
+      .trigger('click')
+    await flushPromises()
+
+    const discord = wrapper.get('[data-testid="channel-discord"]')
+    expect(discord.text()).toContain('Active')
+    expect(discord.get('[role="status"]').text()).toBe('Test message sent.')
+  })
 })
 
 describe('organization notification settings', () => {

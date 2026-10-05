@@ -269,6 +269,11 @@ runner at once, so runs in flight are cancelled rather than finished. Remove it 
 `Unregister-ScheduledTask -TaskName 'Aictiq runner' -Confirm:$false`. The runner's git
 credential scripts need Git for Windows, which runs them through its bundled `sh`.
 
+The runner upgrades itself from npm between runs and exits with code 75 to be restarted on
+the new version; every definition above restarts on it. Turn that off with `"autoUpdate": false`
+in `runner.json` and update with `aictiq runner update` instead. See
+[the CLI reference](cli.md#aictiq-runner---executing-factory-runs).
+
 For more concurrency, generate the definition with `aictiq runner install-service --parallel 2`.
 One process supports 1–16 concurrent runs, but the whole process is still one trust domain.
 
