@@ -30,9 +30,18 @@ public static class NotificationsModule
         services.AddSingleton<NotificationUnsubscribeTokens>();
 
         // Chat channels: the API connects and tests them, Workers deliver to them. The client
-        // logs nothing - a webhook URL or Telegram API path is itself the credential.
+        // logs nothing - a webhook URL or Telegram API path is itself the credential. It also
+        // drops the default retry handler: chat_outbox already retries with backoff and counts
+        // failures toward "broken", and a post retried after a timeout or a 5xx the platform
+        // had already accepted shows up twice in the chat.
         services.AddOptions<TelegramOptions>().BindConfiguration(TelegramOptions.SectionName);
-        services.AddHttpClient(ChatSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10)).RemoveAllLoggers();
+        // EXTEXP0001: RemoveAllResilienceHandlers is still marked experimental; it is the
+        // supported way to opt one client out of ConfigureHttpClientDefaults.
+#pragma warning disable EXTEXP0001
+        services.AddHttpClient(ChatSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers()
+            .RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
         services.AddSingleton<ChatSecrets>();
         services.AddScoped<IChatSender, TelegramSender>();
         services.AddScoped<IChatSender, SlackSender>();

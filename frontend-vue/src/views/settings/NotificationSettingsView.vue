@@ -118,6 +118,8 @@ async function sendTest(channel: ChatChannel) {
   } finally {
     busy.value = null
   }
+  // A test that gets through makes a broken channel active again, so show its new status.
+  await loadChannels()
 }
 async function disconnect(channel: ChatChannel) {
   if (!window.confirm(`Disconnect ${chatChannelLabels[channel.type]}? Notifications stop going there.`)) return
