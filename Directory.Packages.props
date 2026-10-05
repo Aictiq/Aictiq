@@ -35,7 +35,7 @@
     <PackageVersion Include="Fluid.Core" Version="2.40.0" />
 
     <!-- Billing (SaaS only; unused unless Stripe:SecretKey is configured) -->
-    <PackageVersion Include="Stripe.net" Version="52.4.2" />
+    <PackageVersion Include="Stripe.net" Version="53.0.0" />
 
     <!-- Caching -->
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.10.0" />
