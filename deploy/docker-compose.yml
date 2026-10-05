@@ -147,6 +147,12 @@ services:
       # is not the one the container binds to.
       Email__BaseUrl: ${AICTIQ_URL:-http://localhost}
 
+      # Optional Telegram bot for chat notifications; Slack and Discord need nothing.
+      # Without a token Telegram is not offered. See docs/self-host.md.
+      Notifications__Telegram__BotToken: ${TELEGRAM_BOT_TOKEN:-}
+      Notifications__Telegram__BotUsername: ${TELEGRAM_BOT_USERNAME:-}
+      Notifications__Telegram__WebhookSecret: ${TELEGRAM_WEBHOOK_SECRET:-}
+
       # This is deliberately opt-in. A missing endpoint is a no-op even when enabled;
       # the reporter never sends identifiers, content, credentials, or configuration.
       Telemetry__Enabled: ${TELEMETRY_ENABLED:-false}
@@ -260,6 +266,12 @@ services:
       # Links in email must point at the address a recipient's browser can reach, which
       # is not the one the container binds to.
       Email__BaseUrl: ${AICTIQ_URL:-http://localhost}
+
+      # Optional Telegram bot for chat notifications; Slack and Discord need nothing.
+      # Without a token Telegram is not offered. See docs/self-host.md.
+      Notifications__Telegram__BotToken: ${TELEGRAM_BOT_TOKEN:-}
+      Notifications__Telegram__BotUsername: ${TELEGRAM_BOT_USERNAME:-}
+      Notifications__Telegram__WebhookSecret: ${TELEGRAM_WEBHOOK_SECRET:-}
 
       Realtime__Backplane: ${REALTIME_BACKPLANE:-postgres}
 

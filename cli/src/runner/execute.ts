@@ -7,7 +7,13 @@ import { LogStreamer } from './log.js'
 import { spawnSupervised } from './process.js'
 import type { SupervisedProcess } from './process.js'
 import { RunFailure } from './types.js'
-import type { ClaimedRun, FinishReport, HarnessAdapter, RunnerHello } from './types.js'
+import type {
+  ClaimedRun,
+  FinishReport,
+  HarnessAdapter,
+  InvocationContext,
+  RunnerHello,
+} from './types.js'
 import { continuePrompt } from './harness/failure.js'
 import {
   applyFollowUpTarget,
@@ -78,6 +84,15 @@ export async function executeRun(
   const event = (line: string) => log.push('event', line)
 
   let harness: SupervisedProcess | undefined
+  // Puts back what the adapter's `prepare` changed in the checkout; runs once.
+  let restoreCheckout: (() => Promise<void>) | undefined
+  const restore = async () => {
+    const pending = restoreCheckout
+    restoreCheckout = undefined
+    await pending?.().catch((error: unknown) => {
+      event(`Restoring the checkout failed: ${message(error)}`)
+    })
+  }
   let stopReason: 'cancelled' | 'timed-out' | 'shutdown' | 'closed' | undefined
   const abort = new AbortController()
   const stop = (reason: NonNullable<typeof stopReason>) => {
@@ -285,7 +300,7 @@ export async function executeRun(
     }
     if (stopReason) return stopped(null, [])
 
-    const invocation = adapter.invocation({
+    const context: InvocationContext = {
       prompt: workspace.prompt,
       promptFile: workspace.promptFile,
       workspace: workspace.checkout,
@@ -293,7 +308,8 @@ export async function executeRun(
       mcpConfigFile: workspace.mcpConfigFile,
       mcpServer: options.workspace.mcpServer,
       ...(resumeSessionId !== undefined ? { resumeSessionId } : {}),
-    })
+    }
+    const invocation = adapter.invocation(context)
     const env: NodeJS.ProcessEnv = {
       ...inheritedEnv(process.env),
       ...invocation.env,
@@ -316,6 +332,13 @@ export async function executeRun(
     const remember = (line: string) => {
       lastLines.push(line)
       if (lastLines.length > 20) lastLines.shift()
+    }
+
+    try {
+      restoreCheckout = await adapter.prepare?.(context)
+    } catch (error) {
+      event(`Preparing ${run.harness} failed: ${message(error)}`)
+      return failed('workspace-failed', message(error))
     }
 
     event(`Starting ${invocation.command} in ${workspace.checkout}`)
@@ -362,6 +385,7 @@ export async function executeRun(
     if (stopReason) void harness.stop(options.graceMs ?? 10_000)
 
     const exitCode = await harness.exited
+    await restore()
     event(exitCode === null ? 'Harness was killed' : `Harness exited with code ${exitCode}`)
     const usage = { costUsd, inputTokens, outputTokens, exitCode }
     if (stopReason) return stopped(exitCode, lastLines, usage)
@@ -402,6 +426,8 @@ export async function executeRun(
       options.shutdown?.removeEventListener('abort', onShutdown)
     })
 
+  // A runner error after `prepare` skipped the restore above.
+  await restore()
   if (report?.outcome === 'failed' && report.failureReason)
     event(`Run failed: ${report.failureReason}`)
   if (report && sessionId) report.sessionId = sessionId

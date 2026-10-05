@@ -4,7 +4,7 @@
  * and the seams between the poll loop, the workspace and the harness adapters.
  */
 
-export type HarnessName = 'claude' | 'codex' | 'opencode'
+export type HarnessName = 'claude' | 'codex' | 'opencode' | 'cursor'
 
 export interface HarnessInfo {
   name: string
@@ -205,6 +205,12 @@ export interface HarnessAdapter {
    * limit and is readable by every user through /proc.
    */
   invocation(context: InvocationContext): HarnessInvocation
+  /**
+   * Files the harness needs in the checkout for one invocation, such as a config it only
+   * reads from there. Runs before the harness starts; the returned function puts the checkout
+   * back once it has exited, so nothing outlives the run or reaches a commit.
+   */
+  prepare?(context: InvocationContext): Promise<() => Promise<void>>
   parse(line: string): ParsedLine
   /** `resuming` is set when the invocation resumed a session, so a lost session can be told apart. */
   outcome(

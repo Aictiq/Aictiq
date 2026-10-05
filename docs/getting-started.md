@@ -144,6 +144,56 @@ opens the full inbox. Notification item links retain their original organization
 when you are working in another one. Run-completion updates open the run for factory
 operators and the related item for other members.
 
+### Choosing how you hear about things
+
+**Settings → Notifications** has one row per kind of update. **Inbox** turns a kind on or
+off everywhere: with Inbox off you get nothing for that kind on any channel. **Email** is
+Off, Immediate, or Daily digest (one mail at 08:00 in your time zone). Immediate email
+and chat messages are skipped while you are active in the app, since you see the update
+there. Mentions and replies to your comments are always sent.
+
+Three kinds are about factory runs: **Run succeeded**, **Run failed** (including timed out
+and cancelled), and **Run needs input** (a refine run came back with questions). They go
+to the person who started the run and to the item's assignee, and link to the run.
+
+### Telegram, Slack and Discord
+
+Under **Channels** on the same page you can connect your own:
+
+- **Slack**: create an [incoming webhook](https://api.slack.com/messaging/webhooks) for a
+  channel or your DMs and paste its URL (`https://hooks.slack.com/services/…`).
+- **Discord**: in a channel's **Integrations → Webhooks**, create a webhook and paste its
+  URL (`https://discord.com/api/webhooks/…`).
+- **Telegram**: choose **Connect** to get a one-time code. Open the link, or send
+  `/start <code>` to the Aictiq bot yourself. The code expires after 15 minutes. Telegram
+  only appears if the instance has a bot configured. Self-hosted operators should read
+  [Self-hosting](./self-host.md#telegram-slack-and-discord).
+
+Each connected channel adds a column with **Default**, **Off**, **Immediate** and **Daily
+digest**. **Default** uses your organization's default for that kind. If the organization
+has none, it does whatever your Email does. A newly connected channel therefore starts
+out matching email. A digest is one message a day at 08:00 your time.
+
+**Send test** posts a test message. Webhook URLs and chat ids are stored encrypted and only
+shown masked. If a channel keeps failing (for example, the webhook was deleted or the bot
+was blocked), it is marked **broken** and stops receiving messages, while your other
+channels keep working. A successful **Send test** brings it back.
+
+### Organization channels and defaults
+
+Org admins have **Org settings → Notifications**:
+
+- **Shared channels**: connect a Slack or Discord webhook, or a Telegram group (add the bot
+  to the group and send `/start <code>` there), for example `#dev`. Shared channels get
+  organization-wide events only, never personal ones like "you were mentioned". These
+  events are state changes, sprint started and completed, and run succeeded, failed and
+  needs input. Each one can be Off, Immediate or Daily digest (08:00 UTC). New channels
+  start with sprints and failed or blocked runs on.
+- **Member defaults**: a default per kind for email and each chat platform. It applies to
+  members who have not chosen a setting themselves; a member's own choice always wins.
+
+Every plan includes chat channels.
+
 ## Where to next
 
 - [Self-hosting](./self-host.md) - object storage (AWS S3, MinIO, R2), external

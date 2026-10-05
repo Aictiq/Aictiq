@@ -4,6 +4,7 @@ using Aictiq.Modules.Notifications.Domain;
 using Aictiq.Modules.Notifications.Templates;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Email;
+using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -25,6 +26,8 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
         {
             try { await RunOnceAsync(stoppingToken); }
             catch (Exception ex) { logger.LogError(ex, "Notification digest sweep failed"); }
+            try { await RunChatOnceAsync(stoppingToken); }
+            catch (Exception ex) { logger.LogError(ex, "Chat digest sweep failed"); }
             try { await Task.Delay(Interval, stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }
@@ -86,6 +89,79 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) { db.ChangeTracker.Clear(); } // concurrent/restarted sweep
     }
+
+    /// <summary>
+    /// One message per chat channel per day, listing the lines queued for it since the last.
+    /// A person's channel goes at 08:00 in their time zone; a shared one at 08:00 UTC. The
+    /// lines are consumed with the digest, and the message id is derived from the channel
+    /// and date, so a restarted sweep cannot post the same digest twice. Public so tests can drive it.
+    /// </summary>
+    public async Task RunChatOnceAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var db = services.GetRequiredService<NotificationsDbContext>();
+        var waiting = await db.ChatDigestEntries.AsNoTracking()
+            .GroupBy(e => new { e.ChannelId, e.OrganizationId }).Select(g => g.Key).Take(1000).ToListAsync(ct);
+        if (waiting.Count == 0) return;
+        var now = clock.GetUtcNow();
+        var tenant = services.GetRequiredService<AmbientCurrentTenant>();
+
+        var personal = waiting.Where(w => w.OrganizationId is null).Select(w => w.ChannelId).ToArray();
+        var userChannels = await db.UserChannels.Where(c => personal.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+        var profiles = await services.GetRequiredService<IUserDirectory>()
+            .GetDeliveryProfilesAsync(userChannels.Values.Select(c => c.UserId).Distinct().ToArray(), ct);
+        foreach (var channelId in personal)
+        {
+            if (!userChannels.TryGetValue(channelId, out var channel) || !profiles.TryGetValue(channel.UserId, out var person))
+            {
+                await DropEntriesAsync(db, channelId, ct);
+                continue;
+            }
+            var localNow = TimeZoneInfo.ConvertTime(now, Zone(person.TimeZone));
+            var localDay = DateOnly.FromDateTime(localNow.DateTime);
+            if (localNow.Hour != 8 || channel.LastDigestLocalDate == localDay) continue;
+            await PostDigestAsync(db, channel, null, "Your Aictiq daily digest", localDay, now, ct);
+            channel.LastDigestLocalDate = localDay;
+            await db.SaveChangesAsync(ct);
+        }
+
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        foreach (var shared in waiting.Where(w => w.OrganizationId is not null))
+        {
+            using var _ = tenant.Use(shared.OrganizationId!.Value);
+            var channel = await db.OrgChannels.SingleOrDefaultAsync(c => c.Id == shared.ChannelId, ct);
+            if (channel is null)
+            {
+                await DropEntriesAsync(db, shared.ChannelId, ct);
+                continue;
+            }
+            if (now.UtcDateTime.Hour != 8 || channel.LastDigestDate == today) continue;
+            await PostDigestAsync(db, channel, channel.OrganizationId, $"Aictiq daily digest · {channel.Name}", today, now, ct);
+            channel.LastDigestDate = today;
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    private static async Task PostDigestAsync(NotificationsDbContext db, IChatChannel channel, Guid? organizationId,
+        string heading, DateOnly day, DateTimeOffset now, CancellationToken ct)
+    {
+        var entries = await db.ChatDigestEntries.Where(e => e.ChannelId == channel.Id && e.CreatedAt <= now)
+            .OrderBy(e => e.CreatedAt).ToListAsync(ct);
+        db.ChatDigestEntries.RemoveRange(entries);
+        // A channel that stopped working loses its lines with the digest it cannot receive.
+        if (channel.Status != ChatChannelStatus.Active || entries.Count == 0) return;
+        var id = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"chat-digest:{channel.Id}:{day:yyyy-MM-dd}"))[..16]);
+        if (await db.ChatOutbox.AnyAsync(m => m.Id == id, ct)) return;
+        db.ChatOutbox.Add(new ChatOutboxMessage
+        {
+            Id = id, ChannelId = channel.Id, OrganizationId = organizationId, SendAfter = now, CreatedAt = now,
+            Text = ChatFormatter.Digest(channel.Type, heading, entries.Select(e => e.Line).ToArray())
+        });
+    }
+
+    private static Task DropEntriesAsync(NotificationsDbContext db, Guid channelId, CancellationToken ct) =>
+        db.ChatDigestEntries.Where(e => e.ChannelId == channelId).ExecuteDeleteAsync(ct);
 
     private static TimeZoneInfo Zone(string? id)
     {

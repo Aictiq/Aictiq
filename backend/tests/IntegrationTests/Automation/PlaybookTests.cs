@@ -79,6 +79,19 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
     }
 
     [Fact]
+    public async Task cursor_is_an_accepted_harness_and_an_unknown_one_is_rejected()
+    {
+        var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Cursor", null, "cursor", null, null, 60, "Implement the item."), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        Assert.Equal("cursor", (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!.Harness);
+
+        var unknown = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Other", null, "aider", null, null, 60, "Implement the item."), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+    }
+
+    [Fact]
     public async Task starter_creates_a_default_playbook_backed_by_an_editable_wiki_page_and_is_idempotent()
     {
         var response = await _owner.PostAsync($"{Base(_project)}/playbooks/starter", null, Ct);

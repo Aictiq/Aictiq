@@ -23,6 +23,166 @@ namespace Aictiq.Modules.Notifications.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Delivery.DataProtectionKeyRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("friendly_name");
+
+                    b.Property<string>("Xml")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("xml");
+
+                    b.HasKey("Id")
+                        .HasName("pk_data_protection_keys");
+
+                    b.ToTable("data_protection_keys", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.ChatConnectCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ChannelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("channel_id");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_chat_connect_codes");
+
+                    b.HasIndex("ChannelId")
+                        .HasDatabaseName("ix_chat_connect_codes_channel_id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_chat_connect_codes_code_hash");
+
+                    b.ToTable("chat_connect_codes", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.ChatDigestEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ChannelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("channel_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Line")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("line");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_chat_digest_entries");
+
+                    b.HasIndex("ChannelId", "CreatedAt")
+                        .HasDatabaseName("ix_chat_digest_entries_channel_id_created_at");
+
+                    b.ToTable("chat_digest_entries", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.ChatOutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid>("ChannelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("channel_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_error");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("SendAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("send_after");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.HasKey("Id")
+                        .HasName("pk_chat_outbox");
+
+                    b.HasIndex("ChannelId")
+                        .HasDatabaseName("ix_chat_outbox_channel_id");
+
+                    b.HasIndex("SendAfter")
+                        .HasDatabaseName("ix_chat_outbox_pending")
+                        .HasFilter("status = 'pending'");
+
+                    b.ToTable("chat_outbox", "notify", t =>
+                        {
+                            t.HasCheckConstraint("ck_chat_outbox_status", "status IN ('pending','sent','failed','skipped')");
+                        });
+                });
+
             modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.EmailOutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -209,6 +369,10 @@ namespace Aictiq.Modules.Notifications.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<short?>("DiscordMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("discord_mode");
+
                     b.Property<short>("EmailMode")
                         .HasColumnType("smallint")
                         .HasColumnName("email_mode");
@@ -220,6 +384,14 @@ namespace Aictiq.Modules.Notifications.Migrations
                     b.Property<short>("Kind")
                         .HasColumnType("smallint")
                         .HasColumnName("kind");
+
+                    b.Property<short?>("SlackMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("slack_mode");
+
+                    b.Property<short?>("TelegramMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("telegram_mode");
 
                     b.Property<string>("UserId")
                         .IsRequired()
@@ -262,6 +434,177 @@ namespace Aictiq.Modules.Notifications.Migrations
                         .HasDatabaseName("ix_presence_user_id");
 
                     b.ToTable("presence", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.OrgChatChannel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ConnectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("integer")
+                        .HasColumnName("consecutive_failures");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("LastDigestDate")
+                        .HasColumnType("date")
+                        .HasColumnName("last_digest_date");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_error");
+
+                    b.Property<string>("Modes")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("modes");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProtectedTarget")
+                        .HasColumnType("text")
+                        .HasColumnName("protected_target");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetHint")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("target_hint");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_org_channels");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_org_channels_organization_id");
+
+                    b.ToTable("org_channels", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.OrgNotificationDefault", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<short?>("DiscordMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("discord_mode");
+
+                    b.Property<short?>("EmailMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("email_mode");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<short?>("SlackMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("slack_mode");
+
+                    b.Property<short?>("TelegramMode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("telegram_mode");
+
+                    b.HasKey("Id")
+                        .HasName("pk_org_defaults");
+
+                    b.HasIndex("OrganizationId", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ix_org_defaults_organization_id_kind");
+
+                    b.ToTable("org_defaults", "notify");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Notifications.Domain.UserChatChannel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ConnectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("integer")
+                        .HasColumnName("consecutive_failures");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("LastDigestLocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("last_digest_local_date");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_error");
+
+                    b.Property<string>("ProtectedTarget")
+                        .HasColumnType("text")
+                        .HasColumnName("protected_target");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetHint")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("target_hint");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint")
+                        .HasColumnName("type");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_channels");
+
+                    b.HasIndex("UserId", "Type")
+                        .IsUnique()
+                        .HasDatabaseName("ix_user_channels_user_id_type");
+
+                    b.ToTable("user_channels", "notify");
                 });
 
             modelBuilder.Entity("Aictiq.SharedKernel.Outbox.OutboxMessage", b =>

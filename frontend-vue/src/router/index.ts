@@ -383,6 +383,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/settings/OrgWebhooksView.vue'),
         meta: { requiresAuth: true, title: 'Integrations' },
       },
+      {
+        path: 'notifications',
+        name: 'org-settings-notifications',
+        component: () => import('@/views/settings/OrgNotificationsView.vue'),
+        meta: { requiresAuth: true, title: 'Notifications' },
+      },
       { path: 'audit', name: 'org-settings-audit', component: () => import('@/views/settings/OrgAuditLogView.vue'), props: route => ({ slug: String(route.params.slug) }), meta: { requiresAuth: true, title: 'Audit log' } },
     ],
   },

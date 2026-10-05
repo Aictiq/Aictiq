@@ -1,7 +1,7 @@
 import { apiFetch } from '@/utils/api'
 
 /** Harness names are deliberately strings end to end: runners report the same values. */
-export const playbookHarnesses = ['claude', 'codex', 'opencode'] as const
+export const playbookHarnesses = ['claude', 'codex', 'opencode', 'cursor'] as const
 export type PlaybookHarness = (typeof playbookHarnesses)[number]
 
 export interface Playbook {

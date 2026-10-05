@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -163,6 +163,31 @@ describe('executeRun', () => {
       outcome: 'succeeded',
       pullRequestUrl: null,
     })
+  })
+
+  it('lets the adapter prepare the checkout before the harness and restores it after', async () => {
+    const calls: string[] = []
+    const adapter = scriptAdapter(`
+      const { existsSync } = await import('node:fs')
+      console.log('prepared ' + existsSync('.harness-config'))
+    `)
+    adapter.prepare = async (context) => {
+      calls.push(`prepare ${context.workspace === workspace.checkout}`)
+      writeFileSync(join(context.workspace, '.harness-config'), '{}')
+      return async () => {
+        calls.push('restore')
+        rmSync(join(context.workspace, '.harness-config'))
+      }
+    }
+    const workspace = stubWorkspace()
+    options.provision = async () => workspace
+    options.adapters.fake = adapter
+    const report = await executeRun(claimedRun(), options)
+
+    expect(report).toMatchObject({ outcome: 'succeeded' })
+    expect(calls).toEqual(['prepare true', 'restore'])
+    expect(logLines().map((c) => c.text)).toContain('prepared true')
+    expect(existsSync(join(workspace.checkout, '.harness-config'))).toBe(false)
   })
 
   it('fails with harness-unavailable at once when the harness is not installed', async () => {

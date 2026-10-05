@@ -15,6 +15,7 @@ export type OrgSettingsTab =
   | 'invitations'
   | 'billing'
   | 'integrations'
+  | 'notifications'
   | 'audit'
 
 export type ProjectSettingsTab =
@@ -102,6 +103,7 @@ export function orgSettingsLinks(slug: string): SettingsLink[] {
     { to: orgSettingsPath(slug, 'agents'), label: 'Agents' },
     { to: orgSettingsPath(slug, 'billing'), label: 'Billing' },
     { to: orgSettingsPath(slug, 'integrations'), label: 'Integrations' },
+    { to: orgSettingsPath(slug, 'notifications'), label: 'Notifications' },
     { to: orgSettingsPath(slug, 'audit'), label: 'Audit log' },
   ]
 }

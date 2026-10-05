@@ -23,6 +23,7 @@ describe('resumeCommand', () => {
     expect(resumeCommand(run({ harness: 'opencode' }), now)).toBe(
       `${cd}opencode --session 'sess-1'`,
     )
+    expect(resumeCommand(run({ harness: 'cursor' }), now)).toBe(`${cd}agent --resume 'sess-1'`)
   })
 
   it('offers nothing without a session, a stored checkout, a finish, or within five days', () => {

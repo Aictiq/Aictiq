@@ -133,5 +133,5 @@ public sealed record RunnerCapabilities(
     IReadOnlyList<string>? Workspaces = null,
     IReadOnlyList<string>? RepoRoots = null);
 
-/// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>.</param>
+/// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>, <c>cursor</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);
