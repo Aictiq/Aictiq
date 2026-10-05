@@ -91,11 +91,20 @@ describe('cursor stream-json parser', () => {
 
   it('reads the session, the token counts and the final result', () => {
     expect(new Set(parsed.map((line) => line.sessionId))).toEqual(new Set([session]))
-    expect(parsed.at(-1)).toMatchObject({
-      inputTokens: 1200 + 8000 + 500,
-      outputTokens: 340,
-      result: "I'll read the instructions first.Done: the change is pushed.",
+    expect(parsed.at(-1)).toMatchObject({ inputTokens: 1200 + 8000 + 500, outputTokens: 340 })
+    // Cursor's `result` runs every message together; the summary is the last message alone.
+    const results = parsed.filter((line) => line.result !== undefined).map((line) => line.result)
+    expect(results.at(-1)).toBe('Done: the change is pushed.')
+  })
+
+  it('keeps the text of an error result', () => {
+    const line = JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      result: 'Out of credits',
     })
+    expect(cursor.parse(line).result).toBe('Out of credits')
   })
 
   it('names an MCP call by its server and tool', () => {
@@ -104,11 +113,17 @@ describe('cursor stream-json parser', () => {
       subtype: 'started',
       tool_call: {
         mcpToolCall: {
-          args: { providerIdentifier: 'aictiq', toolName: 'get_item', args: { key: 'A-1' } },
+          args: {
+            name: 'aictiq-get_item',
+            args: { key: 'A-1' },
+            toolCallId: 'call-1',
+            providerIdentifier: 'aictiq',
+            toolName: 'get_item',
+          },
         },
       },
     })
-    expect(cursor.parse(line).log).toMatch(/^→ aictiq\.get_item /)
+    expect(cursor.parse(line).log).toBe('→ aictiq.get_item {"key":"A-1"}')
   })
 
   it('keeps malformed output as a log line', () => {
