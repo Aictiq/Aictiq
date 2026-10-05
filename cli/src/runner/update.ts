@@ -64,7 +64,7 @@ export async function latestVersion(
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
   const registry = (env.npm_config_registry || 'https://registry.npmjs.org/').replace(/\/+$/, '')
-  const url = `${registry}/-/package/${PackageName.replace('/', '%2F')}/dist-tags`
+  const url = `${registry}/-/package/${PackageName.replaceAll('/', '%2F')}/dist-tags`
   let response: Response
   try {
     response = await fetchImpl(url, {
