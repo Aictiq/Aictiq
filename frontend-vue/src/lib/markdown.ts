@@ -24,6 +24,67 @@ const md = new MarkdownIt({
   typographer: false,
 })
 
+export interface ItemReferenceContext {
+  slug: string
+  projectKey: string
+  /** Only keys resolved successfully by the API may become links. */
+  itemKeys: string[]
+}
+
+const itemReferencePattern = /(^|[\s(])#([A-Z][A-Z0-9]*-[1-9]\d*)(?![\p{L}\p{N}_-])/gu
+
+// Work on text tokens after linkify: code, images and existing links never become references.
+md.core.ruler.after('linkify', 'item-references', (state) => {
+  const context = state.env?.itemReferences as ItemReferenceContext | undefined
+  if (!context) return
+  const keys = new Set(context.itemKeys)
+  for (const inline of state.tokens) {
+    if (!inline.children) continue
+    let linkDepth = 0
+    inline.children = inline.children.flatMap((token) => {
+      if (token.type === 'link_open') linkDepth++
+      if (token.type === 'link_close') linkDepth--
+      if (token.type !== 'text' || linkDepth) return [token]
+      const parts = []
+      let offset = 0
+      for (const match of token.content.matchAll(itemReferencePattern)) {
+        const key = match[2]!
+        if (!key.startsWith(`${context.projectKey}-`) || !keys.has(key)) continue
+        const start = match.index! + match[1]!.length
+        const text = new state.Token('text', '', 0)
+        text.content = token.content.slice(offset, start)
+        const open = new state.Token('link_open', 'a', 1)
+        open.attrSet('href', `/o/${encodeURIComponent(context.slug)}/p/${encodeURIComponent(context.projectKey)}/items/${key}`)
+        const label = new state.Token('text', '', 0)
+        label.content = `#${key}`
+        parts.push(text, open, label, new state.Token('link_close', 'a', -1))
+        offset = start + key.length + 1
+      }
+      if (!offset) return [token]
+      const tail = new state.Token('text', '', 0)
+      tail.content = token.content.slice(offset)
+      return [...parts, tail]
+    })
+  }
+})
+
+/** Extract only visible references, so code and URL anchors cause no API requests. */
+export function referencedItemKeys(source: string, projectKey: string): string[] {
+  const keys = new Set<string>()
+  for (const inline of md.parse(source, {})) {
+    let linkDepth = 0
+    for (const token of inline.children ?? []) {
+      if (token.type === 'link_open') linkDepth++
+      if (token.type === 'link_close') linkDepth--
+      if (token.type !== 'text' || linkDepth) continue
+      for (const match of token.content.matchAll(itemReferencePattern)) {
+        if (match[2]!.startsWith(`${projectKey}-`)) keys.add(match[2]!)
+      }
+    }
+  }
+  return [...keys]
+}
+
 /**
  * GitHub-style task lists: `- [ ] todo` and `- [x] done`, the same Markdown the editor
  * writes. Written here rather than pulled in as a plugin because it is a dozen lines and a
@@ -151,10 +212,10 @@ const ALLOWED_ATTR = [
 ]
 
 /** Renders Markdown to sanitised HTML. The result is safe to bind with `v-html`. */
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, itemReferences?: ItemReferenceContext): string {
   if (!source) return ''
 
-  const html = md.render(source)
+  const html = md.render(source, { itemReferences })
 
   return purify.sanitize(html, {
     ALLOWED_TAGS,

@@ -24,6 +24,8 @@ public sealed record SearchResponse(IReadOnlyList<SearchItemResult> Items, IRead
 public static class SearchEndpoints
 {
     private static readonly Regex ItemKey = new("^[A-Za-z][A-Za-z0-9]{0,11}-[1-9][0-9]*$", RegexOptions.Compiled);
+    private static readonly Regex ItemKeyPrefix = new("^[A-Za-z][A-Za-z0-9]{0,11}(?:-(?:[1-9][0-9]*)?)?$", RegexOptions.Compiled);
+    private static readonly Regex ItemNumberPrefix = new("^#?[1-9][0-9]*$", RegexOptions.Compiled);
 
     public static IEndpointRouteBuilder MapSearchEndpoints(this IEndpointRouteBuilder api)
     {
@@ -38,7 +40,7 @@ public static class SearchEndpoints
 
     private static Task<IResult> ProjectSearch(HttpContext http, WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory,
         ICurrentUser user, ICurrentTenant tenant, string? q, string? types, int limit = 20, CancellationToken ct = default) =>
-        SearchAsync(db, wiki, access, directory, tenant.OrganizationId!.Value, [http.ResolvedProjectId()!.Value], user.UserId!, q, types, limit, ct);
+        SearchAsync(db, wiki, access, directory, tenant.OrganizationId!.Value, [http.ResolvedProjectId()!.Value], user.UserId!, q, types, limit, ct, allowItemSuggestions: true);
 
     private static async Task<IResult> OrganizationSearch(WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory, ICurrentUser user,
         ICurrentTenant tenant, string? q, string? types, int limit = 20, CancellationToken ct = default)
@@ -57,30 +59,37 @@ public static class SearchEndpoints
     }
 
     private static async Task<IResult> SearchAsync(WorkItemsDbContext db, IWikiSearch wiki, IProjectAccess access, IUserDirectory directory,
-        Guid organizationId, IReadOnlyList<Guid> projectIds, string userId, string? rawQuery, string? rawTypes, int limit, CancellationToken ct)
+        Guid organizationId, IReadOnlyList<Guid> projectIds, string userId, string? rawQuery, string? rawTypes, int limit, CancellationToken ct, bool allowItemSuggestions = false)
     {
         var query = SearchQuery.Normalize(rawQuery);
-        if (query is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["A search query is required."] });
         if (!TryTypes(rawTypes, out var includeItems, out var includeComments, out var includePages))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["types"] = ["types must contain items, comments, pages, or any combination."] });
+        var itemSuggestions = allowItemSuggestions && includeItems && !includeComments && !includePages;
+        if (query is null && !itemSuggestions)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["A search query is required."] });
         if (projectIds.Count == 0) return Results.Ok(new SearchResponse([], [], []));
 
         var take = Math.Clamp(limit == 0 ? 20 : limit, 1, 100);
+        if (query is null)
+            return Results.Ok(new SearchResponse(await SuggestedItemsAsync(db, projectIds, "", take, ct), [], []));
         // A key is an identifier, not natural language. Avoid the ranking path entirely so
         // ACME-12 always resolves directly, even when its title has since changed.
-        if (includeItems && ItemKey.IsMatch(query))
+        if (includeItems && !itemSuggestions && ItemKey.IsMatch(query))
         {
             var exact = await ExactItemAsync(db, projectIds, query, ct);
             if (exact is not null) return Results.Ok(new SearchResponse([exact], [], []));
         }
 
-        var items = includeItems ? await FullTextItemsAsync(db, projectIds, query, take, ct) : [];
-        // "1377" names an item the full-text document cannot find (see SearchQuery.ItemNumber),
-        // one per project that has it, ahead of anything that merely mentions the number.
-        if (includeItems && SearchQuery.ItemNumber(query) is { } number && !query.Contains('-'))
+        // Full text separates the number from a key: OTHER-1 can match LOCAL-1.
+        // Autocomplete must honor the typed identifier instead of those lexical matches.
+        var identifierQuery = ItemNumberPrefix.IsMatch(query) || (ItemKeyPrefix.IsMatch(query) && query.Contains('-'));
+        var items = includeItems && !(itemSuggestions && identifierQuery) ? await FullTextItemsAsync(db, projectIds, query, take, ct) : [];
+        // Identifier prefixes are useful while typing a link. Put exact identifiers first,
+        // then other matching keys, ahead of title/description matches.
+        if (includeItems && (itemSuggestions || ItemKeyPrefix.IsMatch(query) || ItemNumberPrefix.IsMatch(query)))
         {
-            var numbered = await NumberedItemsAsync(db, projectIds, number, take, ct);
-            items = numbered.Concat(items.Where(x => numbered.All(n => n.Id != x.Id))).Take(take).ToList();
+            var suggested = await SuggestedItemsAsync(db, projectIds, query, take, ct, includeTitle: itemSuggestions && !identifierQuery);
+            items = suggested.Concat(items.Where(x => suggested.All(n => n.Id != x.Id))).Take(take).ToList();
         }
         var comments = includeComments
             ? await FullTextCommentsAsync(db, projectIds, query, take,
@@ -90,7 +99,7 @@ public static class SearchEndpoints
         var pages = includePages ? (await wiki.SearchAsync(projectIds, query, take, userId, ct)).Select(x => new SearchPageResult(x.Id, x.ProjectId, x.Slug, x.Title, x.Snippet, x.Rank)).ToList() : [];
         // pg_trgm is deliberately a fallback. A correct lexical result must never lose to a
         // fuzzy one, and the index only exists on titles where a typo is most likely.
-        if (items.Count == 0 && comments.Count == 0 && includeItems)
+        if (items.Count == 0 && comments.Count == 0 && includeItems && !(itemSuggestions && identifierQuery))
             items = await TrigramItemsAsync(db, projectIds, query, take, ct);
         return Results.Ok(new SearchResponse(items, comments, pages));
     }
@@ -124,19 +133,27 @@ public static class SearchEndpoints
             : null;
     }
 
-    private static async Task<List<SearchItemResult>> NumberedItemsAsync(WorkItemsDbContext db, IReadOnlyList<Guid> projects, int number, int limit, CancellationToken ct)
+    private static async Task<List<SearchItemResult>> SuggestedItemsAsync(WorkItemsDbContext db, IReadOnlyList<Guid> projects, string query, int limit, CancellationToken ct, bool includeTitle = false)
     {
         const string sql = """
             SELECT item.id, item.project_key || '-' || item.number::text, item.title,
                 replace(replace(replace(item.title, '&', '&amp;'), '<', '&lt;'), '>', '&gt;') AS snippet,
                 1::real AS rank
             FROM work.items item
-            WHERE item.project_id = ANY(@projects) AND item.number = @number
-            ORDER BY item.project_key
+            WHERE item.project_id = ANY(@projects)
+              AND (@query = ''
+                OR (@number <> '' AND item.number::text LIKE @number || '%')
+                OR (@key <> '' AND lower(item.project_key || '-' || item.number::text) LIKE @key || '%')
+                OR (@include_title AND item.title ILIKE '%' || @title || '%'))
+            ORDER BY (lower(item.project_key || '-' || item.number::text) = lower(@query)
+                OR item.number::text = @number) DESC, item.updated_at DESC, item.id
             LIMIT @limit
             """;
-        await using var command = await CommandAsync(db, sql, projects, number.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
-        command.Parameters.AddWithValue("number", number);
+        await using var command = await CommandAsync(db, sql, projects, query, ct);
+        command.Parameters.AddWithValue("number", ItemNumberPrefix.IsMatch(query) ? query.TrimStart('#') : "");
+        command.Parameters.AddWithValue("key", ItemKeyPrefix.IsMatch(query) ? query.ToLowerInvariant() : "");
+        command.Parameters.AddWithValue("include_title", includeTitle);
+        command.Parameters.AddWithValue("title", query.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_"));
         command.Parameters.AddWithValue("limit", limit);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var results = new List<SearchItemResult>();

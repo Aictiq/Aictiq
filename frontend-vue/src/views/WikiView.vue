@@ -602,7 +602,7 @@ async function savePermissions() {
           </div>
 
           <div v-if="editing">
-            <MarkdownEditor v-model="markdown" :upload="uploadToPage" :accept="acceptedFiles" />
+            <MarkdownEditor v-model="markdown" :slug="slug" :project-key="projectKey" :upload="uploadToPage" :accept="acceptedFiles" />
             <Input v-model="summary" class="mt-3" placeholder="Save summary (optional)" />
             <p v-if="conflict" class="mt-2 text-sm text-destructive">
               Someone saved first. Refresh the page, merge your draft, then save again.
@@ -621,7 +621,7 @@ async function savePermissions() {
               >
             </div>
           </div>
-          <Markdown v-else :source="current.contentMarkdown" />
+          <Markdown v-else :slug="slug" :project-key="projectKey" :source="current.contentMarkdown" />
         </template>
 
         <p v-else class="text-muted-foreground">Select a page or create the first one.</p>
@@ -722,6 +722,8 @@ async function savePermissions() {
           <p v-if="diffLoading" class="text-muted-foreground p-3 text-sm">Loading…</p>
           <Markdown
             v-else-if="viewing?.number === 1 && firstRevision.data.value"
+            :slug="slug"
+            :project-key="projectKey"
             class="p-3"
             :source="firstRevision.data.value.contentMarkdown"
           />

@@ -32,6 +32,12 @@ and all terms must match. Supported terms include `state:active,resolved`, `type
 `estimate:>4`, `remaining:none`, and `claimed:any|none|@me|@agent|<userId>`. Use `q` for
 free-text search and `sort` only from the values documented by that endpoint.
 
+Project search (`/orgs/{slug}/projects/{key}/search`) with `types=items` also supports
+ticket autocomplete: an empty `q` returns recent items, and key or number prefixes
+(`ACME-12`, `12`, or `#12`) return matching tickets with exact identifiers first.
+Title fragments are supported too. Results stay inside that project and respect `limit`.
+Organization search and searches that include comments or pages require a nonempty `q`.
+
 Paged endpoints use one-based `page` and `pageSize` query parameters and return a
 `PagedResult` with the current page, page size, total count, and items. Page size is clamped to
 the endpoint's documented maximum (normally 100). Do not infer more pages from item count: use
