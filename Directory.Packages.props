@@ -5,9 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Aspire -->
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.4" />
-    <PackageVersion Include="Aspire.Npgsql" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.0" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.0" />
+    <PackageVersion Include="Aspire.Npgsql" Version="13.6.0" />
 
     <!-- ASP.NET Core / EF Core -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
@@ -24,11 +24,11 @@
     <PackageVersion Include="Npgsql" Version="10.0.3" />
 
     <!-- Object storage (S3 API; Garage in dev and compose, anything S3-compatible in prod) -->
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.103.4" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.1" />
 
     <!-- Image processing for attachments (MIT; NoDependencies needs no system libs in the image) -->
-    <PackageVersion Include="SkiaSharp" Version="4.152.1" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.1" />
+    <PackageVersion Include="SkiaSharp" Version="4.153.1" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
 
     <!-- Email: SMTP transport and Liquid templates -->
     <PackageVersion Include="MailKit" Version="4.18.1" />
@@ -51,7 +51,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
 
     <!-- API surface -->
-    <PackageVersion Include="Scalar.AspNetCore" Version="2.17.10" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.17.13" />
     <!-- Direct reference to override the vulnerable 2.0.0 pulled in transitively (GHSA-v5pm-xwqc-g5wc) -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.12.2" />
     <PackageVersion Include="Markdig" Version="0.45.0" />
