@@ -190,6 +190,8 @@ async function submit() {
           <MarkdownEditor
             ref="editor"
             v-model="description"
+            :slug="slug"
+            :project-key="projectKey"
             :upload="upload"
             :accept="attachmentAccept"
             placeholder="What should happen, what goes wrong, who needs it…"

@@ -9,9 +9,10 @@ import TaskList from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
-import { Bold, Code, List, ListTodo, Minus, Paperclip, Plus, Table as TableIcon, Trash2 } from '@lucide/vue'
+import { Bold, Code, Hash, List, ListTodo, Minus, Paperclip, Plus, Table as TableIcon, Trash2 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import { searchProject, type SearchItem } from '@/api/search'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { useToast } from '@/composables/useToast'
 import { mentionToken, type Mentionable, searchMentionables } from '@/lib/mentions'
@@ -35,6 +36,9 @@ const props = withDefaults(
     mentionables?: Mentionable[]
     /** Put the cursor at the end as soon as the editor exists, e.g. in a reply box just opened. */
     autofocus?: boolean
+    /** Both are required to search tickets from this project. */
+    slug?: string
+    projectKey?: string
   }>(),
   {
     placeholder: 'Write a description…',
@@ -44,6 +48,8 @@ const props = withDefaults(
     accept: undefined,
     mentionables: undefined,
     autofocus: false,
+    slug: undefined,
+    projectKey: undefined,
   },
 )
 const emit = defineEmits<{ 'update:modelValue': [markdown: string]; blur: [] }>()
@@ -71,7 +77,7 @@ function trackMention() {
   const current = editor.value
   if (!current || !props.mentionables?.length || !current.isFocused) return void (mention.value = null)
   const { $from, empty } = current.state.selection
-  if (!empty || $from.parent.type.spec.code) return void (mention.value = null)
+  if (!empty || $from.parent.type.spec.code || current.isActive('code')) return void (mention.value = null)
   const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
   const match = /(?:^|[\s(])@([\p{L}\p{N}-]{0,40})$/u.exec(before)
   if (!match) return void (mention.value = null)
@@ -115,6 +121,89 @@ function mentionKey(event: KeyboardEvent): boolean {
   return false
 }
 
+// Ticket suggestions are fetched only while a # trigger is active. Watch cleanup prevents
+// old responses from replacing a newer query, even after a project change or Escape.
+const ticket = ref<{ from: number; to: number; query: string; left: number; top: number } | null>(null)
+const ticketIndex = ref(0)
+const ticketMatches = ref<SearchItem[]>([])
+const ticketLoading = ref(false)
+const ticketError = ref(false)
+watch([() => ticket.value?.query, () => props.slug, () => props.projectKey], (_value, _old, cleanup) => {
+  ticketMatches.value = []
+  ticketIndex.value = 0
+  ticketError.value = false
+  ticketLoading.value = !!ticket.value
+  if (!ticket.value || !props.slug || !props.projectKey) return
+  const { query } = ticket.value
+  const slug = props.slug
+  const projectKey = props.projectKey
+  let active = true
+  const timer = setTimeout(async () => {
+    try {
+      const results = await searchProject(slug, projectKey, query, { types: 'items', limit: 8 })
+      if (active) ticketMatches.value = results.items.filter((item) => item.key.startsWith(`${projectKey}-`)).slice(0, 8)
+    } catch {
+      if (active) ticketError.value = true
+    } finally {
+      if (active) ticketLoading.value = false
+    }
+  }, 150)
+  cleanup(() => { active = false; clearTimeout(timer) })
+})
+
+function trackTicket() {
+  const current = editor.value
+  if (!current || !props.slug || !props.projectKey || props.disabled || !current.isFocused)
+    return void (ticket.value = null)
+  const { $from, empty } = current.state.selection
+  if (!empty || $from.parent.type.spec.code || current.isActive('code') || current.isActive('link'))
+    return void (ticket.value = null)
+  const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
+  const match = /(?:^|[\s(])#([\p{L}\p{N}-]+(?: [\p{L}\p{N}-]+)*)?$/u.exec(before)
+  if (!match) return void (ticket.value = null)
+  const query = match[1] ?? ''
+  if (query.length > 80) return void (ticket.value = null)
+  const from = $from.pos - query.length - 1
+  const at = current.view.coordsAtPos(from)
+  const box = root.value?.getBoundingClientRect()
+  ticket.value = { from, to: $from.pos, query, left: box ? at.left - box.left : 0, top: box ? at.bottom - box.top + 4 : 0 }
+}
+
+function trackSuggestions() {
+  trackMention()
+  trackTicket()
+}
+
+function pickTicket(item: SearchItem) {
+  const range = ticket.value
+  if (!range) return
+  ticket.value = null
+  editor.value?.chain().focus().insertContentAt({ from: range.from, to: range.to }, { type: 'text', text: `#${item.key} ` }).run()
+}
+
+function ticketKey(event: KeyboardEvent): boolean {
+  if (!ticket.value) return false
+  const matches = ticketMatches.value
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (matches.length) ticketIndex.value = (ticketIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length
+    return true
+  }
+  if ((event.key === 'Enter' || event.key === 'Tab') && matches.length) {
+    pickTicket(matches[ticketIndex.value]!)
+    return true
+  }
+  return false
+}
+
+function insertTicketTrigger() {
+  const current = editor.value
+  if (!current) return
+  const { $from } = current.state.selection
+  const before = $from.parent.textBetween(0, $from.parentOffset)
+  current.chain().focus().insertContent({ type: 'text', text: (!before || /[\s(]$/.test(before) ? '' : ' ') + '#' }).run()
+  trackTicket()
+}
+
 const editor = useEditor({
   content: props.modelValue,
   contentType: 'markdown',
@@ -133,15 +222,16 @@ const editor = useEditor({
     handleDOMEvents: {
       keydown: (_view, event) => {
         if (event.key !== 'Escape') return false
-        if (mention.value) {
+        if (mention.value || ticket.value) {
           mention.value = null
+          ticket.value = null
           event.preventDefault()
           event.stopPropagation()
         }
         return true
       },
     },
-    handleKeyDown: (_view, event) => mentionKey(event),
+    handleKeyDown: (_view, event) => ticketKey(event) || mentionKey(event),
     handlePaste: (_view, event) => insertFiles(event.clipboardData?.files),
     handleDrop: (view, event) => {
       const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
@@ -149,11 +239,12 @@ const editor = useEditor({
     },
   },
   onUpdate: ({ editor: current }) => emit('update:modelValue', current.getMarkdown()),
-  onSelectionUpdate: trackMention,
-  onTransaction: trackMention,
+  onSelectionUpdate: trackSuggestions,
+  onTransaction: trackSuggestions,
   // Leaving the editor to pick a file is not "done editing" - a blur-save would race the upload.
   onBlur: () => {
     mention.value = null
+    ticket.value = null
     if (uploading.value === 0) emit('blur')
   },
 })
@@ -224,7 +315,8 @@ watch(() => props.modelValue, (markdown) => {
   if (!editor.value || editor.value.getMarkdown() === markdown) return
   editor.value.commands.setContent(markdown, { contentType: 'markdown' as never, emitUpdate: false })
 })
-watch(() => props.disabled, (disabled) => editor.value?.setEditable(!disabled))
+watch(() => props.disabled, (disabled) => { editor.value?.setEditable(!disabled); if (disabled) ticket.value = null })
+watch(() => [props.slug, props.projectKey], () => { ticket.value = null })
 onBeforeUnmount(() => editor.value?.destroy())
 </script>
 
@@ -264,6 +356,18 @@ onBeforeUnmount(() => editor.value?.destroy())
           <span v-if="action.text">{{ action.text }}</span>
         </button>
       </div>
+      <button
+        v-if="slug && projectKey"
+        type="button"
+        class="text-muted-foreground hover:text-foreground hover:bg-accent inline-flex size-7 items-center justify-center rounded disabled:opacity-50"
+        aria-label="Insert ticket reference"
+        title="Insert ticket reference"
+        :disabled="disabled || editor?.isActive('codeBlock') || editor?.isActive('code')"
+        @mousedown.prevent
+        @click="insertTicketTrigger"
+      >
+        <Hash class="size-4" aria-hidden="true" />
+      </button>
       <template v-if="upload">
         <button
           type="button"
@@ -280,6 +384,31 @@ onBeforeUnmount(() => editor.value?.destroy())
       </template>
     </div>
     <EditorContent :editor="editor" />
+    <div
+      v-if="ticket"
+      class="bg-popover text-popover-foreground absolute z-50 w-80 max-w-full overflow-hidden rounded-md border py-1 text-sm shadow-md"
+      :style="{ left: `${ticket.left}px`, top: `${ticket.top}px` }"
+      data-testid="ticket-list"
+    >
+      <p v-if="ticketLoading" class="text-muted-foreground px-2 py-1.5" role="status">Loading tickets…</p>
+      <p v-else-if="ticketError" class="text-muted-foreground px-2 py-1.5" role="status">Could not load tickets.</p>
+      <p v-else-if="!ticketMatches.length" class="text-muted-foreground px-2 py-1.5" role="status">No matches</p>
+      <ul v-else role="listbox" aria-label="Tickets to reference">
+        <li
+          v-for="(item, index) in ticketMatches"
+          :key="item.id"
+          role="option"
+          :aria-selected="index === ticketIndex"
+          class="flex cursor-pointer items-center gap-2 px-2 py-1.5"
+          :class="index === ticketIndex && 'bg-accent text-accent-foreground'"
+          @mousedown.prevent="pickTicket(item)"
+          @mouseenter="ticketIndex = index"
+        >
+          <span class="shrink-0 font-mono text-xs">{{ item.key }}</span>
+          <span class="truncate">{{ item.title }}</span>
+        </li>
+      </ul>
+    </div>
     <ul
       v-if="mention && mentionMatches.length"
       class="bg-popover text-popover-foreground absolute z-50 w-64 overflow-hidden rounded-md border py-1 text-sm shadow-md"

@@ -52,6 +52,12 @@ An open item, wiki page or sprint returns to the corresponding list. Personal an
 organization pages stay open; project Settings opens Items if you are not an admin in
 the selected project.
 
+In descriptions, comments and wiki pages, type `#` or choose the `#` formatting button
+to reference a ticket from the current project. Search by key, number or title, then
+use arrow keys and Enter/Tab, or click a result. The saved Markdown contains plain
+`#ACME-123` text. Rendered descriptions, comments and wiki pages link existing tickets
+in the same project; code, unknown keys and other-project references remain plain text.
+
 ## The in-app tour and Get started
 
 Aictiq offers a short product tour on a new account's first working screen, and a

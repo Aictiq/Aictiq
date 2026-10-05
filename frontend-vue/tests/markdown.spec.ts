@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { markdownToPlainText, renderMarkdown } from '@/lib/markdown'
+import { markdownToPlainText, referencedItemKeys, renderMarkdown } from '@/lib/markdown'
 
 /**
  * The Markdown renderer takes text written by other people - teammates, guests, and AI
@@ -128,5 +128,33 @@ describe('markdownToPlainText', () => {
 
     expect(text).toHaveLength(20)
     expect(text.endsWith('…')).toBe(true)
+  })
+})
+
+describe('ticket references', () => {
+  const context = { slug: 'acme', projectKey: 'ACME', itemKeys: ['ACME-12', 'OTHER-1'] }
+
+  it('links only resolved tickets from the current project', () => {
+    const root = document.createElement('div')
+    root.innerHTML = renderMarkdown('See #ACME-12 (#ACME-12). #ACME-999 #OTHER-1', context)
+    expect([...root.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['#ACME-12', '/o/acme/p/ACME/items/ACME-12'],
+      ['#ACME-12', '/o/acme/p/ACME/items/ACME-12'],
+    ])
+    expect(root.textContent).toContain('#ACME-999 #OTHER-1')
+    expect(renderMarkdown('#ACME-12')).not.toContain('<a')
+  })
+
+  it('ignores code, links, URL anchors, malformed keys and headings', () => {
+    const source = ['`#ACME-12`', '```md\n#ACME-12\n```',
+      '[#ACME-12](/example)', 'https://example.com/#ACME-12', 'word#ACME-12 #ACME-12suffix #ACME-12-3', '# Heading'].join('\n\n')
+    const root = document.createElement('div')
+    root.innerHTML = renderMarkdown(source, context)
+    expect(root.querySelectorAll('a[href="/o/acme/p/ACME/items/ACME-12"]')).toHaveLength(0)
+    expect(referencedItemKeys(source, 'ACME')).toEqual([])
+  })
+
+  it('extracts unique visible project keys to resolve before rendering', () => {
+    expect(referencedItemKeys('**#ACME-12** (#ACME-12) #ACME-999 #OTHER-1', 'ACME')).toEqual(['ACME-12', 'ACME-999'])
   })
 })
