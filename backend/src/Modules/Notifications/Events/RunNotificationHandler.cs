@@ -30,7 +30,7 @@ public sealed class RunNotificationHandler(
             .Where(s => !string.IsNullOrWhiteSpace(s)));
 
         await chat.PublishToOrganizationAsync(e.OrganizationId, e.EventId, kind,
-            new ChatMessage(message, summary, await chat.OrganizationUrlAsync(e.OrganizationId, $"runs/{e.RunId}", cancellationToken), "Open the run"),
+            new ChatMessage(message, summary, await chat.OrganizationUrlAsync(e.OrganizationId, ChatNotificationService.RunPath(e.RunId), cancellationToken), "Open the run"),
             cancellationToken);
 
         var candidates = new[] { e.RequestedBy, item?.AssigneeId }.OfType<string>().Distinct().ToArray();
