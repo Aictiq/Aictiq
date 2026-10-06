@@ -30,7 +30,14 @@ import {
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
 import type { RunnerCapabilities } from '../runner/types.js'
-import { cliEntryPath, PackageName, rerun, SelfUpdater, UpdateCheckIntervalMs } from '../runner/update.js'
+import {
+  cliEntryPath,
+  PackageName,
+  rerun,
+  SelfUpdater,
+  UpdateCheckIntervalMs,
+  UpdateRetryMs,
+} from '../runner/update.js'
 import {
   DefaultAttachmentMaxBytes,
   DefaultAttachmentMaxCount,
@@ -400,10 +407,15 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         let supervisor = createSupervisor()
         let interrupted = false
 
+        let retry: ReturnType<typeof setTimeout> | undefined
         const check = async (): Promise<void> => {
+          clearTimeout(retry)
           const result = await updater.check()
           if (result.status === 'unavailable') {
-            log(`Update check failed (${result.reason}); staying on ${version}`)
+            log(
+              `Update check failed (${result.reason}); staying on ${version} and trying again in ${UpdateRetryMs / 60_000} min`,
+            )
+            if (!interrupted) retry = setTimeout(() => void check(), UpdateRetryMs)
             return
           }
           if (result.status === 'current') {
@@ -475,6 +487,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             }
           } finally {
             clearInterval(timer)
+            clearTimeout(retry)
           }
         } catch (error) {
           throw asCliError(error)

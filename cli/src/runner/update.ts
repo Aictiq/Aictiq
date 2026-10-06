@@ -7,6 +7,13 @@ export const PackageName = '@aictiq/cli'
 /** How often a running runner asks the registry again. */
 export const UpdateCheckIntervalMs = 6 * 60 * 60 * 1000
 
+/**
+ * How soon a check that could not reach the registry is tried again. A runner started at boot
+ * often checks before the network is up, and waiting the full interval after that would leave
+ * it on the old version for hours.
+ */
+export const UpdateRetryMs = 5 * 60 * 1000
+
 const RegistryTimeoutMs = 15_000
 const InstallTimeoutMs = 5 * 60 * 1000
 
