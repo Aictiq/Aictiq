@@ -40,8 +40,8 @@ as authorization.
 ## Factory runners and prompts
 
 One operating-system user is one trust domain. Aictiq intentionally starts Claude
-Code, Codex, OpenCode, or Cursor as the runner's operating-system user without an
-additional sandbox or approval boundary. The harness can reach that user's
+Code, Codex, OpenCode, Cursor, or GitHub Copilot as the runner's operating-system
+user without an additional sandbox or approval boundary. The harness can reach that user's
 repositories, network, harness sign-in, git credentials, and other readable
 files. Run it under an unprivileged account on a machine or VM you control.
 

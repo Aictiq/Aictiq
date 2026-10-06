@@ -273,7 +273,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       print('')
       print(
         capabilities.harnesses.length === 0
-          ? 'No harness found on PATH (claude, codex, opencode, cursor agent).'
+          ? 'No harness found on PATH (claude, codex, opencode, cursor agent, copilot).'
           : renderTable(capabilities.harnesses, [
               { header: 'HARNESS', value: (h) => h.name },
               { header: 'VERSION', value: (h) => h.version ?? '' },

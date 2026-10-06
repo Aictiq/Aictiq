@@ -11,6 +11,7 @@ import {
   listPlaybooks,
   type FactorySettings,
   type Playbook,
+  type PlaybookHarness,
 } from '@/api/playbooks'
 import { listProjectMembers, listProjects, type Project, type ProjectMember } from '@/api/projects'
 import { listRunnerChoices, listRunners, type Runner } from '@/api/runners'
@@ -284,8 +285,16 @@ const origin = typeof window === 'undefined' ? '' : window.location.origin
 const registerCommand = computed(() => `aictiq runner register --url ${origin} --token jrn_…`)
 const hint = computed(() => settings.value?.localPathHint ?? '')
 
-const harnessTab = ref<'claude' | 'codex' | 'opencode' | 'cursor'>('claude')
-const harnessGuides = {
+interface HarnessGuide {
+  label: string
+  commands: string
+  docs: string
+  /** Shown under the commands: what the harness needs beyond installing and signing in. */
+  note?: string
+}
+
+const harnessTab = ref<PlaybookHarness>('claude')
+const harnessGuides: Record<PlaybookHarness, HarnessGuide> = {
   claude: {
     label: 'Claude Code',
     commands:
@@ -309,7 +318,14 @@ const harnessGuides = {
       'curl https://cursor.com/install -fsS | bash\nagent login     # or set CURSOR_API_KEY for headless runs\nagent --version',
     docs: 'https://cursor.com/docs/cli/headless',
   },
-} as const
+  copilot: {
+    label: 'GitHub Copilot',
+    commands:
+      'npm install -g @github/copilot\ncopilot login   # or set COPILOT_GITHUB_TOKEN / GH_TOKEN to a fine-grained PAT with "Copilot Requests"\ncopilot --version',
+    docs: 'https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli',
+    note: "Copilot CLI needs an active GitHub Copilot plan on the signed-in account, and every prompt uses premium requests from that user's quota.",
+  },
+}
 
 const chosenPlatform = ref<RunnerPlatform | null>(null)
 const platform = computed<RunnerPlatform>(
@@ -539,6 +555,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 :label="`${harnessGuides[harnessTab].label} setup`"
                 :command="harnessGuides[harnessTab].commands"
               />
+              <p v-if="harnessGuides[harnessTab].note">{{ harnessGuides[harnessTab].note }}</p>
               <a
                 :href="harnessGuides[harnessTab].docs"
                 target="_blank"

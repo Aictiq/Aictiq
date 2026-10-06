@@ -107,7 +107,7 @@ describe('RunnerLoop', () => {
     loop.stop()
     await running
     expect(instance.to('/runs/claim')[0]!.body).toMatchObject({
-      harnesses: ['claude', 'codex', 'opencode', 'cursor'],
+      harnesses: ['claude', 'codex', 'opencode', 'cursor', 'copilot'],
     })
   })
 

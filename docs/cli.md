@@ -188,8 +188,8 @@ aictiq runner update                  # install the latest @aictiq/cli now and r
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
 
-`start` detects `claude`, `codex`, `opencode` and Cursor's `agent` (or `cursor-agent`) on
-`PATH` and reports them, so the instance only hands over runs the machine can execute. Each run gets
+`start` detects `claude`, `codex`, `opencode`, Cursor's `agent` (or `cursor-agent`) and
+`copilot` on `PATH` and reports them, so the instance only hands over runs the machine can execute. Each run gets
 `~/.local/share/aictiq/runner/<run-id>/`: `repo/` is a git worktree of the mapped clone (or
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
 MCP configuration sit beside it, outside anything the agent could commit. The harness runs
@@ -205,6 +205,22 @@ their values, and git is told to ignore it for the run (`.git/info/exclude`, or
 `--skip-worktree` when the repository tracks its own `.cursor/mcp.json`), so no commit picks
 it up. Cursor runs with `-p --force --trust --approve-mcps`; usage is billed to the Cursor
 account or `CURSOR_API_KEY` the runner's user signed in with.
+
+GitHub Copilot CLI runs as `copilot --output-format json --allow-all --no-ask-user
+--additional-mcp-config @<run dir>/mcp.json --usage-output-file <run dir>/copilot-usage.json`
+with the prompt piped on stdin, so the prompt text is never in argv. `--allow-all` allows all
+tools, paths and URLs, like the other harnesses' bypass modes, and covers the attachments
+directory; `--add-dir` is not used because it would also load `.github/skills` and agents from
+the uploaded attachments as trusted configuration. The Aictiq server comes from the same 0600
+`mcp.json` the runner writes outside the checkout for Claude Code. Copilot passes its own
+environment to local MCP servers, so the token stays in the process environment and nothing is
+written into the checkout (`--secret-env-vars` is not used, because it would strip
+`AICTIQ_TOKEN` from the MCP server too). The runner picks the session id up front
+(`--session-id=<uuid>`, or `--resume=<session>` when continuing), so a run that stops halfway
+can still be resumed; sessions live in `~/.copilot/session-state`. Token usage is read from the
+usage file after the harness exits. Copilot CLI needs an active GitHub Copilot plan, and every
+prompt uses premium requests from the quota of the account the runner's user signed in with
+(`copilot login`, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN`).
 
 One machine can run for several organizations. Each has a profile in `runner.json` with its
 own secret, `workspaces` and `repoRoots`, and `--org` picks the profile for `map` and `root`

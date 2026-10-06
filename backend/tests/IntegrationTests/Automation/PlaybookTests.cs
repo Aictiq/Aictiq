@@ -92,6 +92,17 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
     }
 
     [Fact]
+    public async Task copilot_is_an_accepted_harness_and_is_stored_as_given()
+    {
+        var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Copilot", null, "copilot", null, null, 60, "Implement the item."), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal("copilot", playbook.Harness);
+        Assert.Equal("copilot", (await _owner.GetFromJsonAsync<PlaybookView>($"{Base(_project)}/playbooks/{playbook.Id}", ApiTestContext.Json, Ct))!.Harness);
+    }
+
+    [Fact]
     public async Task starter_creates_a_default_playbook_backed_by_an_editable_wiki_page_and_is_idempotent()
     {
         var response = await _owner.PostAsync($"{Base(_project)}/playbooks/starter", null, Ct);

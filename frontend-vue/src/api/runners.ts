@@ -8,7 +8,7 @@ import { apiFetch } from '@/utils/api'
  */
 
 export interface RunnerHarness {
-  /** As a playbook names it: `claude`, `codex`, `opencode`, `cursor`. */
+  /** As a playbook names it: `claude`, `codex`, `opencode`, `cursor`, `copilot`. */
   name: string
   version: string | null
 }

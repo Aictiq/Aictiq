@@ -243,7 +243,7 @@ describe('outcomes and capability probes', () => {
 
   it('returns null for an absent executable and exposes all adapters', async () => {
     await expect(versionOf('aictiq-command-that-does-not-exist')).resolves.toBeNull()
-    expect(Object.keys(harnesses)).toEqual(['claude', 'codex', 'opencode', 'cursor'])
+    expect(Object.keys(harnesses)).toEqual(['claude', 'codex', 'opencode', 'cursor', 'copilot'])
     await expect(probeHarnesses({ PATH: '' } as NodeJS.ProcessEnv)).resolves.toEqual([])
   })
 })

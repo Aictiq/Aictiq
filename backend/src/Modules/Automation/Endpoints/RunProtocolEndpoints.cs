@@ -735,7 +735,7 @@ public static partial class RunProtocolEndpoints
         if (harnesses is null || harnesses.Count is 0 or > 16
             || harnesses.Any(harness => !RunnerEndpoints.HarnessName().IsMatch(harness)))
         {
-            errors["harnesses"] = ["Between 1 and 16 harnesses, each named in lower case (claude, codex, opencode, cursor)."];
+            errors["harnesses"] = ["Between 1 and 16 harnesses, each named in lower case (claude, codex, opencode, cursor, copilot)."];
         }
 
         if (request is { Slots: < 1 or > 16 })

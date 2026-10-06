@@ -262,7 +262,7 @@ public static class RefinementEndpoints
             answers.Add(("What should the refined ticket change?", feedback));
         var harness = string.IsNullOrWhiteSpace(request.Harness) ? null : request.Harness.Trim();
         if (harness is not null && !Harnesses.IsSupported(harness))
-            errors["harness"] = ["Choose claude, codex, opencode or cursor."];
+            errors["harness"] = ["Choose claude, codex, opencode, cursor or copilot."];
         if (errors.Count > 0) return Validation(errors);
 
         var row = await db.Refinements.SingleOrDefaultAsync(row => row.ItemId == item.Id, ct);

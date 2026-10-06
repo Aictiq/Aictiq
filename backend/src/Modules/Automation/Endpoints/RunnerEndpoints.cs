@@ -440,7 +440,7 @@ public static partial class RunnerEndpoints
         if (capabilities.Harnesses is null || capabilities.Harnesses.Count > 16
             || capabilities.Harnesses.Any(h => h is null || !HarnessName().IsMatch(h.Name ?? "") || h.Version is { Length: > 100 }))
         {
-            errors["capabilities.harnesses"] = ["At most 16 harnesses, each named in lower case (claude, codex, opencode, cursor) with a version of at most 100 characters."];
+            errors["capabilities.harnesses"] = ["At most 16 harnesses, each named in lower case (claude, codex, opencode, cursor, copilot) with a version of at most 100 characters."];
         }
         if (capabilities.Os is { Length: > 64 } || capabilities.Arch is { Length: > 64 } || capabilities.CliVersion is { Length: > 64 })
         {
