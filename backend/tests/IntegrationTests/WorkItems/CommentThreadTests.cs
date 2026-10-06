@@ -93,6 +93,11 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
 
         var page = await _owner.GetFromJsonAsync<PagedResult<CommentView>>(ItemPath(item.Key, "comments"), ApiTestContext.Json, Ct);
         Assert.Equal([null, root.Id, root.Id], page!.Items.Select(x => x.ParentCommentId));
+
+        var newest = await _owner.GetFromJsonAsync<PagedResult<CommentView>>(ItemPath(item.Key, "comments?order=desc"), ApiTestContext.Json, Ct);
+        Assert.Equal([nested.Id, reply.Id, root.Id], newest!.Items.Select(x => x.Id));
+        var sideways = await _owner.GetAsync(ItemPath(item.Key, "comments?order=sideways"), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, sideways.StatusCode);
     }
 
     [Fact]

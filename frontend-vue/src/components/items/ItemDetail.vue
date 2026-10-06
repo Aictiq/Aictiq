@@ -88,7 +88,7 @@ const item = useQuery({
 })
 const comments = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey, 'comments']),
-  queryFn: () => listComments(props.slug, props.itemKey),
+  queryFn: () => listComments(props.slug, props.itemKey, { order: 'desc' }),
 })
 const history = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey, 'history']),
@@ -145,8 +145,9 @@ const changingStatus = ref(false)
 const statusError = ref<string | null>(null)
 const commentItems = computed(() => comments.data.value?.items ?? [])
 /**
- * Jira-style threads: each top-level comment with its replies beneath it, oldest first. A
- * reply whose first comment is not on this page still shows, as a thread of its own.
+ * Jira-style threads, newest first: each top-level comment with its replies beneath it, which
+ * read oldest first like a conversation. A reply whose first comment is not on this page
+ * still shows, as a thread of its own.
  */
 const threads = computed(() => {
   const ids = new Set(commentItems.value.map((entry) => entry.id))
@@ -157,7 +158,7 @@ const threads = computed(() => {
       replies.set(entry.parentCommentId, [...(replies.get(entry.parentCommentId) ?? []), entry])
     else roots.push(entry)
   }
-  return roots.map((root) => ({ root, replies: replies.get(root.id) ?? [] }))
+  return roots.map((root) => ({ root, replies: [...(replies.get(root.id) ?? [])].reverse() }))
 })
 const historyItems = computed(() => history.data.value?.items ?? [])
 const relationItems = computed(() => relations.data.value ?? [])
