@@ -141,7 +141,7 @@ public sealed class RunDispatcher(
 
         if (harness is not null && !Harnesses.IsSupported(harness))
         {
-            return DispatchResult.Invalid("harness", "Choose claude, codex, opencode or cursor.");
+            return DispatchResult.Invalid("harness", "Choose claude, codex, opencode, cursor or copilot.");
         }
 
         if (scheduledFor is { } startAt && startAt <= clock.GetUtcNow())

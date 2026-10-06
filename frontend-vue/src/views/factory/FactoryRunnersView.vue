@@ -339,8 +339,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
         <h2 class="text-sm font-medium">Runners</h2>
         <p class="text-muted-foreground mt-0.5 text-xs">
           A runner is <code class="font-mono">aictiq runner</code> on a machine you prepare - a VPS,
-          a laptop, a CI box - with Claude Code, Codex, OpenCode or Cursor already signed in. It
-          picks up runs and reports back. Its secret is shown once, when it is registered.
+          a laptop, a CI box - with Claude Code, Codex, OpenCode, Cursor or GitHub Copilot already
+          signed in. It picks up runs and reports back. Its secret is shown once, when it is
+          registered.
         </p>
       </div>
       <div v-if="mayManage" class="flex flex-wrap gap-2">
@@ -471,8 +472,8 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
           </li>
           <li>
             <span class="text-foreground font-medium">Sign in and clone.</span>
-            Sign in to Claude Code, Codex, OpenCode or Cursor as the runner user, then clone the
-            repositories it will work in.
+            Sign in to Claude Code, Codex, OpenCode, Cursor or GitHub Copilot as the runner user,
+            then clone the repositories it will work in.
           </li>
           <li>
             <span class="text-foreground font-medium">Register and keep it running.</span>

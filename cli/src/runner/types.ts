@@ -4,7 +4,7 @@
  * and the seams between the poll loop, the workspace and the harness adapters.
  */
 
-export type HarnessName = 'claude' | 'codex' | 'opencode' | 'cursor'
+export type HarnessName = 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot'
 
 export interface HarnessInfo {
   name: string
@@ -168,6 +168,12 @@ export interface HarnessInvocation {
   /** Written to the child's stdin and then closed, when the harness reads its prompt there. */
   stdin?: string
   env?: Record<string, string>
+  /**
+   * The session the harness was told to start or resume, for a harness that only names it at
+   * the end. The run takes it once the harness prints its first line, so a harness that fails
+   * before it starts a session leaves none behind.
+   */
+  sessionId?: string
 }
 
 export interface HarnessOutcome {
@@ -212,6 +218,8 @@ export interface HarnessAdapter {
    */
   prepare?(context: InvocationContext): Promise<() => Promise<void>>
   parse(line: string): ParsedLine
+  /** Token counts a harness only writes down when it exits; read once it has. */
+  usage?(context: InvocationContext): Pick<ParsedLine, 'inputTokens' | 'outputTokens'> | null
   /** `resuming` is set when the invocation resumed a session, so a lost session can be told apart. */
   outcome(
     exitCode: number | null,

@@ -365,6 +365,8 @@ export async function executeRun(
           return
         }
         const parsed = adapter.parse(line)
+        // A harness given its session up front has started it once it prints anything.
+        parsed.sessionId ??= invocation.sessionId
         const tally = (total: number | undefined, value: number | undefined) =>
           value === undefined ? total : parsed.accumulate ? (total ?? 0) + value : value
         costUsd = tally(costUsd, parsed.costUsd)
@@ -386,6 +388,9 @@ export async function executeRun(
 
     const exitCode = await harness.exited
     await restore()
+    const written = adapter.usage?.(context)
+    inputTokens = written?.inputTokens ?? inputTokens
+    outputTokens = written?.outputTokens ?? outputTokens
     event(exitCode === null ? 'Harness was killed' : `Harness exited with code ${exitCode}`)
     const usage = { costUsd, inputTokens, outputTokens, exitCode }
     if (stopReason) return stopped(exitCode, lastLines, usage)

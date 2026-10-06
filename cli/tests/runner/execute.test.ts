@@ -86,7 +86,9 @@ describe('executeRun', () => {
       delete process.env.AICTIQ_RUNNER_TOKEN
       delete process.env.AICTIQ_CONFIG_HOME
     }
-    expect(logLines().map((c) => c.text)).toContain('inherited AICTIQ_ITEM,AICTIQ_ORG,AICTIQ_RUN,AICTIQ_TOKEN,AICTIQ_URL')
+    expect(logLines().map((c) => c.text)).toContain(
+      'inherited AICTIQ_ITEM,AICTIQ_ORG,AICTIQ_RUN,AICTIQ_TOKEN,AICTIQ_URL',
+    )
   })
 
   it('runs the harness in the workspace, streams its log and reports success with the pull request', async () => {
@@ -188,6 +190,36 @@ describe('executeRun', () => {
     expect(calls).toEqual(['prepare true', 'restore'])
     expect(logLines().map((c) => c.text)).toContain('prepared true')
     expect(existsSync(join(workspace.checkout, '.harness-config'))).toBe(false)
+  })
+
+  it('takes a session named up front once the harness prints, and tokens written at exit', async () => {
+    const adapter = scriptAdapter(`
+      console.log('working')
+      process.exit(3)
+    `)
+    const invocation = adapter.invocation.bind(adapter)
+    adapter.invocation = (context) => ({ ...invocation(context), sessionId: 'sess-early' })
+    adapter.usage = () => ({ inputTokens: 120, outputTokens: 7 })
+    options.adapters.fake = adapter
+    const report = await executeRun(claimedRun(), options)
+
+    expect(report).toMatchObject({
+      outcome: 'failed',
+      sessionId: 'sess-early',
+      inputTokens: 120,
+      outputTokens: 7,
+    })
+  })
+
+  it('names no session when the harness fails before printing anything', async () => {
+    const adapter = scriptAdapter(`process.exit(1)`)
+    const invocation = adapter.invocation.bind(adapter)
+    adapter.invocation = (context) => ({ ...invocation(context), sessionId: 'sess-never' })
+    options.adapters.fake = adapter
+    const report = await executeRun(claimedRun(), options)
+
+    expect(report).toMatchObject({ outcome: 'failed' })
+    expect(report?.sessionId).toBeUndefined()
   })
 
   it('fails with harness-unavailable at once when the harness is not installed', async () => {
@@ -355,17 +387,31 @@ describe('executeRun', () => {
       options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); process.exit(3)`, [])
       const report = await executeRun(claimedRun(), options)
 
-      expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
-      expect(instance.to('/finish')[0]!.body).toMatchObject({ sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
+      expect(report).toMatchObject({
+        outcome: 'failed',
+        sessionId: 'sess-1',
+        workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/),
+      })
+      expect(instance.to('/finish')[0]!.body).toMatchObject({
+        sessionId: 'sess-1',
+        workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/),
+      })
       expect(calls).toMatchObject({ retained: ['sess-1'], cleaned: 0 })
     })
 
     it('keeps the workspace of a successful run with a session, and leaves the item’s other kept workspaces', async () => {
       const calls = tracked()
-      options.adapters.fake = sessionAdapter(`console.log('SESSION sess-1'); console.log('RESULT ok')`, [])
+      options.adapters.fake = sessionAdapter(
+        `console.log('SESSION sess-1'); console.log('RESULT ok')`,
+        [],
+      )
       const report = await executeRun(claimedRun(), options)
 
-      expect(report).toMatchObject({ outcome: 'succeeded', sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
+      expect(report).toMatchObject({
+        outcome: 'succeeded',
+        sessionId: 'sess-1',
+        workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/),
+      })
       expect(calls).toMatchObject({ retained: ['sess-1'], cleaned: 0 })
       // The item's worktree is released before provisioning; after the run only expiry sweeps.
       expect(calls.pruned).toEqual([{ organizationSlug: 'acme', itemKey: 'ACME-42' }, null])
@@ -379,7 +425,10 @@ describe('executeRun', () => {
       )
       await executeRun(claimedRun(), options)
       const beats = instance.to('/runner/runs/' + claimedRun().runId + '/heartbeat')
-      expect(beats.map((beat) => beat.body)).toContainEqual({ sessionId: 'sess-1', workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/) })
+      expect(beats.map((beat) => beat.body)).toContainEqual({
+        sessionId: 'sess-1',
+        workspacePath: expect.stringMatching(/aictiq-ws-.*\/repo$/),
+      })
     })
 
     it('cleans up a failed run without a session: there is nothing to continue', async () => {
@@ -402,7 +451,9 @@ describe('executeRun', () => {
           ...stubWorkspace(),
           prompt,
           retain: (id) => calls.retained.push(id),
-          cleanup: async () => { calls.cleaned++ },
+          cleanup: async () => {
+            calls.cleaned++
+          },
         }
       }
       options.adapters.fake = sessionAdapter(
@@ -410,7 +461,13 @@ describe('executeRun', () => {
         contexts,
       )
       const report = await executeRun(
-        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: 'harness-transient' } }),
+        claimedRun({
+          resume: {
+            continuesRunId: 'run-0',
+            sessionId: 'sess-0',
+            failureReason: 'harness-transient',
+          },
+        }),
         options,
       )
 
@@ -434,7 +491,9 @@ describe('executeRun', () => {
       options.prune = async () => []
       options.adapters.fake = sessionAdapter(`process.exit(3)`, [])
       const report = await executeRun(
-        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null } }),
+        claimedRun({
+          resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null },
+        }),
         options,
       )
       expect(report).toMatchObject({ outcome: 'failed', sessionId: 'sess-0' })
@@ -448,7 +507,9 @@ describe('executeRun', () => {
       }
       options.adapters.fake = sessionAdapter(`console.log('RESULT ok')`, [])
       const report = await executeRun(
-        claimedRun({ resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null } }),
+        claimedRun({
+          resume: { continuesRunId: 'run-0', sessionId: 'sess-0', failureReason: null },
+        }),
         options,
       )
       expect(report).toMatchObject({ outcome: 'failed', failureReason: 'session-unavailable' })

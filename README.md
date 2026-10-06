@@ -86,7 +86,7 @@ dotnet run --project backend/src/AppHost
 ## Run your own runner
 
 A runner is the `aictiq runner` process on your VPS, laptop or CI host. It starts a coding
-harness - Claude Code, Codex, OpenCode or Cursor - in a workspace it controls, under an agent
+harness - Claude Code, Codex, OpenCode, Cursor or GitHub Copilot - in a workspace it controls, under an agent
 identity you own:
 
 ```bash

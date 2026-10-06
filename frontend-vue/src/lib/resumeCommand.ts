@@ -9,11 +9,13 @@ import type { Run } from '@/api/runs'
 /** How long a runner keeps a finished run's checkout (`KeptWorkspaceMaxAgeMs` in the CLI). */
 export const KeptWorkspaceDays = 5
 
+/** Each command ends where the quoted session goes: a space, or `=` for Copilot's `--resume=<id>`. */
 const harnessCommands: Record<string, string> = {
-  claude: 'claude --resume',
-  codex: 'codex resume',
-  opencode: 'opencode --session',
-  cursor: 'agent --resume',
+  claude: 'claude --resume ',
+  codex: 'codex resume ',
+  opencode: 'opencode --session ',
+  cursor: 'agent --resume ',
+  copilot: 'copilot --resume=',
 }
 
 /**
@@ -42,5 +44,5 @@ export function resumeCommand(run: Run, now: number = Date.now()): string | null
   if (!(now - Date.parse(finishedAt) < KeptWorkspaceDays * 24 * 60 * 60 * 1000)) return null
   // A Windows runner's checkout (`C:\...`) is opened from PowerShell, which also runs `&&`.
   const quote = /^[A-Za-z]:[\\/]/.test(workspacePath) ? quoteForPowerShell : quoteForShell
-  return `cd ${quote(workspacePath)} && ${harness} ${quote(sessionId)}`
+  return `cd ${quote(workspacePath)} && ${harness}${quote(sessionId)}`
 }

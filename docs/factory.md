@@ -74,11 +74,12 @@ its runs:
 | Codex | Follow [OpenAI's Codex CLI guide](https://developers.openai.com/codex/cli), then run `codex login` (use device authentication if the VPS has no browser). |
 | OpenCode | Follow [OpenCode's installation guide](https://opencode.ai/docs), then run `opencode auth login` or use `/connect` in its TUI. |
 | Cursor | Run `curl https://cursor.com/install -fsS \| bash` (see [Cursor's CLI guide](https://cursor.com/docs/cli/headless)), then `agent login`, or set `CURSOR_API_KEY` in the runner's environment. Runs use your Cursor plan. |
+| GitHub Copilot | Run `npm install -g @github/copilot` (see [GitHub's Copilot CLI guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)), then `copilot login`, or set `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN`) to a fine-grained personal access token with the **Copilot Requests** permission. Needs an active GitHub Copilot plan; every prompt uses premium requests from that user's quota. |
 
 Verify the selected program is on `PATH` for this account:
 
 ```bash
-claude --version     # or: codex --version / opencode --version / agent --version
+claude --version     # or: codex --version / opencode --version / agent --version / copilot --version
 ```
 
 For a runner-local project, clone it once and authenticate Git and `gh` so this same account
@@ -385,8 +386,9 @@ immediately.
 ### Continue a failed run
 
 The runner records each run's harness session (Claude Code's session, Codex's thread,
-OpenCode's session, Cursor's chat). When a run fails or times out after its harness started, the runner keeps
-its checkout, so the run can pick up where the agent stopped instead of starting over:
+OpenCode's session, Cursor's chat, Copilot's session). When a run fails or times out after its
+harness started, the runner keeps its checkout, so the run can pick up where the agent stopped
+instead of starting over:
 
 - **Continue** on the run page queues a new run on the same runner. The harness resumes the
   same session in the kept checkout, with the agent's earlier edits still there, and is told why
@@ -467,6 +469,7 @@ that runner, so run it on that machine as the runner's user:
 | Codex | `cd '<checkout>' && codex resume '<session>'` |
 | OpenCode | `cd '<checkout>' && opencode --session '<session>'` |
 | Cursor | `cd '<checkout>' && agent --resume '<session>'` |
+| GitHub Copilot | `cd '<checkout>' && copilot --resume='<session>'` |
 
 The path and session are quoted for bash, zsh and fish. If the runner already removed the
 checkout, `cd` fails. Working by hand while Aictiq continues the same run (Continue or an
@@ -558,7 +561,7 @@ listed). A run sent to an offline runner waits in the queue until it comes back.
 choice is remembered in this browser per project, separately from **Hand to agent**'s, and
 falls back to the defaults when the runner is gone or cannot run the harness. Through the
 API, `POST .../items/{itemKey}/refinement` takes optional `runnerId` and `harness`
-(`claude`, `codex`, `opencode` or `cursor`); without them the run goes to any free runner
+(`claude`, `codex`, `opencode`, `cursor` or `copilot`); without them the run goes to any free runner
 with the playbook's harness.
 
 Refinement is available only from an existing ticket's details. A refine run claims the item
@@ -608,14 +611,14 @@ they are provisioned with the per-run agent token and are never added to its bra
 
 | Symptom or failure | Meaning | Fix |
 | --- | --- | --- |
-| `harness-unavailable` | The run asked for Claude Code, Codex, OpenCode, or Cursor, but that executable did not work on the runner's service `PATH`. | Run `aictiq runner status` as the service user. Install and sign in to the playbook's harness, regenerate the systemd unit from the correct shell, then start a new run. |
+| `harness-unavailable` | The run asked for Claude Code, Codex, OpenCode, Cursor, or GitHub Copilot, but that executable did not work on the runner's service `PATH`. | Run `aictiq runner status` as the service user. Install and sign in to the playbook's harness, regenerate the systemd unit from the correct shell, then start a new run. |
 | `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
 | `no-remote` | A direct-delivery run's Runner-local checkout has no `origin` remote. The agent works in an isolated clone that is removed after the run, so without a remote its commits would be lost. | Add the remote (`git remote add origin <url>`) in the mapped checkout, or switch the playbook's **Delivery** to **Branch and pull request**, which works in a local-only repository. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `harness-rate-limited`, `harness-transient`, `harness-crashed` | The harness hit a rate limit, the model API was overloaded or unreachable, or the harness died on its own. | Aictiq continues the run automatically up to twice. After that, use **Continue** once the limit resets, or **Retry**. |
-| `harness-not-authenticated` | The harness is not signed in as the runner's user (so far reported by Cursor: `Authentication required` or an invalid `CURSOR_API_KEY`). | Run `agent login` (or `agent status`) as the runner's user, or set a valid `CURSOR_API_KEY` in the service environment, then **Retry**. |
-| `harness-model-unavailable` | The harness rejected the model it was asked to use. | Check `agent models` for the models your Cursor plan allows. |
-| `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (older than 5 days, or removed). | Use **Retry** to start a fresh run. |
+| `harness-not-authenticated` | The harness is not signed in as the runner's user (so far reported by Cursor: `Authentication required` or an invalid `CURSOR_API_KEY`; and by GitHub Copilot: not signed in, or the account has no Copilot entitlement). | Cursor: run `agent login` (or `agent status`) as the runner's user, or set a valid `CURSOR_API_KEY` in the service environment. GitHub Copilot: run `copilot login` as the runner's user, or set `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` to a token with the **Copilot Requests** permission, and check that the account has an active Copilot plan. Then **Retry**. |
+| `harness-model-unavailable` | The harness rejected the model it was asked to use (GitHub Copilot: `Model "x" from --model flag is not available`). | Check `agent models` for the models your Cursor plan allows, or `/model` in `copilot` for the models your Copilot plan allows. |
+| `session-unavailable` | A continue run could not resume: its runner was offline or gone, or it no longer had the kept workspace (older than 5 days, or removed), or the harness no longer had the session (GitHub Copilot: `No session, task, or name matched`). | Use **Retry** to start a fresh run. |
 | `follow-up-target-missing` | A follow-up's earlier pull request could not be found, or its branch is neither on `origin` nor in the kept checkout. The harness did not start. | Check that the pull request and branch still exist and that `gh auth status` works as the runner's user, then mention the agent again, or start a new run. |
 | `timed_out` / timed out | The run exceeded the playbook's time limit. The harness is stopped and the failure path is applied. | Split the item or make the playbook more focused. Raise the playbook limit only when the work legitimately needs it, then **Continue** the run (each continue gets the full limit again) or start a new one. |
 | Run stays queued | No online runner in the organization currently advertises the selected harness, or the run was sent to one runner and that runner is offline. | Check **Factory → Runners** and `aictiq runner status`; start a correctly configured runner, or cancel the run and start it again for any free runner. |
