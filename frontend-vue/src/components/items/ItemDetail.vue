@@ -281,9 +281,6 @@ async function onDispatched() {
 }
 
 const description = ref('')
-const descriptionEditing = ref(false)
-const descriptionEditor = ref<{ uploading: boolean } | null>(null)
-watch(() => props.itemKey, () => { descriptionEditing.value = false })
 const title = ref('')
 const comment = ref('')
 const saving = ref(false)
@@ -916,30 +913,15 @@ function logged(updated: TimeTrackingItem) {
         :busy="liveRun !== null"
       />
       <div class="mt-3">
-        <div class="flex items-center justify-between">
-          <label class="font-label">Description</label>
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground rounded px-2 py-1 text-xs disabled:opacity-50"
-            :disabled="descriptionEditor?.uploading"
-            @click="descriptionEditing = !descriptionEditing"
-          >
-            {{ descriptionEditing ? 'Preview description' : 'Edit description' }}
-          </button>
-        </div>
-        <MarkdownEditor
-          v-if="descriptionEditing"
-          ref="descriptionEditor"
+        <label class="font-label">Description</label
+        ><MarkdownEditor
           v-model="description"
-          autofocus
           :slug="slug"
           :project-key="projectKey"
           class="mt-2"
           :upload="uploadToDescription"
           :accept="acceptedFiles"
         />
-        <Markdown v-else-if="description" :source="description" :slug="slug" :project-key="projectKey" class="mt-2" />
-        <p v-else class="text-muted-foreground mt-2 text-sm">No description yet.</p>
       </div>
       <p v-if="conflict" class="text-destructive mt-3 text-sm">
         Someone changed this item. Reload to compare before overwriting.
