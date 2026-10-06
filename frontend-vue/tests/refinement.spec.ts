@@ -184,15 +184,37 @@ describe('CreateTicketDialog', () => {
   })
 })
 
+const playbooks = [{ id: 'pb1', name: 'Refine', harness: 'claude', isDefault: false }]
+const runnerChoice = (id: string, harnesses: string[], isOnline = true) => ({
+  id,
+  name: id,
+  harnesses,
+  isOnline,
+})
+
+// happy-dom ships no storage in this setup, so a Map stands in for the browser's.
+function stubStorage() {
+  const store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  })
+  return store
+}
+
 describe('RefinementPanel', () => {
   async function mountPanel(
     current: unknown,
     dirty = false,
     canOperateFactory = true,
     enabled = true,
+    runners: unknown[] = [],
   ) {
     const calls = stubFetch([
       ['GET', /\/refinement-settings\/$/, settings(enabled)],
+      ['GET', /\/projects\/PROJ\/playbooks$/, playbooks],
+      ['GET', /\/runners\/choices$/, runners],
       ['GET', /\/items\/PROJ-7\/refinement\/$/, current],
       ['POST', /\/items\/PROJ-7\/refinement\/$/, refinement('refining')],
       ['POST', /\/items\/PROJ-7\/transition$/, { ...item, stateId: 's-ready', version: 4 }],
@@ -300,6 +322,8 @@ describe('RefinementPanel', () => {
         { question: 'Which platform?', answer: 'iOS 17' },
         { question: 'Which browser?', answer: '' },
       ],
+      runnerId: null,
+      harness: 'claude',
     })
   })
 
@@ -363,5 +387,74 @@ describe('RefinementPanel', () => {
     expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual([
       '/api/v1/orgs/acme/items/PROJ-7/refinement/',
     ])
+  })
+
+  it('sends the chosen runner and harness and remembers them for the project', async () => {
+    const store = stubStorage()
+    const { wrapper, calls } = await mountPanel(null, false, true, true, [
+      runnerChoice('claude-box', ['claude']),
+      runnerChoice('codex-box', ['codex'], false),
+      runnerChoice('new-box', []),
+    ])
+    const harness = wrapper.find('[data-testid="refine-run-harness"]')
+    expect((harness.element as HTMLSelectElement).value).toBe('claude')
+    const runner = () => wrapper.find('[data-testid="refine-run-runner"]')
+    // Any free runner, the claude runner and the one that has not reported yet.
+    expect(
+      runner()
+        .findAll('option')
+        .map((o) => o.text()),
+    ).toEqual(['Any free runner', 'claude-box · online', 'new-box · online'])
+
+    await harness.setValue('codex')
+    expect(
+      runner()
+        .findAll('option')
+        .map((o) => o.text()),
+    ).toEqual(['Any free runner', 'codex-box · offline', 'new-box · online'])
+    await runner().setValue('codex-box')
+    expect(wrapper.text()).toContain('codex-box is offline.')
+
+    await wrapper.find('[data-testid="refinement-start"]').trigger('click')
+    await flushPromises()
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
+      runnerId: 'codex-box',
+      harness: 'codex',
+    })
+    expect(JSON.parse(store.get('aictiq.refine.PROJ')!)).toEqual({
+      runnerId: 'codex-box',
+      harness: 'codex',
+    })
+    // Hand to agent's choice is its own.
+    expect(store.has('aictiq.run.PROJ')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preselects the remembered choice and falls back when the runner is gone', async () => {
+    const store = stubStorage()
+    store.set('aictiq.refine.PROJ', JSON.stringify({ runnerId: 'codex-box', harness: 'codex' }))
+    const kept = await mountPanel(null, false, true, true, [
+      runnerChoice('codex-box', ['codex']),
+      runnerChoice('other', ['claude']),
+    ])
+    expect(
+      (kept.wrapper.find('[data-testid="refine-run-harness"]').element as HTMLSelectElement).value,
+    ).toBe('codex')
+    expect(
+      (kept.wrapper.find('[data-testid="refine-run-runner"]').element as HTMLSelectElement).value,
+    ).toBe('codex-box')
+    kept.wrapper.unmount()
+
+    const gone = await mountPanel(null, false, true, true, [
+      runnerChoice('a', ['codex']),
+      runnerChoice('b', ['claude']),
+    ])
+    await gone.wrapper.find('[data-testid="refinement-start"]').trigger('click')
+    await flushPromises()
+    expect(gone.calls.find((call) => call.method === 'POST')?.body).toEqual({
+      runnerId: null,
+      harness: 'codex',
+    })
+    gone.wrapper.unmount()
   })
 })

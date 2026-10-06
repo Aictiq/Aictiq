@@ -550,6 +550,17 @@ Then, from **Create ticket** on the Items, Backlog or Board page (or the command
 4. When the ticket is ready, review it, edit anything, and choose **Confirm ticket**. The
    item moves to the configured state. **Ask for changes** sends a note back for another pass.
 
+Next to **Refine ticket**, **Answer and refine**, **Refine again** and **Try again** you choose the harness
+and, when the organization has more than one runner, the runner. The harness starts as the
+refine playbook's and applies to that run only; the runner list offers **Any free runner**
+and the runners that report the chosen harness (a runner that has not reported yet stays
+listed). A run sent to an offline runner waits in the queue until it comes back. Your last
+choice is remembered in this browser per project, separately from **Hand to agent**'s, and
+falls back to the defaults when the runner is gone or cannot run the harness. Through the
+API, `POST .../items/{itemKey}/refinement` takes optional `runnerId` and `harness`
+(`claude`, `codex`, `opencode` or `cursor`); without them the run goes to any free runner
+with the playbook's harness.
+
 Refinement is available only from an existing ticket's details. A refine run claims the item
 without moving or assigning it, works in an isolated clone of the default branch (so the
 runner checkout needs an `origin` remote, as for direct

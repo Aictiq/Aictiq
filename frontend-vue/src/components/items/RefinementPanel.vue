@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { CircleCheck, Loader2, MessageCircleQuestion, Sparkles, TriangleAlert } from '@lucide/vue'
 import { transitionItem, type WorkItem } from '@/api/items'
+import { listPlaybooks, playbookHarnesses, type Playbook } from '@/api/playbooks'
 import {
   confirmRefinement,
   getRefinement,
@@ -10,9 +11,12 @@ import {
   refineItem,
   type RefineBody,
 } from '@/api/refinement'
+import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
+import RefineRunPicker from '@/components/items/RefineRunPicker.vue'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import { refinementLabels } from '@/lib/refinement'
+import { readRefineRunChoice, runnerCanRun, writeRefineRunChoice } from '@/lib/runs'
 import { factoryRunPath, projectSettingsPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
 
@@ -20,6 +24,8 @@ import { useOrganizationsStore } from '@/stores/organizations'
  * Where an item's refinement stands, above its description: the agent at work, its
  * questions with room for the answers, or the refined ticket waiting for the person to
  * review and confirm. When refinement is off, a notice links to its project settings.
+ * Every refine run - the first, answers, asking for changes - goes with the runner and
+ * harness picked beside its button, preselected from what this project used last.
  */
 const props = defineProps<{
   slug: string
@@ -51,6 +57,60 @@ const status = computed(() => current.value?.status ?? null)
 const active = computed(() => status.value !== null && status.value !== 'confirmed')
 const canRefine = computed(() => canOperate.value && settings.data.value?.enabled === true)
 
+// Without either list the run still goes to any free runner with the playbook's harness.
+const playbooks = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'playbooks']),
+  queryFn: () => listPlaybooks(props.slug, props.projectKey).catch(() => [] as Playbook[]),
+  enabled: canRefine,
+})
+const runnerChoices = useQuery({
+  queryKey: computed(() => [props.slug, 'runner-choices']),
+  queryFn: () => listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
+  enabled: canRefine,
+})
+const runners = computed(() => runnerChoices.data.value ?? [])
+const playbookHarness = computed(
+  () =>
+    playbooks.data.value?.find((p) => p.id === settings.data.value?.playbookId)?.harness ?? null,
+)
+
+/** Null is "any free runner". */
+const runnerId = ref<string | null>(null)
+const harness = ref<string | null>(null)
+/** The choice is preselected once per project, then left to the person. */
+const choiceReady = ref(false)
+
+watch(
+  () => props.projectKey,
+  () => {
+    choiceReady.value = false
+  },
+)
+
+watch(
+  [() => playbooks.data.value, () => runnerChoices.data.value, choiceReady],
+  ([projectPlaybooks, choices, ready]) => {
+    if (ready || !projectPlaybooks || !choices) return
+    // The choice this project used last, if it still names things that exist and fit.
+    const remembered = readRefineRunChoice(props.projectKey)
+    harness.value =
+      remembered?.harness && (playbookHarnesses as readonly string[]).includes(remembered.harness)
+        ? remembered.harness
+        : playbookHarness.value
+    const rememberedRunner = choices.find((runner) => runner.id === remembered?.runnerId)
+    runnerId.value =
+      rememberedRunner && runnerCanRun(rememberedRunner, harness.value) ? rememberedRunner.id : null
+    choiceReady.value = true
+  },
+  { immediate: true },
+)
+
+// Another harness may rule the chosen runner out.
+watch(harness, (chosen) => {
+  const runner = runners.value.find((r) => r.id === runnerId.value)
+  if (runner && !runnerCanRun(runner, chosen)) runnerId.value = null
+})
+
 const answers = ref<string[]>([])
 const feedback = ref('')
 const askingForChanges = ref(false)
@@ -77,7 +137,13 @@ async function refine(body: RefineBody = {}) {
   if (!canRefine.value || working.value) return
   working.value = 'refine'
   try {
-    await refineItem(props.slug, props.item.key, body)
+    // One runner is no choice; the run goes to it as to any free runner.
+    const choice = {
+      runnerId: runners.value.length > 1 ? runnerId.value : null,
+      harness: harness.value,
+    }
+    await refineItem(props.slug, props.item.key, { ...body, ...choice })
+    writeRefineRunChoice(props.projectKey, { runnerId: runnerId.value, harness: harness.value })
     feedback.value = ''
     askingForChanges.value = false
     await refresh()
@@ -187,6 +253,13 @@ async function confirm() {
           data-testid="refinement-answer"
         />
       </div>
+      <RefineRunPicker
+        v-if="canRefine && choiceReady"
+        v-model:runner-id="runnerId"
+        v-model:harness="harness"
+        :runners="runners"
+        :disabled="working !== null"
+      />
       <div class="flex flex-wrap gap-2">
         <Button
           type="submit"
@@ -229,6 +302,13 @@ async function confirm() {
           class="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
         />
       </div>
+      <RefineRunPicker
+        v-if="canRefine && choiceReady && (askingForChanges || status === 'failed')"
+        v-model:runner-id="runnerId"
+        v-model:harness="harness"
+        :runners="runners"
+        :disabled="working !== null"
+      />
       <p v-if="dirty" class="text-muted-foreground text-xs">Save your edits before confirming.</p>
       <div class="flex flex-wrap gap-2">
         <Button
@@ -264,7 +344,17 @@ async function confirm() {
       </div>
     </div>
   </section>
-  <div v-else-if="canRefine && !refinement.isPending.value && !props.busy" class="mt-2 flex">
+  <div
+    v-else-if="canRefine && !refinement.isPending.value && !props.busy"
+    class="mt-2 flex flex-wrap items-end gap-3"
+  >
+    <RefineRunPicker
+      v-if="choiceReady"
+      v-model:runner-id="runnerId"
+      v-model:harness="harness"
+      :runners="runners"
+      :disabled="working !== null"
+    />
     <Button
       size="sm"
       variant="default"

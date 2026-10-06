@@ -20,3 +20,10 @@ auditConfig:
     # TypeScript config, via fast-glob/micromatch), which expands our own fixed globs and
     # never untrusted input, and none of it ships in the bundle.
     - GHSA-vfj7-8cjw-p6xm
+
+# GHSA-jqcg-44mw-7w3h (proxy-addr, via shadcn-vue's MCP SDK) and GHSA-68fv-2mgg-jv7q
+# (source-map-js, via the Vue compiler and postcss): force the patched releases, which
+# stay inside every dependent's declared range. Drop once upstream lockfiles move on.
+overrides:
+  proxy-addr: 2.0.8
+  source-map-js: 1.2.2

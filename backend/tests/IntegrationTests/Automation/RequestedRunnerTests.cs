@@ -85,7 +85,7 @@ public sealed class RequestedRunnerTests(PostgresFixture postgres, GarageFixture
         }
         var wrongHarness = await DispatchToAsync(ItemKey, codexOnly.Runner.Id);
         Assert.Equal(HttpStatusCode.BadRequest, wrongHarness.StatusCode);
-        Assert.Equal("codex-box does not report claude, which this playbook uses.",
+        Assert.Equal("codex-box does not report claude, which this run uses.",
             await ValidationMessageAsync(wrongHarness, "runnerId"));
 
         (await Owner.PatchAsJsonAsync($"/api/v1/orgs/{Slug}/runners/{Runner.Runner.Id}",

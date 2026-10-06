@@ -129,12 +129,20 @@ public sealed class RunDispatcher(
     /// branch, pinned to the runner that holds its session, which the runner resumes. Otherwise
     /// it is an ordinary implement run with the comment's request added to its prompt.
     /// </param>
+    /// <param name="harness">
+    /// The harness for this run only, in place of the playbook's; null for the playbook's own.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
         DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null,
-        MentionDispatch? mention = null)
+        MentionDispatch? mention = null, string? harness = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
+
+        if (harness is not null && !Harnesses.IsSupported(harness))
+        {
+            return DispatchResult.Invalid("harness", "Choose claude, codex, opencode or cursor.");
+        }
 
         if (scheduledFor is { } startAt && startAt <= clock.GetUtcNow())
         {
@@ -201,8 +209,9 @@ public sealed class RunDispatcher(
             return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
         }
 
+        var runHarness = harness ?? playbook.Harness;
         if (previous is null && runnerId is { } requestedRunner
-            && await RunnerErrorAsync(requestedRunner, playbook.Harness, ct) is { } runnerError)
+            && await RunnerErrorAsync(requestedRunner, runHarness, ct) is { } runnerError)
         {
             return DispatchResult.Invalid("runnerId", runnerError);
         }
@@ -258,7 +267,7 @@ public sealed class RunDispatcher(
             RequestedRunnerId = runnerId,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
             RuleId = actor.Kind == DispatchActorKind.Rule ? actor.RuleId : null,
-            Harness = playbook.Harness,
+            Harness = runHarness,
             PromptSnapshot = prompt,
             PlaybookRevisionId = content.RevisionId,
             BranchName = branch,
@@ -447,7 +456,7 @@ public sealed class RunDispatcher(
         if (runner.Capabilities is { } capabilities
             && !capabilities.Harnesses.Any(h => string.Equals(h.Name, harness, StringComparison.Ordinal)))
         {
-            return $"{runner.Name} does not report {harness}, which this playbook uses.";
+            return $"{runner.Name} does not report {harness}, which this run uses.";
         }
         return null;
     }
