@@ -3,6 +3,7 @@ import UiPageState from '@/components/UiPageState.vue'
 // The wrapper, not vue-sonner's own Toaster: it dresses the toast in the app's popover
 // tokens and its icon set, so a toast belongs to the same screen it appears over.
 import { Toaster } from '@/components/ui/sonner'
+import { useDocumentTitle } from '@/composables/useDocumentTitle'
 import { activityToasterId } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
@@ -14,6 +15,8 @@ const session = useSessionStore()
 // A toast is a card over the page, so it follows the page's theme rather than sonner's
 // own default of light.
 const ui = useUiStore()
+// The tab names the page and the project, so a row of Aictiq tabs can be told apart.
+useDocumentTitle()
 </script>
 
 <template>

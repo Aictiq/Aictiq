@@ -59,6 +59,7 @@ import { branchName } from '@/api/relations'
 import type { TimeTrackingItem } from '@/api/time-tracking'
 import { useItemModal } from '@/composables/useItemModal'
 import { useCommands } from '@/composables/useCommands'
+import { usePageTitle } from '@/composables/useDocumentTitle'
 import { since } from '@/lib/claims'
 import { mentionToken, type Mentionable } from '@/lib/mentions'
 import { factoryRunPath } from '@/router/paths'
@@ -107,6 +108,7 @@ const watchers = useQuery({
   queryFn: () => listWatchers(props.slug, props.itemKey),
 })
 const currentItem = computed(() => item.data.value ?? null)
+usePageTitle(() => (currentItem.value ? `${currentItem.value.key} ${currentItem.value.title}` : null))
 const children = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey, 'children']),
   queryFn: () => listItemChildren(props.slug, props.itemKey),

@@ -13,7 +13,7 @@ declare module 'vue-router' {
     requiresAuth: boolean
     /** Signed-out only - the auth pages. A signed-in visitor is bounced to the app. */
     guestOnly?: boolean
-    /** Heading for placeholder screens. */
+    /** The page's name in the header, the browser tab and placeholder screens. */
     title?: string
     /** The screen is not built yet; PlaceholderView stands in for it. */
     soon?: boolean
@@ -102,19 +102,19 @@ const routes: RouteRecordRaw[] = [
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
-    meta: { requiresAuth: false, guestOnly: true },
+    meta: { requiresAuth: false, title: 'Sign in', guestOnly: true },
   },
   {
     path: '/register',
     name: 'register',
     component: () => import('@/views/RegisterView.vue'),
-    meta: { requiresAuth: false, guestOnly: true },
+    meta: { requiresAuth: false, title: 'Create account', guestOnly: true },
   },
   {
     path: '/forgot-password',
     name: 'forgot-password',
     component: () => import('@/views/ForgotPasswordView.vue'),
-    meta: { requiresAuth: false, guestOnly: true },
+    meta: { requiresAuth: false, title: 'Forgot password', guestOnly: true },
   },
   {
     // Public: the whole point of an invitation is that the recipient may not have an
@@ -122,7 +122,7 @@ const routes: RouteRecordRaw[] = [
     path: '/invite/:token',
     name: 'invite',
     component: () => import('@/views/InviteAcceptView.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: 'Invitation' },
   },
   {
     // Not guestOnly: the link arrives by mail and is opened wherever the mail was read,
@@ -130,7 +130,7 @@ const routes: RouteRecordRaw[] = [
     path: '/reset-password/:token',
     name: 'reset-password',
     component: () => import('@/views/ResetPasswordView.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: 'Reset password' },
   },
   {
     // Anonymous by design: the confirmation link proves control of the new mailbox, and
@@ -138,7 +138,7 @@ const routes: RouteRecordRaw[] = [
     path: '/confirm-email/:token',
     name: 'confirm-email',
     component: () => import('@/views/ConfirmEmailView.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: 'Confirm email' },
   },
   {
     // Anonymous for the same reason: the account that registered cannot sign in until
@@ -146,7 +146,7 @@ const routes: RouteRecordRaw[] = [
     path: '/verify-email/:token',
     name: 'verify-email',
     component: () => import('@/views/VerifyEmailView.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: 'Verify email' },
   },
   {
     path: '/projects',
@@ -505,7 +505,7 @@ const routes: RouteRecordRaw[] = [
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('@/views/NotFoundView.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: 'Page not found' },
   },
 ]
 
