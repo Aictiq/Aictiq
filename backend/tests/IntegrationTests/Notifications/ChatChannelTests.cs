@@ -205,13 +205,15 @@ public sealed class ChatChannelTests(PostgresFixture postgres, GarageFixture gar
         Assert.Equal(3, sender.Sent.Count);
         Assert.Contains(sender.Sent, s => s.Type == ChatChannelType.Telegram && s.Target == "555");
 
-        // The daily digest: one Slack message with both lines, once.
+        // The daily digest: one Slack message with both lines, once. 08:10 UTC tomorrow, so the
+        // lines queued just now are not newer than the digest's clock.
+        var digestAt = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(1).AddHours(8).AddMinutes(10), TimeSpan.Zero);
         var digest = new DailyNotificationDigestService(context.Factory.Services.GetRequiredService<IServiceScopeFactory>(),
-            new FixedClock(new DateTimeOffset(2026, 10, 5, 8, 10, 0, TimeSpan.Zero)), NullLogger<DailyNotificationDigestService>.Instance);
+            new FixedClock(digestAt), NullLogger<DailyNotificationDigestService>.Instance);
         await digest.RunChatOnceAsync(ct);
         await digest.RunChatOnceAsync(ct);
         sender.Sent.Clear();
-        await DueNowAsync(context, ct); // queued at the fixed clock's 08:10, which may be ahead of the database's
+        await DueNowAsync(context, ct); // queued at the fixed clock's 08:10 tomorrow, ahead of the database's
         await delivery.RunOnceAsync(ct);
         var digestMessage = Assert.Single(sender.Sent);
         Assert.Equal(ChatChannelType.Slack, digestMessage.Type);
