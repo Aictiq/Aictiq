@@ -918,6 +918,7 @@ function logged(updated: TimeTrackingItem) {
           v-model="description"
           :slug="slug"
           :project-key="projectKey"
+          link-tickets
           class="mt-2"
           :upload="uploadToDescription"
           :accept="acceptedFiles"
@@ -1098,6 +1099,7 @@ function logged(updated: TimeTrackingItem) {
             v-model="comment"
             :slug="slug"
             :project-key="projectKey"
+            link-tickets
             compact
             placeholder="Add a comment - @ to tag someone, paste or drop images"
             :upload="uploadToComment"
@@ -1187,6 +1189,7 @@ function logged(updated: TimeTrackingItem) {
               v-model="reply"
               :slug="slug"
               :project-key="projectKey"
+              link-tickets
               compact
               autofocus
               :placeholder="`Reply to ${thread.root.author.displayName}`"

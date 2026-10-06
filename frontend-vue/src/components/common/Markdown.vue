@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useQueries } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 
-import { getItem } from '@/api/items'
-import { referencedItemKeys, renderMarkdown } from '@/lib/markdown'
+import { useResolvedItemKeys } from '@/composables/useResolvedItemKeys'
+import { renderMarkdown } from '@/lib/markdown'
 
 /**
  * Renders user-written Markdown. `v-html` is safe here and only here because
@@ -12,20 +11,12 @@ import { referencedItemKeys, renderMarkdown } from '@/lib/markdown'
  */
 const props = defineProps<{ source: string; slug?: string; projectKey?: string }>()
 const router = useRouter()
-const keys = computed(() => props.slug && props.projectKey ? referencedItemKeys(props.source, props.projectKey) : [])
-const items = useQueries({
-  queries: computed(() => keys.value.map((key) => ({
-    queryKey: [props.slug, key],
-    queryFn: () => getItem(props.slug!, key),
-    retry: false,
-    staleTime: 60_000,
-  }))),
-})
+const itemKeys = useResolvedItemKeys(() => props.source, () => props.slug, () => props.projectKey)
 
 const html = computed(() => renderMarkdown(props.source, props.slug && props.projectKey ? {
   slug: props.slug,
   projectKey: props.projectKey,
-  itemKeys: items.value.flatMap((item) => item.data ? [item.data.key] : []),
+  itemKeys: itemKeys.value,
 } : undefined))
 
 function navigate(event: MouseEvent) {
