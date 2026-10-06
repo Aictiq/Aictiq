@@ -56,8 +56,11 @@ export interface CommentPage {
 
 const base = (slug: string, itemKey: string) => `/orgs/${slug}/items/${itemKey}/comments`
 
-export const listComments = (slug: string, itemKey: string, page = 1) =>
-  apiFetch<CommentPage>(`${base(slug, itemKey)}?page=${page}`)
+export const listComments = (
+  slug: string,
+  itemKey: string,
+  { page = 1, order = 'asc' }: { page?: number; order?: 'asc' | 'desc' } = {},
+) => apiFetch<CommentPage>(`${base(slug, itemKey)}?page=${page}&order=${order}`)
 
 export const createComment = (
   slug: string,

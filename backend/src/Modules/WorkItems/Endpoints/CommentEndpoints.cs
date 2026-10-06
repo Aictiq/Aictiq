@@ -44,14 +44,27 @@ public static class CommentEndpoints
     }
 
     private static async Task<IResult> List(string itemKey, WorkItemsDbContext db, IProjectAccess access,
-        ICurrentUser user, IUserDirectory directory, int page = 1, int pageSize = 50, CancellationToken ct = default)
+        ICurrentUser user, IUserDirectory directory, int page = 1, int pageSize = 50, string? order = null, CancellationToken ct = default)
     {
+        // Oldest first unless asked otherwise: the item page reads newest first, so its first
+        // page is the latest conversation rather than the start of it.
+        var newestFirst = order?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "asc" => false,
+            "desc" => true,
+            _ => (bool?)null,
+        };
+        if (newestFirst is null)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["order"] = ["order must be asc or desc."] });
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         var take = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 100);
         var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
         var hidden = await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct);
-        var query = onItem.WithoutFactory(db, hidden).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
+        var visible = onItem.WithoutFactory(db, hidden);
+        var query = newestFirst.Value
+            ? visible.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id)
+            : visible.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
         var total = await query.CountAsync(ct);
         var comments = await query.Skip(Math.Max(0, page - 1) * take).Take(take).ToListAsync(ct);
         var canReact = ScopeRequirements.IsSatisfiedBy(user.Scopes, Scopes.Write) && await ArchivedAsync(access, item, ct) is null;
