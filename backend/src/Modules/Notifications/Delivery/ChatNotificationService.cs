@@ -109,13 +109,16 @@ public sealed class ChatNotificationService(
         var url = details?.Url;
         if (notification.RunId is { } runId && IsRunKind(notification.Kind)
             && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, cancellationToken))
-            url = await OrganizationUrlAsync(notification.OrganizationId, $"runs/{runId}", cancellationToken);
+            url = await OrganizationUrlAsync(notification.OrganizationId, RunPath(runId), cancellationToken);
         url ??= await ItemUrlAsync(notification.OrganizationId, notification.ItemKey, cancellationToken);
         var subject = notification.ItemKey is null ? null
             : details?.ItemTitle is { Length: > 0 } title ? $"{notification.ItemKey} · {title}" : notification.ItemKey;
         var summary = string.Join("\n", new[] { subject, details?.Excerpt }.Where(s => !string.IsNullOrWhiteSpace(s)));
         return new ChatMessage(notification.Message, summary, url);
     }
+
+    /// <summary>A run's page under the organization, matching the web app's factory route.</summary>
+    public static string RunPath(Guid runId) => $"factory/runs/{runId}";
 
     public static bool IsRunKind(NotificationKind kind) =>
         kind is NotificationKind.RunSucceeded or NotificationKind.RunFailed or NotificationKind.RunNeedsInput;

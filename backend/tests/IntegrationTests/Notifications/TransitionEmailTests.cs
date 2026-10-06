@@ -128,7 +128,7 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
         Assert.Contains("Shipped &lt;script&gt;the fix&lt;/script&gt;.", runMail.BodyHtml);
         Assert.DoesNotContain("private operator failure reason", runMail.BodyText);
         Assert.Contains("https://github.com/acme/web/pull/42", runMail.BodyHtml);
-        Assert.Contains($"https://aictiq.test/o/email-links/runs/{runId}", runMail.BodyText);
+        Assert.Contains($"https://aictiq.test/o/email-links/factory/runs/{runId}", runMail.BodyText);
 
         // Replaying the outbox event never creates another email.
         await using (var replayScope = context.Factory.Services.CreateAsyncScope())

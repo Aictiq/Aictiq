@@ -49,7 +49,7 @@ public sealed class NotificationEmailService(
             if (notification.RunId is { } runId && ChatNotificationService.IsRunKind(notification.Kind) && organization is not null
                 && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl)
                 && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
-                variables["notificationUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/runs/{runId}";
+                variables["notificationUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/{ChatNotificationService.RunPath(runId)}";
             if (transition?.ItemTitle is not null)
             {
                 template = "transition";
@@ -69,7 +69,7 @@ public sealed class NotificationEmailService(
                     variables["pullRequestUrl"] = SafeWebUrl(run.PullRequestUrl);
                     if (organization is not null && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl)
                         && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
-                        variables["runUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/runs/{run.Id}";
+                        variables["runUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/{ChatNotificationService.RunPath(run.Id)}";
                 }
             }
             var rendered = renderer.Render(template, variables);

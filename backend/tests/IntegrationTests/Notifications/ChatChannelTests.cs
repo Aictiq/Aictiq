@@ -177,7 +177,7 @@ public sealed class ChatChannelTests(PostgresFixture postgres, GarageFixture gar
             var queued = await db.ChatOutbox.ToListAsync(ct);
             Assert.Equal(2, queued.Count); // Telegram (personal) and #dev (shared)
             var personal = Assert.Single(queued, m => m.OrganizationId is null);
-            Assert.Contains($"https://aictiq.test/o/chat-org/runs/{failedRun}", personal.Text);
+            Assert.Contains($"https://aictiq.test/o/chat-org/factory/runs/{failedRun}", personal.Text);
             Assert.Contains("Ship &lt;chat&gt;", personal.Text);
             Assert.Equal(organizationId, Assert.Single(queued, m => m.OrganizationId is not null).OrganizationId);
             Assert.Single(await db.ChatDigestEntries.ToListAsync(ct));
