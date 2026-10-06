@@ -189,22 +189,18 @@ afterEach(() => {
 })
 
 describe('saving an item', () => {
-  it('renders description references and allows editing then previewing the draft', async () => {
-    const original = item.descriptionMarkdown
-    item.descriptionMarkdown = 'See #PROJ-1 #PROJ-999 #OTHER-1'
+  it('shows the description as an always-on editor with ticket autocomplete', async () => {
     const wrapper = await mountDetail()
-    item.descriptionMarkdown = original
 
-    expect(wrapper.find('a[href="/o/acme/p/PROJ/items/PROJ-1"]').text()).toBe('#PROJ-1')
-    expect(wrapper.find('a[href$="/PROJ-999"]').exists()).toBe(false)
-    const edit = wrapper.findAll('button').find((button) => button.text() === 'Edit description')!
-    await edit.trigger('click')
+    const buttons = wrapper.findAll('button').map((button) => button.text())
+    expect(buttons).not.toContain('Edit description')
+    expect(buttons).not.toContain('Preview description')
+    expect(wrapper.text()).not.toContain('No description yet.')
     const descriptionEditor = wrapper.findAllComponents(MarkdownEditor)[0]!
+    expect(descriptionEditor.props()).toMatchObject({ slug: 'acme', projectKey: 'PROJ', autofocus: false })
+    expect(descriptionEditor.props('upload')).toBeTypeOf('function')
     descriptionEditor.vm.$emit('update:modelValue', 'Changed #PROJ-1')
-    await wrapper.vm.$nextTick()
-    await wrapper.findAll('button').find((button) => button.text() === 'Preview description')!.trigger('click')
     await flushPromises()
-    expect(wrapper.find('.aictiq-markdown').text()).toBe('Changed #PROJ-1')
     expect(disabled(wrapper, 'item-save')).toEqual([false, false])
     wrapper.unmount()
   })
