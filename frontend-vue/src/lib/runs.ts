@@ -178,15 +178,38 @@ export function chainTotals(chain: RunChainLink[]): {
   }
 }
 
-/** What the run detail says while nothing has picked the run up yet. */
+/**
+ * What the run detail says while nothing has picked the run up yet: which runner it waits
+ * for and why, when the instance said (`waiting`), so a run held up behind another one does
+ * not read as stuck.
+ */
 export function runWaitingMessage(
-  run: Pick<Run, 'status' | 'harness' | 'scheduledFor'>,
+  run: Pick<Run, 'status' | 'harness' | 'scheduledFor' | 'waiting'>,
   now: Date = new Date(),
 ): string | null {
   if (run.status !== 'queued') return null
   const scheduled = runScheduledLabel(run, now)
   if (scheduled) return `${scheduled}. A runner that offers ${run.harness} picks it up after that.`
-  return `Waiting for a runner that offers ${run.harness}…`
+  const waiting = run.waiting
+  if (!waiting) return `Waiting for a runner that offers ${run.harness}…`
+
+  const names = waiting.runners.join(', ')
+  const ahead =
+    waiting.ahead > 0
+      ? ` ${waiting.ahead} queued run${waiting.ahead === 1 ? ' goes' : 's go'} first.`
+      : ''
+  switch (waiting.reason) {
+    case 'runner-offline':
+      return `Waiting for ${names}, which is offline. It starts when ${names} comes back.`
+    case 'runner-busy':
+      return `Waiting for ${names}, which is busy with another run. It starts when that run finishes.${ahead}`
+    case 'no-runner':
+      return `No online runner offers ${run.harness}. It starts when one connects.`
+    case 'runners-busy':
+      return `Every runner that offers ${run.harness} is busy (${names}). It starts when one of them finishes.${ahead}`
+    case 'runner-free':
+      return `${names} ${waiting.runners.length === 1 ? 'has' : 'have'} a free slot and should pick it up within seconds.${ahead} If nothing happens, the machine may be finishing another organization's run first.`
+  }
 }
 
 // ── Scheduled runs ──────────────────────────────────────────────────────────────────

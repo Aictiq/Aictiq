@@ -19,6 +19,18 @@ import { apiFetch } from '@/utils/api'
 export type RunStatus =
   'queued' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timedOut'
 
+/**
+ * What a queued run waits for. `runner-offline`/`runner-busy`: the one runner it was sent to;
+ * `no-runner`: no online runner offers its harness; `runners-busy`: every one that does has
+ * every slot taken; `runner-free`: one has a free slot and should take it within seconds.
+ */
+export interface RunWaiting {
+  reason: 'runner-offline' | 'runner-busy' | 'no-runner' | 'runners-busy' | 'runner-free'
+  runners: string[]
+  /** Runs queued before this one that the same runners may take first. */
+  ahead: number
+}
+
 export interface Run {
   id: string
   projectId: string
@@ -50,6 +62,8 @@ export interface Run {
   queuedAt: string
   /** When the run may start (UTC); null when it was queued to start as soon as a runner is free. */
   scheduledFor?: string | null
+  /** Why a queued run whose time has come is not running yet (run detail, for factory operators). */
+  waiting?: RunWaiting | null
   assignedAt: string | null
   startedAt: string | null
   finishedAt: string | null
@@ -272,3 +286,10 @@ export const cancelRun = (slug: string, runId: string) =>
  */
 export const continueRun = (slug: string, runId: string) =>
   apiFetch<Run>(`${runsBase(slug)}/${runId}/continue`, { method: 'POST' })
+
+/**
+ * Lets a scheduled run go now instead of at its start time. The run keeps its claim on the
+ * item; only the wait goes. 409 once it is no longer waiting for its time.
+ */
+export const startRunNow = (slug: string, runId: string) =>
+  apiFetch<void>(`${runsBase(slug)}/${runId}/start-now`, { method: 'POST' })

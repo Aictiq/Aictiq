@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Aictiq.Modules.Automation.Endpoints;
 
@@ -34,6 +35,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="TriggerCommentId">The comment that asked for the run by mentioning its agent, or null.</param>
 /// <param name="FollowsUpRunId">The earlier run of the agent on the item that this run follows up, or null.</param>
 /// <param name="BranchName">The branch the run delivers on.</param>
+/// <param name="Waiting">Why a queued run whose time has come is not running yet (run detail only, for factory operators).</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -46,7 +48,24 @@ public sealed record RunView(
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
-    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null);
+    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
+    RunWaitView? Waiting = null);
+
+/// <summary>
+/// What a queued run waits for, so the run page can say it rather than "waiting for a runner".
+/// Only this organization's runs count toward a runner's slots: a machine that serves several
+/// organizations may still be busy with another one's run, which this organization cannot see.
+/// </summary>
+/// <param name="Reason">
+/// <c>runner-offline</c> or <c>runner-busy</c>: the run was sent to one runner (see
+/// <paramref name="Runners"/>), which is offline or has every slot taken.
+/// <c>no-runner</c>: no online runner offers the run's harness.
+/// <c>runners-busy</c>: every online runner that offers it has every slot taken.
+/// <c>runner-free</c>: a runner that offers it has a free slot and should take it within seconds.
+/// </param>
+/// <param name="Runners">The runners the reason is about, by name.</param>
+/// <param name="Ahead">Runs queued before this one that the same runners may take first.</param>
+public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead);
 
 /// <summary>One run of a continue chain, with what it cost on its own.</summary>
 public sealed record RunChainLink(
@@ -89,6 +108,7 @@ public static class RunEndpoints
         runs.MapGet("/{runId:guid}", GetAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapGet("/{runId:guid}/log", LogAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapPost("/{runId:guid}/cancel", CancelAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
+        runs.MapPost("/{runId:guid}/start-now", StartNowAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
         runs.MapPost("/{runId:guid}/continue", ContinueAsync).RequireOrgRole(OrgRole.Member)
             .RequireFactoryOperator().RequireScope(Scopes.Write);
 
@@ -217,7 +237,8 @@ public static class RunEndpoints
 
     private static async Task<IResult> GetAsync(
         Guid runId, AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
-        IProjectAccess access, IUserDirectory directory, CancellationToken ct)
+        IProjectAccess access, IUserDirectory directory, IOptions<AutomationOptions> options, TimeProvider clock,
+        CancellationToken ct)
     {
         if (user.UserId is not { } userId)
         {
@@ -232,7 +253,67 @@ public static class RunEndpoints
         var isOperator = await access.CanOperateFactoryAsync(userId, tenant.OrganizationId!.Value, ct);
         var people = await directory.GetAsync([run.AgentUserId], ct);
         var names = await DisplayNamesAsync(db, [run], ct);
-        return Results.Ok(await WithChainAsync(db, run, ToView(run, people, includeDetails: isOperator, names), ct));
+        var view = await WithChainAsync(db, run, ToView(run, people, includeDetails: isOperator, names), ct);
+        // Runner names are the operators' business, like the runner list they come from.
+        return Results.Ok(isOperator
+            ? view with { Waiting = await WaitingAsync(db, run, options.Value, clock.GetUtcNow(), ct) }
+            : view);
+    }
+
+    /// <summary>
+    /// Why a queued run is not running yet, judged the way <c>/runner/runs/claim</c> hands runs
+    /// out: the runner it was sent to while that one is enabled, otherwise any runner that offers
+    /// its harness. Null for a run that is not queued, or still waits for its start time.
+    /// </summary>
+    private static async Task<RunWaitView?> WaitingAsync(
+        AutomationDbContext db, Run run, AutomationOptions options, DateTimeOffset now, CancellationToken ct)
+    {
+        if (run.Status != RunStatus.Queued || run.ScheduledFor > now)
+        {
+            return null;
+        }
+
+        var runners = (await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null && r.DisabledAt == null)
+                .ToListAsync(ct))
+            .Where(r => r.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)
+            .ToList();
+        var requested = run.RequestedRunnerId is { } requestedId
+            ? await db.Runners.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestedId, ct)
+            : null;
+        // A continue run never moves; any other run sent to a runner that is gone may go anywhere.
+        var pinned = requested is not null && (requested.IsUsable || run.ContinuesRunId is not null);
+        var candidates = pinned ? [requested!] : runners;
+
+        var taken = await db.Runs.AsNoTracking()
+            .Where(r => (r.Status == RunStatus.Assigned || r.Status == RunStatus.Running) && r.RunnerId != null)
+            .GroupBy(r => r.RunnerId!.Value)
+            .Select(group => new { RunnerId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(row => row.RunnerId, row => row.Count, ct);
+        bool Free(Runner runner) => taken.GetValueOrDefault(runner.Id) < Math.Max(1, runner.Capabilities?.MaxParallel ?? 1);
+
+        var online = candidates.Where(r => RunnerEndpoints.IsOnline(r, options, now)).ToList();
+        var free = online.Where(Free).ToList();
+        var (reason, named) = (pinned, online.Count, free.Count) switch
+        {
+            (true, 0, _) => ("runner-offline", candidates),
+            (true, _, 0) => ("runner-busy", online),
+            (false, 0, _) => ("no-runner", []),
+            (false, _, 0) => ("runners-busy", online),
+            _ => ("runner-free", free),
+        };
+
+        // The claim order: by start time, else by when it was asked for.
+        var turn = run.ScheduledFor ?? run.QueuedAt;
+        // Only what the runners that can take this run might take first: a run sent to a
+        // runner that is offline is not ahead of it.
+        var candidateIds = (online.Count > 0 ? online : candidates).Select(r => r.Id).ToList();
+        var ahead = await db.Runs.AsNoTracking()
+            .Where(r => r.Id != run.Id && r.Status == RunStatus.Queued && r.Harness == run.Harness
+                && (r.ScheduledFor ?? r.QueuedAt) < turn && (r.ScheduledFor == null || r.ScheduledFor <= now)
+                && (r.RequestedRunnerId == null || candidateIds.Contains(r.RequestedRunnerId.Value)))
+            .CountAsync(ct);
+
+        return new RunWaitView(reason, named.Select(r => r.Name).Order(StringComparer.Ordinal).ToList(), ahead);
     }
 
     /// <summary>
@@ -461,6 +542,58 @@ public static class RunEndpoints
             title: "This run is already finished.",
             type: ProblemTypes.Conflict,
             statusCode: StatusCodes.Status409Conflict);
+    }
+
+    /// <summary>
+    /// Lets a scheduled run go now instead of at its start time. The run keeps its claim on the
+    /// item, its place and everything else - only the wait goes - so starting it early never
+    /// means cancelling it, and the item never passes through the failure state and back. It
+    /// joins the queue by when it was asked for. The same people who may cancel it may do this.
+    /// </summary>
+    private static async Task<IResult> StartNowAsync(
+        Guid runId, HttpContext http, AutomationDbContext db, ICurrentUser user,
+        IProjectAccess access, IRealtimePublisher realtime, TimeProvider clock, CancellationToken ct)
+    {
+        if (user.UserId is not { } userId)
+        {
+            return NotFound();
+        }
+        var run = await db.Runs.AsNoTracking().SingleOrDefaultAsync(run => run.Id == runId, ct);
+        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is not { } role)
+        {
+            return NotFound();
+        }
+        if (await AuthorizationFilters.FactoryOperatorRefusalAsync(http) is { } refusal)
+        {
+            return refusal;
+        }
+        if (run.RequestedBy != userId && !role.Satisfies(ProjectRole.Admin))
+        {
+            return Results.Problem(
+                title: "Insufficient permissions.",
+                detail: "Only the person who dispatched a run, or a project admin, can start it early.",
+                type: ProblemTypes.InsufficientRole,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // Compare-and-swap on the row as it is now: its time may have come, or a runner may
+        // have taken it, since the read above.
+        var started = await db.Runs
+            .Where(r => r.Id == run.Id && r.Status == RunStatus.Queued && r.ScheduledFor > clock.GetUtcNow())
+            .ExecuteUpdateAsync(set => set.SetProperty(r => r.ScheduledFor, (DateTimeOffset?)null), ct);
+        if (started == 0)
+        {
+            return Results.Problem(
+                title: "This run is no longer waiting for its start time.",
+                type: ProblemTypes.Conflict,
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        await realtime.PublishAsync(run.ProjectId, "run.changed", new
+        {
+            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", scheduledFor = (DateTimeOffset?)null,
+        }, ct);
+        return Results.NoContent();
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────
