@@ -106,6 +106,44 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Fact]
+    public async Task a_refine_run_takes_the_chosen_runner_and_harness()
+    {
+        await EnableAsync();
+
+        var unknown = await Owner.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/",
+            new RefineItemRequest(Harness: "notepad"), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Contains("harness", await unknown.Content.ReadAsStringAsync(Ct));
+
+        var codexOnly = await RegisterRunnerAsync("codex-box");
+        using var codexClient = RunnerClient(codexOnly.Secret);
+        var capabilities = new RunnerCapabilities(1, [new RunnerHarness("codex", "1.0")], "linux", "x64", "0.3.0", 1);
+        (await codexClient.PostAsJsonAsync("/api/v1/runner/hello",
+            new RunnerHelloRequest(capabilities), ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+
+        // The refine playbook's harness is claude, which the codex runner does not report.
+        var mismatch = await Owner.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/",
+            new RefineItemRequest(RunnerId: codexOnly.Runner.Id), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+        Assert.Null((await ItemAsync(ItemKey)).ClaimedBy);
+
+        var response = await Owner.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/",
+            new RefineItemRequest(RunnerId: codexOnly.Runner.Id, Harness: "codex"), ApiTestContext.Json, Ct);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+        var refinement = (await response.Content.ReadFromJsonAsync<RefinementView>(ApiTestContext.Json, Ct))!;
+        var run = await RunAsync(refinement.LastRunId!.Value);
+        Assert.Equal("codex", run.Harness);
+        Assert.Equal(codexOnly.Runner.Id, run.RequestedRunnerId);
+
+        var claim = await codexClient.PostAsJsonAsync("/api/v1/runner/runs/claim",
+            new RunnerClaimRequest(["codex"], 1), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
+        var claimed = (await claim.Content.ReadFromJsonAsync<RunnerRunClaimed>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(run.Id, claimed.RunId);
+        Assert.Equal("codex", claimed.Harness);
+    }
+
+    [Fact]
     public async Task questions_round_trip_and_the_answers_reach_the_next_run()
     {
         await EnableAsync();

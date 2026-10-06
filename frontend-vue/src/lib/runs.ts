@@ -334,6 +334,40 @@ export function writeRunChoice(projectKey: string, choice: RunChoice): void {
   }
 }
 
+const REFINE_CHOICE_PREFIX = 'aictiq.refine.'
+
+/** What a refine run was last sent with: kept apart from Hand to agent's, so neither overwrites the other. */
+export interface RefineRunChoice {
+  /** Null is "any free runner". */
+  runnerId: string | null
+  /** Null is the refine playbook's harness. */
+  harness: string | null
+}
+
+/** The last runner and harness used to refine on this project. Storage is a convenience, never a permission. */
+export function readRefineRunChoice(projectKey: string): RefineRunChoice | null {
+  try {
+    const raw = localStorage.getItem(REFINE_CHOICE_PREFIX + projectKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<RefineRunChoice>
+    return { runnerId: parsed.runnerId ?? null, harness: parsed.harness ?? null }
+  } catch {
+    return null
+  }
+}
+
+export function writeRefineRunChoice(projectKey: string, choice: RefineRunChoice): void {
+  try {
+    localStorage.setItem(REFINE_CHOICE_PREFIX + projectKey, JSON.stringify(choice))
+  } catch {
+    // A private window loses the memory, not the refinement.
+  }
+}
+
+/** A runner that has not reported yet may still have the harness; the API decides once it has. */
+export const runnerCanRun = (runner: { harnesses: string[] }, harness: string | null) =>
+  !harness || runner.harnesses.length === 0 || runner.harnesses.includes(harness)
+
 // ── An agent's record ───────────────────────────────────────────────────────────────
 
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'timedOut'])

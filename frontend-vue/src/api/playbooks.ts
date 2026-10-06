@@ -4,6 +4,13 @@ import { apiFetch } from '@/utils/api'
 export const playbookHarnesses = ['claude', 'codex', 'opencode', 'cursor'] as const
 export type PlaybookHarness = (typeof playbookHarnesses)[number]
 
+export const harnessLabels: Record<PlaybookHarness, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  cursor: 'Cursor CLI',
+}
+
 export interface Playbook {
   id: string
   projectId: string

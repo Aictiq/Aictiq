@@ -26,8 +26,10 @@ public sealed record RefinementAnswer(string? Question, string? Answer);
 /// <param name="Answers">Answers to the questions the last run asked.</param>
 /// <param name="Feedback">What the person wants changed, when they ask again without being asked.</param>
 /// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
+/// <param name="Harness">The harness for this run in place of the refine playbook's; null for the playbook's.</param>
 public sealed record RefineItemRequest(
-    IReadOnlyList<RefinementAnswer>? Answers = null, string? Feedback = null, Guid? RunnerId = null);
+    IReadOnlyList<RefinementAnswer>? Answers = null, string? Feedback = null, Guid? RunnerId = null,
+    string? Harness = null);
 
 public sealed record ConfirmRefinementRequest(uint Version);
 
@@ -258,6 +260,9 @@ public static class RefinementEndpoints
             errors["feedback"] = [$"Keep the note to {ItemRefinement.MaxAnswerLength} characters or fewer."];
         if (!string.IsNullOrEmpty(feedback))
             answers.Add(("What should the refined ticket change?", feedback));
+        var harness = string.IsNullOrWhiteSpace(request.Harness) ? null : request.Harness.Trim();
+        if (harness is not null && !Harnesses.IsSupported(harness))
+            errors["harness"] = ["Choose claude, codex, opencode or cursor."];
         if (errors.Count > 0) return Validation(errors);
 
         var row = await db.Refinements.SingleOrDefaultAsync(row => row.ItemId == item.Id, ct);
@@ -276,7 +281,8 @@ public static class RefinementEndpoints
         // says "Refining" with no run behind it would never be settled.
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var result = await dispatcher.DispatchAsync(
-            project, key, playbookId, settings.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct, context);
+            project, key, playbookId, settings.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct, context,
+            harness: harness);
         switch (result.Outcome)
         {
             case DispatchOutcome.ItemNotFound:

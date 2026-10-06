@@ -61,6 +61,8 @@ export interface RefineBody {
   /** What should change, when asking again without having been asked. */
   feedback?: string
   runnerId?: string | null
+  /** The harness for this run in place of the refine playbook's; null keeps the playbook's. */
+  harness?: string | null
 }
 
 const settingsPath = (slug: string, projectKey: string) =>

@@ -25,6 +25,7 @@ import {
   lastLogSeq,
   normalizeRunStatus,
   projectKeyOf,
+  readRefineRunChoice,
   readRunChoice,
   runDuration,
   runRequesterLabel,
@@ -33,6 +34,7 @@ import {
   runWaitingMessage,
   startRunButton,
   TRUNCATED_SEQ,
+  writeRefineRunChoice,
   writeRunChoice,
 } from '@/lib/runs'
 
@@ -432,6 +434,16 @@ describe('lib/runs', () => {
       expect(readRunChoice('PROJ')).toEqual({ playbookId: 'p1', agentId: 'a1', runnerId: null })
       localStorage.removeItem(key)
       expect(readRunChoice('PROJ')).toBeNull()
+    })
+
+    it('keeps the refinement choice apart from Hand to agent’s', () => {
+      const store = stubStorage()
+      writeRunChoice('PROJ', { playbookId: 'p1', agentId: 'a1', runnerId: 'r1' })
+      writeRefineRunChoice('PROJ', { runnerId: 'r2', harness: 'codex' })
+      expect(readRefineRunChoice('PROJ')).toEqual({ runnerId: 'r2', harness: 'codex' })
+      expect(readRunChoice('PROJ')).toEqual({ playbookId: 'p1', agentId: 'a1', runnerId: 'r1' })
+      expect(readRefineRunChoice('OTHER')).toBeNull()
+      store.clear()
     })
 
     it('reads nothing from an empty or unreadable slot', () => {

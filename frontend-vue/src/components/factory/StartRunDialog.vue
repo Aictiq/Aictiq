@@ -27,6 +27,7 @@ import {
   fromDateTimeLocalValue,
   localTimeZone,
   readRunChoice,
+  runnerCanRun,
   toDateTimeLocalValue,
   writeRunChoice,
 } from '@/lib/runs'
@@ -79,11 +80,8 @@ const assignable = computed(() =>
 
 const playbookHarness = computed(() => playbooks.value.find((p) => p.id === playbookId.value)?.harness ?? null)
 
-/** A runner that has not reported yet may still have the harness; the API decides once it has. */
-const canRun = (runner: RunnerChoice, harness: string | null) =>
-  !harness || runner.harnesses.length === 0 || runner.harnesses.includes(harness)
 
-const compatibleRunners = computed(() => runners.value.filter((runner) => canRun(runner, playbookHarness.value)))
+const compatibleRunners = computed(() => runners.value.filter((runner) => runnerCanRun(runner, playbookHarness.value)))
 
 /** One runner is no choice: every run goes to it anyway. */
 const showRunners = computed(() => runners.value.length > 1)
@@ -107,7 +105,7 @@ const chosenRunner = computed(() => runners.value.find((runner) => runner.id ===
 
 // A playbook with another harness may rule the chosen runner out.
 watch(playbookHarness, (harness) => {
-  if (chosenRunner.value && !canRun(chosenRunner.value, harness)) runnerId.value = null
+  if (chosenRunner.value && !runnerCanRun(chosenRunner.value, harness)) runnerId.value = null
 })
 
 watch(
@@ -148,7 +146,7 @@ watch(
           ? remembered.agentId
           : (defaultAgent ?? assignable.value[0]?.userId ?? null)
       const rememberedRunner = runnerChoices.find((runner) => runner.id === remembered?.runnerId)
-      runnerId.value = rememberedRunner && canRun(rememberedRunner, playbookHarness.value) ? rememberedRunner.id : null
+      runnerId.value = rememberedRunner && runnerCanRun(rememberedRunner, playbookHarness.value) ? rememberedRunner.id : null
     } catch {
       loadFailed.value = true
     } finally {
