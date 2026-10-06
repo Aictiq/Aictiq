@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ExternalLink, Hand, RotateCcw, StepForward } from '@lucide/vue'
+import { ExternalLink, Hand, Play, RotateCcw, StepForward } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
-import { cancelRun, continueRun, dispatchRun, getRun } from '@/api/runs'
+import { cancelRun, continueRun, dispatchRun, getRun, startRunNow } from '@/api/runs'
 import type { Run } from '@/api/runs'
 import { getProject, hasProjectRole } from '@/api/projects'
 import KeyChip from '@/components/common/KeyChip.vue'
@@ -24,6 +24,7 @@ import {
   formatCost,
   formatTokens,
   isLiveRun,
+  isWaitingForSchedule,
   projectKeyOf,
   runDuration,
   runRequesterLabel,
@@ -51,6 +52,9 @@ const runId = computed(() => String(route.params.runId ?? ''))
 const runQuery = useQuery({
   queryKey: computed(() => [slug.value, 'runs', runId.value]),
   queryFn: () => getRun(slug.value, runId.value),
+  // While queued, what it waits for changes with other runs (a runner frees up, comes back,
+  // its start time passes) that send this run no event, so ask again now and then.
+  refetchInterval: (query) => (query.state.data?.status === 'queued' ? 15_000 : false),
 })
 const run = computed(() => runQuery.data.value ?? null)
 const notFound = computed(
@@ -167,6 +171,32 @@ useRunRealtime({
   },
 })
 
+// A scheduled run can go early without being cancelled and dispatched again: the same run
+// keeps its claim on the item, so nothing bounces through the failure state on the way.
+const mayStartNow = computed(
+  () => mayCancel.value && !!run.value && isWaitingForSchedule(run.value, now.value),
+)
+const startingNow = ref(false)
+async function startNow() {
+  const current = run.value
+  if (!current || startingNow.value) return
+  startingNow.value = true
+  try {
+    await startRunNow(slug.value, current.id)
+    toast.info(`Started early - a runner that offers ${current.harness} picks it up now.`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      toast.info('This run is no longer waiting for its start time.')
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    startingNow.value = false
+    await client.invalidateQueries({ queryKey: [slug.value, 'runs', current.id] })
+    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey, 'runs'] })
+  }
+}
+
 const mayCancel = computed(() =>
   run.value
     ? canCancelRun(run.value, {
@@ -257,10 +287,22 @@ const tokens = computed(() => {
           </div>
 
           <Button
+            v-if="mayStartNow"
+            size="sm"
+            class="ml-auto"
+            :disabled="startingNow"
+            data-testid="run-start-now"
+            title="Start the run now instead of at its scheduled time"
+            @click="startNow"
+          >
+            <Play class="size-3.5" aria-hidden="true" />
+            Start now
+          </Button>
+          <Button
             v-if="mayCancel"
             variant="outline"
             size="sm"
-            class="ml-auto"
+            :class="{ 'ml-auto': !mayStartNow }"
             :disabled="cancelling"
             data-testid="run-cancel"
             @click="cancel"

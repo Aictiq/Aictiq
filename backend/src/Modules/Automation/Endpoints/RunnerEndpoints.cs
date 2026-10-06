@@ -401,7 +401,7 @@ public static partial class RunnerEndpoints
             IsDisabled: runner.DisabledAt is not null,
             runner.CreatedAt);
 
-    private static bool IsOnline(Runner runner, AutomationOptions options, DateTimeOffset now) =>
+    internal static bool IsOnline(Runner runner, AutomationOptions options, DateTimeOffset now) =>
         runner.IsUsable && runner.LastSeenAt is { } seen && now - seen <= options.OnlineWindow;
 
     private static Guid RunnerId(HttpContext http) =>

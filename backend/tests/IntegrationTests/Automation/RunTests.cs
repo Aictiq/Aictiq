@@ -681,7 +681,10 @@ public sealed record RunView(
     string? SessionId = null, Guid? ContinuesRunId = null, Guid? ContinuedByRunId = null, bool AutoContinued = false,
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
-    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null);
+    Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
+    RunWaitView? Waiting = null);
+
+public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead);
 
 public sealed record RunChainLink(
     Guid Id, string Status, bool AutoContinued, DateTimeOffset QueuedAt, DateTimeOffset? FinishedAt,

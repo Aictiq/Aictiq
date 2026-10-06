@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Aictiq.IntegrationTests.Storage;
+using Aictiq.SharedKernel.Authorization;
 using Aictiq.Modules.Automation.Workers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -101,6 +102,56 @@ public sealed class ScheduledRunTests(PostgresFixture postgres, GarageFixture ga
         await MakeDueAsync(run.Id);
         using var runner = RunnerClient(Runner.Secret);
         Assert.Equal(HttpStatusCode.NoContent, (await ClaimMaybeAsync(runner))!.StatusCode);
+    }
+
+    [Fact]
+    public async Task start_now_lets_a_scheduled_run_go_without_giving_up_the_item()
+    {
+        var run = await ScheduledAsync(ItemKey, DateTimeOffset.UtcNow.AddHours(6));
+        var start = await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{run.Id}/start-now", null, Ct);
+        Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+
+        // Still the same run and the same claim: nothing was cancelled, nothing re-dispatched.
+        var after = await RunAsync(run.Id);
+        Assert.Equal("queued", after.Status);
+        Assert.Null(after.ScheduledFor);
+        Assert.Equal(AgentId, (await ItemAsync(ItemKey)).ClaimedBy);
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.runs"));
+        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM shared.outbox_messages WHERE type LIKE '%RunFinished%'"));
+
+        using var runner = RunnerClient(Runner.Secret);
+        Assert.Equal(run.Id, (await ClaimAsync(runner)).RunId);
+
+        // Once a runner has it there is nothing left to start early.
+        var again = await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{run.Id}/start-now", null, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    }
+
+    [Fact]
+    public async Task start_now_is_refused_for_a_run_that_is_not_waiting_for_its_time()
+    {
+        var now = await DispatchAsync(ItemKey);
+        var refused = await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{now.Id}/start-now", null, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+
+        var other = await CreateItemAsync("Tidy the footer");
+        var due = await ScheduledAsync(other.Key, DateTimeOffset.UtcNow.AddHours(6));
+        await MakeDueAsync(due.Id);
+        var late = await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{due.Id}/start-now", null, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, late.StatusCode);
+    }
+
+    [Fact]
+    public async Task only_the_requester_or_a_project_admin_may_start_a_run_early()
+    {
+        var run = await ScheduledAsync(ItemKey, DateTimeOffset.UtcNow.AddHours(6));
+        var bob = await Context.RegisterAsync($"run-member-{Guid.NewGuid():N}@test.local", "Bob", "Brown");
+        await AddMemberAsync(bob.User.Id, OrgRole.Member, canOperateFactory: true);
+        using var member = Context.ClientFor(bob);
+
+        var refused = await member.PostAsync($"/api/v1/orgs/{Slug}/runs/{run.Id}/start-now", null, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.NotNull((await RunAsync(run.Id)).ScheduledFor);
     }
 
     [Fact]

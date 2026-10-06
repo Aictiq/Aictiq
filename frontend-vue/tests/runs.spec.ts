@@ -318,6 +318,29 @@ describe('lib/runs', () => {
       expect(runWaitingMessage({ status: 'running', harness: 'claude' })).toBeNull()
     })
 
+    it('names the runner a queued run waits for, and why', () => {
+      const queued = { status: 'queued' as const, harness: 'codex' as const }
+      const wait = (reason: string, runners: string[], ahead = 0) =>
+        runWaitingMessage({ ...queued, waiting: { reason, runners, ahead } as Run['waiting'] })
+      expect(wait('runner-busy', ['blago-hetzner-vm'], 1)).toBe(
+        'Waiting for blago-hetzner-vm, which is busy with another run. It starts when that run finishes. 1 queued run goes first.',
+      )
+      expect(wait('runner-offline', ['laptop'])).toBe(
+        'Waiting for laptop, which is offline. It starts when laptop comes back.',
+      )
+      expect(wait('no-runner', [])).toBe(
+        'No online runner offers codex. It starts when one connects.',
+      )
+      expect(wait('runners-busy', ['a', 'b'], 2)).toBe(
+        'Every runner that offers codex is busy (a, b). It starts when one of them finishes. 2 queued runs go first.',
+      )
+      expect(wait('runner-free', ['a'])).toMatch(
+        /^a has a free slot and should pick it up within seconds\./,
+      )
+      // Without the reason (a viewer who is not an operator) it says what it always said.
+      expect(runWaitingMessage(queued)).toBe('Waiting for a runner that offers codex…')
+    })
+
     it('names the start time while a scheduled run waits for it', () => {
       const now = new Date('2026-10-02T12:00:00Z')
       const run = {
