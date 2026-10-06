@@ -31,7 +31,7 @@ export interface ItemReferenceContext {
   itemKeys: string[]
 }
 
-const itemReferencePattern = /(^|[\s(])#([A-Z][A-Z0-9]*-[1-9]\d*)(?![\p{L}\p{N}_-])/gu
+export const itemReferencePattern = /(^|[\s(])#([A-Z][A-Z0-9]*-[1-9]\d*)(?![\p{L}\p{N}_-])/gu
 
 // Work on text tokens after linkify: code, images and existing links never become references.
 md.core.ruler.after('linkify', 'item-references', (state) => {
@@ -54,7 +54,7 @@ md.core.ruler.after('linkify', 'item-references', (state) => {
         const text = new state.Token('text', '', 0)
         text.content = token.content.slice(offset, start)
         const open = new state.Token('link_open', 'a', 1)
-        open.attrSet('href', `/o/${encodeURIComponent(context.slug)}/p/${encodeURIComponent(context.projectKey)}/items/${key}`)
+        open.attrSet('href', itemHref(context.slug, context.projectKey, key))
         const label = new state.Token('text', '', 0)
         label.content = `#${key}`
         parts.push(text, open, label, new state.Token('link_close', 'a', -1))
@@ -67,6 +67,10 @@ md.core.ruler.after('linkify', 'item-references', (state) => {
     })
   }
 })
+
+export function itemHref(slug: string, projectKey: string, key: string): string {
+  return `/o/${encodeURIComponent(slug)}/p/${encodeURIComponent(projectKey)}/items/${key}`
+}
 
 /** Extract only visible references, so code and URL anchors cause no API requests. */
 export function referencedItemKeys(source: string, projectKey: string): string[] {

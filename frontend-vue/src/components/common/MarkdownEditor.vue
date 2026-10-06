@@ -7,16 +7,22 @@ import TableRow from '@tiptap/extension-table-row'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
-import { EditorContent, useEditor } from '@tiptap/vue-3'
+import { EditorContent, Extension, useEditor } from '@tiptap/vue-3'
 import { Bold, Code, Hash, List, ListTodo, Minus, Paperclip, Plus, Table as TableIcon, Trash2 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { searchProject, type SearchItem } from '@/api/search'
 import UserAvatar from '@/components/common/UserAvatar.vue'
+import { useResolvedItemKeys } from '@/composables/useResolvedItemKeys'
 import { useToast } from '@/composables/useToast'
 import { mentionToken, type Mentionable, searchMentionables } from '@/lib/mentions'
 import { planLimitMessage } from '@/lib/billing'
+import { itemHref, itemReferencePattern } from '@/lib/markdown'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -39,6 +45,8 @@ const props = withDefaults(
     /** Both are required to search tickets from this project. */
     slug?: string
     projectKey?: string
+    /** Show `#KEY` references to existing tickets as links that open them. Needs slug and projectKey. */
+    linkTickets?: boolean
   }>(),
   {
     placeholder: 'Write a description…',
@@ -50,6 +58,7 @@ const props = withDefaults(
     autofocus: false,
     slug: undefined,
     projectKey: undefined,
+    linkTickets: false,
   },
 )
 const emit = defineEmits<{ 'update:modelValue': [markdown: string]; blur: [] }>()
@@ -204,12 +213,71 @@ function insertTicketTrigger() {
   trackTicket()
 }
 
+// ── Ticket links ───────────────────────────────────────────────────────────────────
+// `#KEY` stays plain text in the document and the Markdown; links are decorations drawn
+// over it, so they never reach the saved description. Only keys the API resolved are
+// drawn, like the rendered Markdown does. Set once per editor, so the lookups (and the
+// query client and router they need) exist only where links were asked for.
+const router = props.linkTickets ? useRouter() : undefined
+const linkedKeys = props.linkTickets
+  ? useResolvedItemKeys(() => props.modelValue, () => props.slug, () => props.projectKey)
+  : computed<string[]>(() => [])
+const ticketLinkKey = new PluginKey<DecorationSet>('ticketLinks')
+
+function ticketLinkDecorations(doc: ProseMirrorNode): DecorationSet {
+  const { slug, projectKey } = props
+  const keys = new Set(linkedKeys.value)
+  if (!slug || !projectKey || !keys.size) return DecorationSet.empty
+  const links: Decoration[] = []
+  doc.descendants((node, pos, parent) => {
+    if (!node.isText || parent?.type.spec.code) return
+    if (node.marks.some((mark) => mark.type.name === 'code' || mark.type.name === 'link')) return
+    for (const match of node.text!.matchAll(itemReferencePattern)) {
+      const key = match[2]!
+      if (!key.startsWith(`${projectKey}-`) || !keys.has(key)) continue
+      const from = pos + match.index! + match[1]!.length
+      links.push(Decoration.inline(from, from + key.length + 1, {
+        nodeName: 'a',
+        href: itemHref(slug, projectKey, key),
+        class: 'cursor-pointer',
+        'data-ticket-link': key,
+      }))
+    }
+  })
+  return DecorationSet.create(doc, links)
+}
+
+const TicketLinks = Extension.create({
+  name: 'ticketLinks',
+  addProseMirrorPlugins: () => [
+    new Plugin({
+      key: ticketLinkKey,
+      state: {
+        init: (_config, state) => ticketLinkDecorations(state.doc),
+        apply: (tr, links) => (tr.docChanged || tr.getMeta(ticketLinkKey) ? ticketLinkDecorations(tr.doc) : links),
+      },
+      props: { decorations: (state) => ticketLinkKey.getState(state) },
+    }),
+  ],
+})
+
+/** A plain click opens the ticket in the app; with a modifier it goes to a new tab. */
+function openTicketLink(event: MouseEvent): boolean {
+  if (!router || event.button !== 0) return false
+  const href = (event.target as Element).closest?.('a[data-ticket-link]')?.getAttribute('href')
+  if (!href) return false
+  event.preventDefault()
+  if (event.ctrlKey || event.metaKey || event.shiftKey) window.open(href, '_blank', 'noopener')
+  else void router.push(href)
+  return true
+}
+
 const editor = useEditor({
   content: props.modelValue,
   contentType: 'markdown',
   editable: !props.disabled,
   autofocus: props.autofocus ? 'end' : false,
-  extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Markdown],
+  extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Markdown, TicketLinks],
   editorProps: {
     attributes: {
       class: `aictiq-markdown ${props.compact ? 'min-h-20' : 'min-h-44'} px-3 py-2 text-sm outline-none`,
@@ -232,6 +300,8 @@ const editor = useEditor({
       },
     },
     handleKeyDown: (_view, event) => ticketKey(event) || mentionKey(event),
+    // Ahead of the Link extension's own handler, which would open the href in a new window.
+    handleClick: (_view, _pos, event) => openTicketLink(event),
     handlePaste: (_view, event) => insertFiles(event.clipboardData?.files),
     handleDrop: (view, event) => {
       const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
@@ -314,6 +384,10 @@ function pickFiles(event: Event) {
 watch(() => props.modelValue, (markdown) => {
   if (!editor.value || editor.value.getMarkdown() === markdown) return
   editor.value.commands.setContent(markdown, { contentType: 'markdown' as never, emitUpdate: false })
+})
+// Lookups finish after the text that triggered them, so redraw once the resolved set moves.
+watch(() => linkedKeys.value.join(' '), () => {
+  if (editor.value) editor.value.view.dispatch(editor.value.state.tr.setMeta(ticketLinkKey, true))
 })
 watch(() => props.disabled, (disabled) => { editor.value?.setEditable(!disabled); if (disabled) ticket.value = null })
 watch(() => [props.slug, props.projectKey], () => { ticket.value = null })

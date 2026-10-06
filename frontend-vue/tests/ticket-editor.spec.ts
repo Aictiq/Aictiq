@@ -1,12 +1,16 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { EditorContent, type Editor } from '@tiptap/vue-3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
+import { getItem, type WorkItem } from '@/api/items'
 import { searchProject, type SearchResponse } from '@/api/search'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 
 vi.mock('@/api/search', () => ({ searchProject: vi.fn() }))
+vi.mock('@/api/items', () => ({ getItem: vi.fn() }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 
 const tickets: SearchResponse = {
@@ -263,5 +267,66 @@ describe('ticket suggestions in the Markdown editor', () => {
     expect(editor.state.doc.textContent).toBe('@AnaKovač ')
     expect(searchProject).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="mention-list"]').exists()).toBe(false)
+  })
+})
+
+describe('ticket links in the Markdown editor', () => {
+  async function mountLinked(modelValue: string) {
+    vi.useRealTimers()
+    vi.mocked(getItem).mockReset().mockImplementation(async (_slug, key) => {
+      if (key === 'ACME-999') throw new Error('Not found')
+      return { key } as WorkItem
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }] })
+    await router.push('/')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    wrapper = mount(MarkdownEditor, {
+      attachTo: document.body,
+      props: { modelValue, slug: 'acme', projectKey: 'ACME', linkTickets: true },
+      global: { plugins: [[VueQueryPlugin, { queryClient: client }], router] },
+    })
+    await flushPromises()
+    editor = wrapper.findComponent(EditorContent).props('editor') as Editor
+    return router
+  }
+
+  function click(target: Element, init: MouseEventInit = {}) {
+    const event = new MouseEvent('click', { button: 0, ...init })
+    Object.defineProperty(event, 'target', { value: target })
+    return editor.view.someProp('handleClick', (handle) => handle(editor.view, 1, event))
+  }
+
+  it('links resolved project references without changing the Markdown', async () => {
+    const router = await mountLinked('See #ACME-12, #ACME-999, #OTHER-1 and `#ACME-12`')
+    expect(vi.mocked(getItem).mock.calls).toEqual([['acme', 'ACME-12'], ['acme', 'ACME-999']])
+    const links = wrapper.findAll('a[data-ticket-link]')
+    expect(links.map((link) => link.text())).toEqual(['#ACME-12'])
+    expect(links[0]!.attributes('href')).toBe('/o/acme/p/ACME/items/ACME-12')
+    expect(editor.getMarkdown()).toBe('See #ACME-12, #ACME-999, #OTHER-1 and `#ACME-12`')
+
+    expect(click(links[0]!.element)).toBe(true)
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/o/acme/p/ACME/items/ACME-12')
+  })
+
+  it('links a reference once it is typed and opens modified clicks in a new tab', async () => {
+    const router = await mountLinked('')
+    editor.commands.insertContent('Blocked by #ACME-24')
+    await wrapper.setProps({ modelValue: editor.getMarkdown() })
+    await flushPromises()
+    const link = wrapper.get('a[data-ticket-link]')
+    expect(link.text()).toBe('#ACME-24')
+
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    expect(click(link.element, { ctrlKey: true })).toBe(true)
+    expect(open).toHaveBeenCalledWith('/o/acme/p/ACME/items/ACME-24', '_blank', 'noopener')
+    expect(router.currentRoute.value.path).toBe('/')
+  })
+
+  it('leaves references plain unless links are asked for', async () => {
+    vi.mocked(getItem).mockReset()
+    await mountEditor({ modelValue: '#ACME-12' })
+    expect(getItem).not.toHaveBeenCalled()
+    expect(wrapper.find('a[data-ticket-link]').exists()).toBe(false)
   })
 })
