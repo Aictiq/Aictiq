@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Menu, Monitor, Moon, Search, Sun } from '@lucide/vue'
-import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -16,9 +15,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useCommandStore } from '@/composables/useCommands'
+import { appName, useRouteTitles } from '@/composables/useDocumentTitle'
 import { useSessionStore } from '@/stores/session'
-import { useOrganizationsStore } from '@/stores/organizations'
-import { useProjectsStore } from '@/stores/projects'
 import { useUiStore, type ThemePreference } from '@/stores/ui'
 import { createHubConnection } from '@/utils/realtime'
 
@@ -28,10 +26,7 @@ import { createHubConnection } from '@/utils/realtime'
  * the whole point of a palette, and two would compete.
  */
 const commands = useCommandStore()
-const route = useRoute()
 const session = useSessionStore()
-const organizations = useOrganizationsStore()
-const projects = useProjectsStore()
 const ui = useUiStore()
 const client = useQueryClient()
 let notificationConnection: HubConnection | null = null
@@ -59,17 +54,7 @@ onBeforeUnmount(() => {
   if (active && active.state !== HubConnectionState.Disconnected) active.stop().catch(warn)
 })
 
-// The current route's title is both more useful and more compact than an internal route
-// name such as `org-settings-members`, especially in the phone header.
-const currentTitle = computed(() => {
-  if (typeof route.meta.title === 'string') return route.meta.title
-  if (route.name === 'home') return 'My work'
-  return String(route.name ?? '')
-    .replace(/^(organization|org|project|team)-/, '')
-    .replace(/-settings$/, '')
-    .replaceAll('-', ' ')
-    .replace(/^./, (letter) => letter.toUpperCase())
-})
+const { pageTitle: currentTitle, projectTitle } = useRouteTitles()
 
 // The trigger shows the theme in effect, so `system` reads as whatever the OS resolved to.
 const themeOptions = [
@@ -81,21 +66,7 @@ const themeModel = computed({
   get: () => ui.theme,
   set: (next: ThemePreference) => ui.setTheme(next),
 })
-const scopeTitle = computed(() => {
-  // Scoped pages follow the URL, even while the sidebar's selection is changing.
-  // The unscoped board reads its project from the store, just like its content does.
-  const projectKey =
-    typeof route.params.projectKey === 'string'
-      ? route.params.projectKey
-      : route.name === 'board'
-        ? projects.currentKey
-        : null
-  if (!projectKey) return 'Aictiq'
-
-  // Project keys are only unique within an organization. Never use another tenant's name.
-  if (route.params.slug && route.params.slug !== organizations.currentSlug) return projectKey
-  return projects.projects.find((project) => project.key === projectKey)?.name ?? projectKey
-})
+const scopeTitle = computed(() => projectTitle.value ?? appName)
 const crumbs = computed(() => [scopeTitle.value, currentTitle.value].filter(Boolean))
 </script>
 
