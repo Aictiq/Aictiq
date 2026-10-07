@@ -1,6 +1,6 @@
 {
   "name": "@aictiq/cli",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Command-line client for Aictiq, including an MCP stdio bridge for coding agents.",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -36,7 +36,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "commander": "^15.0.0"
   },
   "devDependencies": {

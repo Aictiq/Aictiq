@@ -106,6 +106,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@modelcontextprotocol/sdk': 1.31.0
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
 
@@ -621,8 +622,8 @@ packages:
   '@microsoft/signalr@10.0.11':
     resolution: {integrity: sha512-FulOJ2EEtKvLQcswe/U7v8pzyXyk7Jua5xgWJPPwyQU/2Z9ORvKcVjyO75VvLsem+CJ1ORRexJ+7Bz1FCei2aw==}
 
-  '@modelcontextprotocol/sdk@1.30.0':
-    resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
+  '@modelcontextprotocol/sdk@1.31.0':
+    resolution: {integrity: sha512-UvTMgnNlnIBO/22ob2RcVGDlcvOslQs8T59+FTGdA0L27a39fdGF/EDETNtDVK4DZGpwomlsYpRdA8UXcVL/pw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -4084,7 +4085,7 @@ snapshots:
       - encoding
       - utf-8-validate
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.31.0(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.5)
       ajv: 8.20.0
@@ -6557,7 +6558,7 @@ snapshots:
   shadcn-vue@2.8.2(eslint@10.9.1(jiti@2.7.0))(vue@3.5.42(typescript@5.9.3)):
     dependencies:
       '@dotenvx/dotenvx': 2.23.0
-      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.31.0(zod@3.25.76)
       '@unovue/detypes': 0.8.5
       '@vue/compiler-sfc': 3.5.42
       c12: 3.3.4
