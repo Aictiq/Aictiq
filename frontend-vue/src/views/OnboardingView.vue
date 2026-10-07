@@ -33,6 +33,13 @@ const emails = ref('')
 const token = ref<AccessTokenCreated | null>(null)
 const errors = ref<Record<string, string[]>>({})
 const key = computed(() => projectKey.value.trim().toUpperCase() || suggestKey(projectName.value))
+// What each step creates and why it matters, so the wizard explains the model as it builds it.
+const intros = computed(() => [
+  'An organization is your company or team on Aictiq. It owns the people, projects, billing and AI agents.',
+  `A project holds the work for one product or codebase: its backlog, board, sprints and wiki. The key starts every item number, so the first item here is ${key.value || 'WEB'}-1.`,
+  'Teammates join the organization as members and can work in its projects. You can invite more later from organization settings.',
+  'Agents pick up items from your backlog and work on them on a machine you control, following a playbook you write.',
+])
 
 onMounted(async () => {
   await organizations.load()
@@ -80,7 +87,7 @@ async function finishIntoChecklist() { onboarding.openChecklist(); await finish(
   <AppShell><main class="mx-auto max-w-xl px-6 py-10">
     <p class="font-label">Get started · {{ step }} of 4</p>
     <h1 class="mt-1 text-2xl font-semibold">{{ ['Create your organization', 'Create the first project', 'Invite your teammates', 'Set up AI work'][step - 1] }}</h1>
-    <p class="text-muted-foreground mt-2 text-sm">You can complete this with a keyboard, and skip the parts you do not need yet.</p>
+    <p class="text-muted-foreground mt-2 text-sm">{{ intros[step - 1] }}</p>
     <div v-if="loading" class="text-muted-foreground mt-8 flex items-center gap-2 text-sm"><Loader2 class="size-4 animate-spin" /> Loading…</div>
     <EmptyState v-else-if="!canCreate" class="mt-8" title="Ask an admin for an invite" description="This self-hosted Aictiq accepts new members by invitation. An administrator can send one to your email address." icon="◇" />
     <form v-else-if="step === 1" class="mt-8 space-y-4" @submit.prevent="createOrganization"><label class="block text-sm font-medium" for="onboard-org">Organization name</label><Input id="onboard-org" v-model="orgName" autofocus placeholder="Acme" :aria-invalid="Boolean(errors.name)" /><p v-for="message in errors.name" :key="message" class="text-destructive text-xs">{{ message }}</p><Button type="submit" :disabled="busy || !orgName.trim()"><Loader2 v-if="busy" class="animate-spin" />Continue</Button></form>
