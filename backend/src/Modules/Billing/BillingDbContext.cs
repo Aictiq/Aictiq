@@ -50,7 +50,11 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options,
                 new BillingPlan { Code = "starter", HumanSeatPrice = 9, OrganizationPrice = 0, IncludedAgentsPerHuman = 3, Limits = new PlanLimits(20, 5, 20, 10_737_418_240) },
                 new BillingPlan { Code = "team", HumanSeatPrice = 15, OrganizationPrice = 0, Limits = new PlanLimits(null, 25, null, 107_374_182_400, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "webhooks", "page_permissions", "audit_export" }) },
                 new BillingPlan { Code = "enterprise", HumanSeatPrice = 19, OrganizationPrice = 0, Limits = new PlanLimits(null, null, null, null, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "webhooks", "page_permissions", "audit_export", "sso", "scim" }) },
-                new BillingPlan { Code = "hosted", HumanSeatPrice = 0, OrganizationPrice = 49m, Limits = new PlanLimits(null, null, null, 10_737_418_240, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "webhooks", "page_permissions", "audit_export" }, RunLogDays: 90, AnalyticsDays: 365) });
+                new BillingPlan { Code = "hosted", HumanSeatPrice = 0, OrganizationPrice = 79m, Limits = new PlanLimits(null, null, null, 10_737_418_240, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "webhooks", "page_permissions", "audit_export" }, RunLogDays: 90, AnalyticsDays: 365) },
+                // The hosted free tier. Its storage and run-log numbers are the defaults of
+                // Billing:FreeTier, which is what is enforced - the people and storage limits
+                // per Owner, across organizations, not per row here.
+                new BillingPlan { Code = "hosted_free", HumanSeatPrice = 0, OrganizationPrice = 0, Limits = new PlanLimits(null, null, null, 209_715_200, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "webhooks", "page_permissions", "audit_export" }, RunLogDays: 30, AnalyticsDays: 365) });
         });
         modelBuilder.Entity<UsageSnapshot>(b =>
         {

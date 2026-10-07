@@ -585,7 +585,9 @@ On a **self-hosted** instance the window is 30 days by default; configure
 change it. Nothing overrides an operator's choice there.
 
 On the **hosted** service the organization's plan supplies the window - 90 days on the
-Hosted offer and its evaluation. Automation asks `IPlanAllowances` per organization
+Hosted offer and its evaluation, 30 days on the free tier (`Billing:FreeTier:RunLogDays`).
+An organization that drops from its evaluation to Free has logs older than 30 days pruned
+on the next sweep. Automation asks `IPlanAllowances` per organization
 rather than reading a billing table, and a plan with no opinion falls back to the
 configured `Retention:RunLogDays`. **A pruned log cannot be recovered by purchasing a
 subscription later**: the chunks are deleted, and buying Hosted afterwards does not bring

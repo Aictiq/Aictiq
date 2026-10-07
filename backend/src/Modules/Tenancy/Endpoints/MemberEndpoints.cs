@@ -121,6 +121,7 @@ public static class MemberEndpoints
             UpdateMemberRequest request,
             TenancyDbContext db,
             ICurrentUser user,
+            IPlanLimits planLimits,
             HybridCache cache,
             NpgsqlDataSource dataSource,
             TimeProvider timeProvider,
@@ -152,6 +153,17 @@ public static class MemberEndpoints
                 {
                     return TenancyResults.Forbidden(
                         "Owners manage every role; admins manage members and guests.");
+                }
+
+                // A new Owner brings this organization's people into their own free-tier
+                // count; one who would go over it is refused rather than made read-only.
+                if (desired == OrgRole.Owner && target.Role != OrgRole.Owner)
+                {
+                    var ownership = await planLimits.CanMakeOwnerAsync(target.OrganizationId, target.UserId, cancellationToken);
+                    if (!ownership.Allowed)
+                    {
+                        return TenancyResults.PlanLimited(ownership);
+                    }
                 }
 
                 target.ChangeRole(desired, user.UserId!, timeProvider.GetUtcNow());

@@ -210,10 +210,11 @@ public static class AuthorizationFilters
         {
             return Results.Problem(
                 title: "This organization is read-only.",
-                detail: "The evaluation has ended, or a payment failed and the grace period with "
-                    + "it. Everything is still readable, downloadable and exportable; an owner can "
-                    + "choose a plan or update the payment method under Settings → Billing to make "
-                    + "changes again.",
+                detail: "The evaluation has ended, a payment failed and the grace period with it, "
+                    + "or an owner has more people across their free organizations than the free "
+                    + "plan allows. Everything is still readable, downloadable and exportable; an "
+                    + "owner can choose a plan, update the payment method or remove people under "
+                    + "Settings to make changes again.",
                 type: ProblemTypes.OrganizationReadOnly,
                 statusCode: StatusCodes.Status409Conflict);
         }

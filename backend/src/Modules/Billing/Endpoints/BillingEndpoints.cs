@@ -44,10 +44,20 @@ public sealed record FoundingOfferView(
     decimal Price, int Periods, int PeriodsBilled, decimal RenewalPrice, DateTimeOffset? ConvertedAt,
     DateTimeOffset? EndsAt);
 
+/// <summary>
+/// The hosted free tier as the Plan page and the banner tell it. The limits are per Owner,
+/// across every unpaid organization they own, so the usage figures are the worst of this
+/// organization's Owners - the one whose count decides.
+/// </summary>
+public sealed record FreeTierView(
+    int MaxPeople, int People, long StorageBytes, long StoredBytes, int MaxRunners, int RunLogDays);
+
 /// <param name="Plan">The plan limits are enforced against right now.</param>
 /// <param name="SubscribedPlan">The plan the Stripe subscription is for; null without one.</param>
 /// <param name="Enabled">Whether this instance takes payments at all - hide every billing action when false.</param>
-/// <param name="ReadOnly">Writes are refused: an evaluation has expired, or a grace period after a failed payment has ended.</param>
+/// <param name="ReadOnly">Writes are refused: an evaluation has expired, a grace period after a failed payment has ended, or a free organization's Owner is over the people limit.</param>
+/// <param name="ReadOnlyReason"><c>payment_failed</c>, <c>evaluation_ended</c> or <c>free_people</c>; null while writable.</param>
+/// <param name="FreeTier">Null unless the hosted free tier is running on this instance.</param>
 public sealed record SubscriptionView(
     string Mode,
     bool Enabled,
@@ -63,7 +73,9 @@ public sealed record SubscriptionView(
     bool HasBillingAccount,
     EvaluationView? Evaluation,
     FoundingOfferView? Founding,
-    IReadOnlyList<PlanOptionView> Plans);
+    IReadOnlyList<PlanOptionView> Plans,
+    string? ReadOnlyReason = null,
+    FreeTierView? FreeTier = null);
 
 public static class BillingEndpoints
 {
@@ -117,7 +129,7 @@ public static class BillingEndpoints
         {
             mode = options.Value.IsSaas ? "saas" : "self_hosted",
             plan = plan.Code,
-            limits = plan.Limits,
+            limits = ConfiguredLimits(plan, options.Value),
             evaluation = evaluation is null ? null : new EvaluationView(
                 evaluation.StartedAt, evaluation.EndsAt, evaluation.EndsAt <= clock.GetUtcNow()),
             usage = new { humans = facts.Humans, agents = facts.Agents, projects = facts.Projects, storageBytes = facts.StorageBytes },
@@ -126,7 +138,8 @@ public static class BillingEndpoints
 
     private static async Task<IResult> GetSubscription(ICurrentTenant tenant, BillingDbContext db,
         IOrganizationPlanUsageSource usage, IOrganizationBillingState state, BillingAvailability availability,
-        IOptions<BillingOptions> options, IOptions<StripeOptions> stripe, TimeProvider clock, CancellationToken ct)
+        FreeTierLedger freeTier, IOptions<BillingOptions> options, IOptions<StripeOptions> stripe, TimeProvider clock,
+        CancellationToken ct)
     {
         var organizationId = tenant.OrganizationId!.Value;
         var facts = await usage.GetAsync(organizationId, ct);
@@ -143,16 +156,23 @@ public static class BillingEndpoints
         }
 
         var subscription = await db.Subscriptions.AsNoTracking().SingleOrDefaultAsync(ct);
+        var freeTierOn = options.Value.FreeTierEnabled;
+        // One free plan is in play at a time: the hosted free tier while it runs, the legacy
+        // Free otherwise. The other is listed only for an organization already on it.
+        var downgradeTarget = freeTierOn ? PlanCodes.HostedFree : PlanCodes.Free;
         var plans = await db.Plans.AsNoTracking().Where(p => p.Code != PlanCodes.SelfHosted).ToListAsync(ct);
         var planOptions = plans
+            .Where(p => p.Code == effective
+                || (p.Code != PlanCodes.Free && p.Code != PlanCodes.HostedFree)
+                || p.Code == downgradeTarget)
             .OrderBy(p => p.OrganizationPrice ?? p.HumanSeatPrice).ThenBy(p => p.Code)
             .Select(p => new PlanOptionView(p.Code, p.HumanSeatPrice, p.OrganizationPrice, p.IncludedAgentsPerHuman,
-                p.Limits,
-                // Purchasable means checkout can build a line for it: Free is always there
-                // as the downgrade target, and the only priced plan is the
+                ConfiguredLimits(p, options.Value),
+                // Purchasable means checkout can build a line for it: the free plan is always
+                // there as the downgrade target, and the only priced plan is the
                 // flat hosted one. The legacy seat plans stay listed for the subscriptions
                 // that still carry them; nothing sells them.
-                availability.IsEnabled && (p.Code == PlanCodes.Free
+                availability.IsEnabled && (p.Code == downgradeTarget
                     || BillingUsage.IsFlat(p) && stripe.Value.OrganizationPrice(p.Code) is not null)))
             .ToList();
 
@@ -176,6 +196,32 @@ public static class BillingEndpoints
                 hostedPrice, subscription.FoundingConvertedAt, endsAt);
         }
 
+        var readOnly = await state.IsReadOnlyAsync(organizationId, ct);
+        string? readOnlyReason = !readOnly ? null
+            : subscription is { } paid && paid.Status.IsBilling() ? "payment_failed"
+            : effective == PlanCodes.HostedFree ? "free_people"
+            : "evaluation_ended";
+
+        FreeTierView? freeTierView = null;
+        if (freeTierOn)
+        {
+            var limits = options.Value.FreeTier;
+            int people = 0;
+            long stored = 0;
+            // A paid organization is in nobody's free count, and says so with zeroes.
+            if (!await freeTier.IsPaidAsync(organizationId, ct))
+            {
+                foreach (var footprint in await freeTier.OwnersOfAsync(organizationId, ct))
+                {
+                    people = Math.Max(people, footprint.People.Count);
+                    stored = Math.Max(stored, await freeTier.StoredBytesAsync(footprint, ct));
+                }
+            }
+            freeTierView = new FreeTierView(limits.MaxPeople, people,
+                options.Value.StorageAllowanceBytes is { } cap ? Math.Min(cap, limits.StorageBytes) : limits.StorageBytes,
+                stored, limits.MaxRunners, limits.RunLogDays);
+        }
+
         return Results.Ok(new SubscriptionView(
             "saas",
             availability.IsEnabled,
@@ -191,11 +237,13 @@ public static class BillingEndpoints
             // path consults, and a banner that disagrees with the refusal is worse than no
             // banner. In particular a paid subscription answers for an organization whose
             // evaluation expired long ago.
-            await state.IsReadOnlyAsync(organizationId, ct),
+            readOnly,
             subscription?.StripeCustomerId is not null,
             evaluation,
             founding,
-            planOptions));
+            planOptions,
+            readOnlyReason,
+            freeTierView));
     }
 
     /// <summary>
@@ -220,12 +268,18 @@ public static class BillingEndpoints
         var organizationId = tenant.OrganizationId!.Value;
 
         var code = request.Plan?.Trim().ToLowerInvariant() ?? "";
+        // With the hosted free tier running, "free" is a request to cancel into it, and the
+        // hosted free tier is the only free plan checkout knows; without it, the reverse.
+        var freeTierOn = billingOptions.Value.FreeTierEnabled;
+        if (freeTierOn && code == PlanCodes.Free) code = PlanCodes.HostedFree;
+        if (!freeTierOn && code == PlanCodes.HostedFree) code = "";
         var target = code == PlanCodes.SelfHosted ? null
             : await db.Plans.AsNoTracking().SingleOrDefaultAsync(p => p.Code == code, ct);
         if (target is null) return Invalid("plan", "Choose a plan this instance sells.");
 
         var flat = BillingUsage.IsFlat(target);
-        var legacyRefresh = !flat && target.Code != PlanCodes.Free;
+        var isFree = target.Code is PlanCodes.Free or PlanCodes.HostedFree;
+        var legacyRefresh = !flat && !isFree;
         if (legacyRefresh)
         {
             var current = await db.Subscriptions.AsNoTracking().SingleOrDefaultAsync(ct);
@@ -238,12 +292,12 @@ public static class BillingEndpoints
             // that customer. Nothing here silently changes anyone's price.
             legacyRefresh = stripeOptions.Value.HumanPrice(target.Code) is not null;
         }
-        else if (!flat && target.Code != PlanCodes.Free)
+        else if (!flat && !isFree)
         {
             return Invalid("plan", $"{target.Code} is no longer open to new subscriptions. Choose {PlanCodes.Hosted}.");
         }
 
-        var priced = target.Code == PlanCodes.Free
+        var priced = isFree
             || (flat
                 ? stripeOptions.Value.OrganizationPrice(target.Code) is not null
                 : stripeOptions.Value.HumanPrice(target.Code) is not null);
@@ -252,7 +306,9 @@ public static class BillingEndpoints
         var facts = await usage.GetAsync(organizationId, includeStorage: true, ct);
         if (facts is null) return Results.NotFound();
 
-        var exceeded = BillingUsage.Exceeded(facts, target.Limits);
+        // The hosted free tier's limits are per Owner rather than per organization, and going
+        // over them only pauses writes or uploads - nothing to remove before cancelling.
+        var exceeded = target.Code == PlanCodes.HostedFree ? [] : BillingUsage.Exceeded(facts, target.Limits);
         if (exceeded.Count > 0)
         {
             return Results.Problem(
@@ -274,7 +330,7 @@ public static class BillingEndpoints
             {
                 return Invalid("plan", $"The organization is already on {target.Code}.");
             }
-            if (target.Code == PlanCodes.Free)
+            if (isFree)
             {
                 await stripe.CancelAtPeriodEndAsync(subscriptionId, ct);
                 return Results.Ok(new BillingRedirectView(null, true));
@@ -293,7 +349,7 @@ public static class BillingEndpoints
             return Results.Ok(new BillingRedirectView(null, true));
         }
 
-        if (target.Code == PlanCodes.Free)
+        if (isFree)
         {
             return Invalid("plan", "The organization is already on the free plan.");
         }
@@ -382,6 +438,15 @@ public static class BillingEndpoints
             : email.BaseUrl.TrimEnd('/');
         return $"{origin}/o/{Uri.EscapeDataString(orgSlug)}/settings/billing";
     }
+
+    /// <summary>
+    /// A plan's limits as this deployment enforces them: the hosted free tier's attachment
+    /// and run-log numbers come from <c>Billing:FreeTier</c>, not from its seeded row.
+    /// </summary>
+    private static PlanLimits ConfiguredLimits(BillingPlan plan, BillingOptions options) =>
+        plan.Code == PlanCodes.HostedFree
+            ? plan.Limits with { StorageBytes = options.FreeTier.StorageBytes, RunLogDays = options.FreeTier.RunLogDays }
+            : plan.Limits;
 
     private static string Describe(ExceededLimit limit) => limit.Limit switch
     {

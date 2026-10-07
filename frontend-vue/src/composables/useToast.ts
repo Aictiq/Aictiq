@@ -41,6 +41,16 @@ export function useToast() {
       toast(message, { description, toasterId: activityToasterId }),
     error,
 
+    /**
+     * A plan-limit refusal. `upgrade` is passed only when a free-plan limit caused it, so
+     * the way to Hosted - which lifts it - rides along as the toast's action.
+     */
+    limited: (message: string, description?: string, upgrade?: () => void) =>
+      toast.error(message, {
+        description,
+        action: upgrade ? { label: 'Upgrade to Hosted', onClick: upgrade } : undefined,
+      }),
+
     /** Every "it went through" for a save, so they all confirm alike and leave alike. */
     saved: (message = 'Saved.', description?: string) =>
       toast.success(message, { description, duration: savedDuration }),

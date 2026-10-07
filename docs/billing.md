@@ -2,17 +2,71 @@
 
 Self-hosted Aictiq has no billing: `Billing:Mode` defaults to `self_hosted`, every
 organization is unlimited, the Plan page shows usage only, no part of the product is
-gated, there is no upgrade call to action anywhere, and nothing here needs configuring.
+gated, there is no upgrade call to action anywhere, and nothing here needs configuring -
+the free tier settings below included, which a self-hosted instance ignores.
 Retention and safety limits an operator configures - `Retention:*`, `Automation:*`,
 `Analytics:RetentionDays`, the rate limits - keep working exactly as configured; feature
 parity is not a promise to disable them. This page is for running the hosted service.
 
-The hosted offer is one flat plan: **USD $49 per organization per month**
+The hosted offer is one flat plan: **USD $79 per organization per month**
 (plan code `hosted`) - unlimited humans, agent identities, teams, projects and work
 items, all implemented core features. New hosted organizations start a 30-day
 evaluation: no card, no automatic charge at expiry, explicit checkout to become paid.
 A founding price of $29/month for the first 12 paid billing periods can be granted
 server-side to the pilot cohort. There are no seat charges and no overage charges.
+
+When the **free tier** is switched on (`Billing:FreeTier:Enabled`), an evaluation that
+ends without a checkout - and a paid subscription that is cancelled - drops the
+organization to **Free** (plan code `hosted_free`) instead of making it read-only. Free is
+the product too, with a few limits that belong to a person rather than to an
+organization; see [The free tier](#the-free-tier). With the switch off, the default, an
+evaluation ends in read-only exactly as it always has.
+
+## The free tier
+
+Hosted only, and only with `Billing:Mode=saas` and `Billing:FreeTier:Enabled=true`.
+
+**The limits belong to a person, not to an organization.** For every Owner, Aictiq counts
+across all the *unpaid* organizations they own - evaluating or Free; a paid Hosted
+organization and its members count toward nobody:
+
+| Limit | Default | Counted as |
+| --- | --- | --- |
+| People | 3, the Owner included ("you plus 2") | Distinct humans: members of every role, Stakeholders and Guests included, plus pending invitations (so 50 open invitations cannot get around it). Agents never count. A person in two of the Owner's organizations counts once, and an invitation to an address that already has an account counts as that account. |
+| Attachments | 200 MiB (209,715,200 bytes) | Committed attachments, pooled across the same organizations - ten organizations are not ten times the storage. |
+| Registered runners | 2 per Free organization | Disabled runners included; deleting one frees the slot. |
+| Finished-run raw logs | 30 days | Through `IPlanAllowances`, like Hosted's 90. |
+
+An organization with several Owners counts toward every one of them, and being a
+member of someone else's organization never counts against you. Everything else on Free
+matches Hosted: projects, items, agents and features are unlimited, runs are allowed,
+and analytics history is 365 days.
+
+**What a limit does.**
+
+- *While on Free*, inviting someone, accepting an invitation, or making someone an Owner
+  that would take any Owner over the people limit is refused with `402 plan-limit` and
+  `limit: "free_people"`. Committing an attachment over the pooled allowance is refused
+  with `limit: "storage_bytes"`, and a third runner with `limit: "runners"`. During the
+  evaluation none of these apply - the organization is Hosted until it ends.
+- *Over the people limit*, a Free organization is read-only through the same
+  `RequireProjectWritable` path as an expired evaluation, until the Owner removes someone,
+  revokes an invitation or pays. Nobody is removed automatically. The check is made on
+  every write, so getting back under the limit, or paying, makes it writable again with
+  nothing to run. That includes going over because the Owner's *other*, still-evaluating
+  organization took people on: they are in the Owner's count from the moment they join.
+- *Over the attachment pool* only new uploads stop; reads, downloads and exports keep
+  working, and nothing is deleted.
+
+**Upgrade prompts.** On hosted, a refusal caused by a free limit carries an
+`upgradeUrl`, and the app shows **Upgrade to Hosted** linking to the organization's
+billing page, and the shell banner for a Free organization over the people limit says
+the same. That is the only upgrade call to action in the product: a paid Hosted
+organization over its 10 GiB is told to delete attachments, and self-hosted shows none.
+
+**Plan codes.** `hosted_free` is its own plan row. The legacy `free` row is untouched and
+still reached by the old code paths with the switch off; with it on, cancelling lands on
+`hosted_free`, and checkout to `free` means the same.
 
 ## Allowances
 
@@ -53,16 +107,25 @@ it - so there is no Stripe script, no publishable key and no CSP change.
 | `Billing:Mode` | `Billing__Mode` | `saas` to bill. Anything else bills nothing, whatever keys are set. |
 | `Stripe:SecretKey` | `Stripe__SecretKey` | `sk_test_…` / `sk_live_…`. Secret. |
 | `Stripe:WebhookSecret` | `Stripe__WebhookSecret` | `whsec_…` of the webhook endpoint. Secret. |
-| `Stripe:Prices:hosted_organization` | `Stripe__Prices__hosted_organization` | Price id (`price_…`) of the $49/month organization subscription, recurring monthly, quantity 1. Required to sell Hosted. |
+| `Stripe:Prices:hosted_organization` | `Stripe__Prices__hosted_organization` | Price id (`price_…`) of the $79/month organization subscription, recurring monthly, quantity 1. Required to sell Hosted. |
 | `Stripe:Prices:hosted_founding` | `Stripe__Prices__hosted_founding` | Price id of the founding price ($29/month). Optional; selling the founding offer needs it and `Billing:FoundingPrice`. |
 | `Stripe:Prices:<plan>_human` / `<plan>_agent` | `Stripe__Prices__starter_human` | Legacy per-human and extra-agent prices. Still read for subscriptions created before the flat plan; never sold to anyone new. |
 | `Billing:EvaluationDays` | `Billing__EvaluationDays` | Default 30. Length of the hosted evaluation. |
 | `Billing:FoundingPrice` | `Billing__FoundingPrice` | USD amount of the founding price. Unset - the default - means the offer is not running on this instance. |
 | `Billing:FoundingPeriods` | `Billing__FoundingPeriods` | Default 12. Discounted monthly billing periods before the plan's own price returns. |
 | `Billing:StorageAllowanceBytes` | `Billing__StorageAllowanceBytes` | Optional operational cap on committed attachments for this deployment. It only ever **narrows** the plan's allowance - the smaller of the two wins - and null defers to the plan (10 GiB on Hosted). |
+| `Billing:FreeTier:Enabled` | `Billing__FreeTier__Enabled` | Default `false`. Turns on the free tier: evaluations and cancellations end on `hosted_free` instead of read-only. Read only in SaaS mode. |
+| `Billing:FreeTier:MaxPeople` | `Billing__FreeTier__MaxPeople` | Default 3. Distinct humans per Owner across their unpaid organizations, the Owner included. |
+| `Billing:FreeTier:StorageBytes` | `Billing__FreeTier__StorageBytes` | Default 209715200 (200 MiB). Committed attachments per Owner across their unpaid organizations. `Billing:StorageAllowanceBytes` narrows it, never widens it. |
+| `Billing:FreeTier:RunLogDays` | `Billing__FreeTier__RunLogDays` | Default 30. Raw run-log retention on Free. |
+| `Billing:FreeTier:MaxRunners` | `Billing__FreeTier__MaxRunners` | Default 2. Registered runners per Free organization. |
 | `Billing:GracePeriodDays` | | Default 14. How long an organization keeps writing after a failed payment. |
 | `Billing:SeatSyncInterval` | | Default `1.00:00:00`. The nightly billing reconciliation (seat re-derivation for legacy subscriptions; founding-transition safety net). |
 | `Billing:StripeEventRetentionDays` | | Default 30. How long processed Stripe event ids are kept for de-duplication. |
+
+The free tier numbers are configuration so they can be tuned on a running deployment
+without a release; `deploy/.env.example` lists them, commented out. Give them to the API
+and Workers alike - Workers ask the same questions when they prune run logs and pause runs.
 
 Both the API and Workers need the Stripe keys and prices: the API creates sessions and takes
 webhooks, Workers run the nightly reconciliation. Nothing is validated on start - without
@@ -92,7 +155,7 @@ dotnet user-secrets set "Billing:FoundingPrice" "29"
 ## Stripe test mode, end to end
 
 1. In the Stripe dashboard (test mode) create the hosted product with one recurring
-   monthly price at $49 per organization (quantity 1), plus - if you are selling the
+   monthly price at $79 per organization (quantity 1), plus - if you are selling the
    founding offer - a second recurring monthly price at $29. Put the price ids in the
    configuration above.
 2. Configure the Customer Portal (Settings → Billing → Customer portal): allow updating the
@@ -121,10 +184,13 @@ dotnet user-secrets set "Billing:FoundingPrice" "29"
 - **Endpoints.** `GET /orgs/{slug}/billing/subscription` (any member - it drives the
   banner) returns the evaluation (`startedAt`, `endsAt`, `expired`), the founding terms
   when the subscription is on them (`price`, `periods`, `periodsBilled`,
-  `renewalPrice`, `convertedAt`) and the plan's `organizationPrice`.
+  `renewalPrice`, `convertedAt`), the plan's `organizationPrice`, `readOnlyReason`
+  (`payment_failed`, `evaluation_ended` or `free_people`; null while writable) and, while
+  the free tier runs, `freeTier`: its limits and this organization's Owners' usage
+  against them (`people`, `storedBytes` - the worst of its Owners, zero when it is paid).
   `POST …/billing/checkout {plan}` and `POST …/billing/portal` (Owner, `admin` scope).
-  Checkout accepts `hosted`, or `free` to cancel; the legacy plan codes are refused for
-  new subscriptions. With no subscription, checkout returns a Stripe Checkout URL; with
+  Checkout accepts `hosted`, or `free` (`hosted_free` while the free tier runs) to
+  cancel; the legacy plan codes are refused for new subscriptions. With no subscription, checkout returns a Stripe Checkout URL; with
   one, it changes the subscription in place with proration (or, for `free`, cancels at
   period end) and the webhook confirms it.
 - **Evaluation.** When a hosted organization is created, Billing receives the
@@ -134,7 +200,8 @@ dotnet user-secrets set "Billing:FoundingPrice" "29"
   two racing deliveries cannot mint a second window, and `ck_evaluations_window`
   (`ends_at > started_at`) refuses a degenerate one. Nothing writes to the row after the
   day it is born: restarts, invitations, new members and plan requests never move it. There is no trial-to-paid
-  conversion: at expiry the organization becomes read-only through the same mechanism
+  conversion. With the free tier on, expiry is the move to `hosted_free` (read-only only
+  while an Owner is over the people limit, as above). With it off, at expiry the organization becomes read-only through the same mechanism
   as a failed payment - reads, downloads, exports, the Portal and checkout keep working,
   while ordinary mutations, new agent dispatches and rule-triggered runs stop; runs
   still queued are cancelled and in-flight runs finish within their existing deadlines,
@@ -151,18 +218,19 @@ dotnet user-secrets set "Billing:FoundingPrice" "29"
   irrelevant to what it pays. (Seat re-derivation still runs for legacy subscriptions.)
 - **Over-allowance.** Committing an attachment that would exceed the committed storage
   allowance answers `402 plan-limit` with `limit: "storage_bytes"` and a message that
-  explains deleting attachments frees space - not an upgrade to a nonexistent higher
-  tier. Reads, downloads and exports keep working when over.
+  explains deleting attachments frees space - on Hosted not an upgrade to a nonexistent
+  higher tier, and no `upgradeUrl`. On Free the message also offers Hosted, and the
+  problem carries an `upgradeUrl`. Reads, downloads and exports keep working when over.
 - **Legacy plans.** `free`, `starter`, `team` and `enterprise` are closed to new
   subscriptions and retained for existing ones. A subscription already on one keeps
   working unchanged - its per-seat quantities are still re-derived nightly and its
   legacy `{plan}_human` / `{plan}_agent` price keys are still read. Nothing is silently
   migrated, repriced, given a fresh evaluation, or deleted; moving to Hosted is an
   explicit checkout by the organization's Owner.
-  `free` is the exception that is still reachable, because it is where cancelling lands
-  an organization - it is a cancellation target, not an offer. It is not sold, not
-  marketed, and it still carries its old caps; nothing anywhere should present it as a
-  permanent hosted free tier.
+  `free` is the exception that is still reachable while the free tier is off, because it
+  is where cancelling lands an organization then - it is a cancellation target, not an
+  offer. It is not sold, not marketed, and it still carries its old caps; the hosted free
+  tier is `hosted_free`, and nothing should present the legacy `free` as it.
 - **Webhooks** (`POST /webhooks/stripe`) are anonymous, signature-verified with Stripe's
   `EventUtility` before anything is parsed, exempt from the per-IP rate limiter (Stripe sends
   from few addresses) and outside the CSRF rule (no cookie). Each event id is inserted into
@@ -190,6 +258,16 @@ dotnet user-secrets set "Billing:FoundingPrice" "29"
 - `billing.subscriptions` is Aictiq's copy; Stripe is the truth. To re-sync one organization
   after fixing something by hand in Stripe, trigger any subscription update there (the
   webhook applies it) or wait for the nightly run.
+
+## Changing the Hosted price
+
+Stripe prices are immutable, so a new price is a new price id. The move from $49 to $79
+was: create a new recurring monthly $79 price on the hosted product, point
+`Stripe:Prices:hosted_organization` at it on the API and Workers, and restart them. The
+`billing.plans` row's `organization_price` is what the Plan page shows; the
+`FreeTierAndHostedPrice` migration moved it to 79. There were no subscribers, so nothing
+was migrated - an existing subscription would otherwise keep the price it was sold at
+until it is changed. The $29 founding price is a separate price id and did not change.
 
 ## Legacy customers at the time of the change
 

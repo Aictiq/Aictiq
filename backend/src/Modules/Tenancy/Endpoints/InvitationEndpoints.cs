@@ -192,10 +192,13 @@ public static class InvitationEndpoints
                 projectKey = project.Key;
             }
 
-            var seat = await planLimits.CanAddHumanSeatAsync(organizationId, 1, cancellationToken);
+            // An invitation is a person from the moment it is sent: counting only acceptances
+            // would let fifty open invitations walk past a limit of three.
+            var seat = await planLimits.CanAddPersonAsync(
+                organizationId, new IncomingPerson(existing?.Id, address), cancellationToken);
             if (!seat.Allowed)
             {
-                return PlanLimited(seat);
+                return TenancyResults.PlanLimited(seat);
             }
 
             var now = timeProvider.GetUtcNow();
@@ -387,10 +390,11 @@ public static class InvitationEndpoints
             }
 
             var now = timeProvider.GetUtcNow();
-            var seat = await planLimits.CanAddHumanSeatAsync(invitation.OrganizationId, 1, cancellationToken);
+            var seat = await planLimits.CanAddPersonAsync(invitation.OrganizationId,
+                new IncomingPerson(user.UserId, null, AcceptedInvitationEmail: invitation.Email), cancellationToken);
             if (!seat.Allowed)
             {
-                return PlanLimited(seat);
+                return TenancyResults.PlanLimited(seat);
             }
 
             // The token decided the tenant; from here everything is scoped to it, which is
@@ -684,12 +688,4 @@ public static class InvitationEndpoints
             detail: detail,
             type: ProblemTypes.Conflict,
             statusCode: StatusCodes.Status409Conflict);
-
-    private static IResult PlanLimited(PlanLimitDecision decision) =>
-        Results.Problem(
-            title: "Plan limit reached.",
-            detail: decision.Reason ?? "This organization cannot add another member on its current plan.",
-            type: ProblemTypes.PlanLimit,
-            statusCode: StatusCodes.Status402PaymentRequired,
-            extensions: new Dictionary<string, object?> { ["limit"] = decision.Limit, ["upgradeUrl"] = decision.UpgradeUrl });
 }

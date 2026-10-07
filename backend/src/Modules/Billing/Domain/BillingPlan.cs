@@ -65,6 +65,13 @@ public static class PlanCodes
     public const string Hosted = "hosted";
 
     /// <summary>
+    /// The hosted free tier: where an evaluation ends, and where a cancelled subscription
+    /// lands, while <c>Billing:FreeTier:Enabled</c> is on. Distinct from the legacy
+    /// <see cref="Free"/>, which keeps its old caps for the code paths that still reach it.
+    /// </summary>
+    public const string HostedFree = "hosted_free";
+
+    /// <summary>
     /// The plan an organization is actually held to. A self-hosted instance holds everyone
     /// to <c>self_hosted</c> whatever is stored; a SaaS instance never honours
     /// <c>self_hosted</c> - it is the column's default, which every organization created

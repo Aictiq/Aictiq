@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
 import { Check, Copy, Loader2 } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
@@ -27,6 +28,7 @@ import { useToast } from '@/composables/useToast'
  */
 const org = useOrgScope()
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const invitations = ref<Invitation[]>([])
 const loading = ref(true)
@@ -109,6 +111,9 @@ async function revoke(invitation: Invitation) {
   try {
     await revokeInvitation(slug.value, invitation.id)
     toast.success(`The invitation to ${invitation.email} was withdrawn.`)
+    // One fewer person may bring a free organization back under its people limit;
+    // the shell's read-only banner should say so without a reload.
+    void queryClient.invalidateQueries({ queryKey: ['billing-subscription', slug.value] })
     await load()
   } catch (error) {
     toast.error(error)
@@ -132,8 +137,8 @@ async function revoke(invitation: Invitation) {
         <div>
           <h2 class="text-sm font-medium">Invitations</h2>
           <p class="text-muted-foreground mt-0.5 text-xs">
-            Each link works once and expires in seven days. Sending it again replaces it -
-            only its hash is stored here, so the previous one cannot be produced twice.
+            Each link works once and expires in seven days. Sending it again replaces it - only its
+            hash is stored here, so the previous one cannot be produced twice.
           </p>
         </div>
         <Button size="sm" @click="inviting = true">Invite people</Button>
@@ -182,7 +187,9 @@ async function revoke(invitation: Invitation) {
                 class="text-muted-foreground text-xs"
               >
                 <template v-if="invitation.projectKey">on {{ invitation.projectKey }}</template>
-                <template v-if="invitation.projectKey && !invitation.canOperateFactory"> · </template>
+                <template v-if="invitation.projectKey && !invitation.canOperateFactory">
+                  ·
+                </template>
                 <template v-if="!invitation.canOperateFactory">no AI work</template>
               </div>
             </td>

@@ -214,9 +214,23 @@ public static partial class RunnerEndpoints
 
     private static async Task<IResult> CreateAsync(
         string orgSlug, CreateRunnerRequest request, AutomationDbContext db, AmbientCurrentTenant tenant,
-        ICurrentUser user, IProjectAccess access, IUserDirectory directory, IOptions<AutomationOptions> options,
-        TimeProvider clock, CancellationToken cancellationToken)
+        ICurrentUser user, IProjectAccess access, IUserDirectory directory, IPlanLimits planLimits,
+        IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken cancellationToken)
     {
+        // Disabled runners still count: disabling is a pause, and re-enabling one must not
+        // take the organization past what it may register.
+        var registered = await db.Runners.CountAsync(r => r.DeletedAt == null, cancellationToken);
+        var allowed = await planLimits.CanRegisterRunnerAsync(tenant.OrganizationId!.Value, registered, cancellationToken);
+        if (!allowed.Allowed)
+        {
+            return Results.Problem(
+                title: "Plan limit reached.",
+                detail: allowed.Reason,
+                type: ProblemTypes.PlanLimit,
+                statusCode: StatusCodes.Status402PaymentRequired,
+                extensions: new Dictionary<string, object?> { ["limit"] = allowed.Limit, ["upgradeUrl"] = allowed.UpgradeUrl });
+        }
+
         Runner? source = null;
         if (request.SameMachineAs is { } sourceId)
         {
