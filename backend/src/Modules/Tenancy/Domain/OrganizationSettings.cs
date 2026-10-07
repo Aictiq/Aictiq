@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Aictiq.Modules.Tenancy.Domain;
 
 /// <summary>
@@ -11,7 +13,15 @@ namespace Aictiq.Modules.Tenancy.Domain;
 /// guess differs per member.
 /// </param>
 /// <param name="WeekStart">First day of the week in calendars and velocity charts.</param>
-public sealed record OrganizationSettings(string TimeZone, DayOfWeek WeekStart)
+/// <remarks>
+/// The JSON names are spelled out because they are also SQL: the column is written with
+/// web (camelCase) naming, but Npgsql translates a LINQ read of a member, such as
+/// <c>org.Settings.TimeZone</c>, to <c>settings -&gt;&gt; 'TimeZone'</c> unless the member
+/// says otherwise, and that key is never there.
+/// </remarks>
+public sealed record OrganizationSettings(
+    [property: JsonPropertyName("timeZone")] string TimeZone,
+    [property: JsonPropertyName("weekStart")] DayOfWeek WeekStart)
 {
     /// <summary>
     /// Whether ordinary members may create projects, or only Admins and Owners.
@@ -21,6 +31,7 @@ public sealed record OrganizationSettings(string TimeZone, DayOfWeek WeekStart)
     /// absent property must land on <c>true</c> - the behaviour organizations already
     /// have - instead of silently taking away a permission on the next deployment.
     /// </summary>
+    [JsonPropertyName("membersCanCreateProjects")]
     public bool MembersCanCreateProjects { get; init; } = true;
 
     public static OrganizationSettings Default { get; } = new("UTC", DayOfWeek.Monday);
