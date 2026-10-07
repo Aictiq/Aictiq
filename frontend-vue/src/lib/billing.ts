@@ -4,6 +4,7 @@ import {
   type ExceededLimit,
   type PlanOption,
   type Subscription,
+  type SubscriptionStatus,
 } from '@/api/billing'
 import { ApiError, type ProblemDetails } from '@/utils/api'
 
@@ -228,12 +229,22 @@ export interface EvaluationNotice {
   endsAt: Date
 }
 
-/** The evaluation's countdown, or null when this organization has none (self-host, paid). */
+/**
+ * Whether a Stripe subscription has ever taken effect: paid, paying late, paused or
+ * cancelled since. The evaluation row outlives the subscription that replaced it, but once
+ * an organization has bought Hosted its evaluation is history - a paid organization is not
+ * counting down to anything, and one that cancelled back to Free is not on an evaluation
+ * again. `incomplete` checkouts never took effect, so the evaluation still stands for them.
+ */
+export const subscriptionTookEffect = (status: SubscriptionStatus | undefined) =>
+  status != null && status !== 'none' && status !== 'incomplete' && status !== 'incompleteExpired'
+
+/** The evaluation's countdown, or null when this organization has none (self-host, subscribed). */
 export function evaluationNotice(
-  subscription: Pick<Subscription, 'evaluation'> | null | undefined,
+  subscription: Pick<Subscription, 'evaluation' | 'status'> | null | undefined,
   now: Date = new Date(),
 ): EvaluationNotice | null {
-  if (!subscription?.evaluation) return null
+  if (!subscription?.evaluation || subscriptionTookEffect(subscription.status)) return null
   const endsAt = new Date(subscription.evaluation.endsAt)
   return { expired: subscription.evaluation.expired, daysLeft: daysUntil(endsAt, now), endsAt }
 }
@@ -275,7 +286,9 @@ export function freePeopleBanner(
  */
 export function evaluationBanner(
   subscription:
-    Pick<Subscription, 'enabled' | 'readOnly' | 'evaluation' | 'freeTier'> | null | undefined,
+    | Pick<Subscription, 'enabled' | 'readOnly' | 'evaluation' | 'status' | 'freeTier'>
+    | null
+    | undefined,
   isOwner: boolean,
   now: Date = new Date(),
 ): PaymentBanner | null {
@@ -320,6 +333,7 @@ export type BannerSubscription = Pick<
   | 'graceEndsAt'
   | 'paymentFailedAt'
   | 'evaluation'
+  | 'status'
   | 'freeTier'
 >
 

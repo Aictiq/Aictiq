@@ -374,7 +374,7 @@ describe('the evaluation notice', () => {
     expect(active.endsAt).toEqual(new Date('2026-09-30T00:00:00Z'))
 
     const expired = evaluationNotice(
-      subscription({
+      evaluating({
         evaluation: {
           startedAt: '2026-08-01T00:00:00Z',
           endsAt: '2026-09-01T00:00:00Z',
@@ -385,6 +385,44 @@ describe('the evaluation notice', () => {
     )!
     expect(expired.expired).toBe(true)
     expect(expired.daysLeft).toBe(0)
+  })
+
+  it('is history once the organization has subscribed, and stays history after it cancels', () => {
+    const lastWeek = {
+      startedAt: '2026-08-22T00:00:00Z',
+      endsAt: '2026-09-26T00:00:00Z',
+      expired: false,
+    }
+    // Still evaluating, nothing bought: the notice and the shell countdown both show.
+    expect(evaluationNotice(evaluating({ evaluation: lastWeek }), now)).not.toBeNull()
+    expect(shellBanner(evaluating({ evaluation: lastWeek }), true, now)).not.toBeNull()
+    // A checkout that never completed bought nothing either.
+    expect(evaluationNotice(evaluating({ status: 'incomplete' }), now)).not.toBeNull()
+
+    // Subscribed: the evaluation row is still there, but nothing is counting down.
+    for (const status of ['active', 'trialing'] as const) {
+      const paid = evaluating({
+        plan: 'hosted',
+        subscribedPlan: 'hosted',
+        status,
+        evaluation: lastWeek,
+      })
+      expect(evaluationNotice(paid, now)).toBeNull()
+      expect(shellBanner(paid, true, now)).toBeNull()
+    }
+
+    // Cancelled back to Free, before or after the evaluation's end: no evaluation again.
+    for (const expired of [false, true]) {
+      const cancelled = evaluating({
+        plan: 'hosted_free',
+        subscribedPlan: null,
+        status: 'canceled',
+        evaluation: { ...lastWeek, expired },
+        freeTier: freeTier(),
+      })
+      expect(evaluationNotice(cancelled, now)).toBeNull()
+      expect(shellBanner(cancelled, true, now)).toBeNull()
+    }
   })
 })
 
@@ -554,7 +592,7 @@ describe('the evaluation banner', () => {
   })
 
   it('says writes have stopped once it expires, and whom a member should ask', () => {
-    const lapsed = subscription({ evaluation: expired, readOnly: true })
+    const lapsed = evaluating({ evaluation: expired, readOnly: true })
 
     const owner = shellBanner(lapsed, true, now)!
     expect(owner.tone).toBe('danger')
@@ -575,7 +613,7 @@ describe('the evaluation banner', () => {
       graceEndsAt: '2026-09-01T00:00:00Z',
       readOnly: true,
     })
-    const evaluationOnly = subscription({ evaluation: expired, readOnly: true })
+    const evaluationOnly = evaluating({ evaluation: expired, readOnly: true })
 
     expect(shellBanner(declined, true, now)!.message).toContain('A payment failed')
     expect(shellBanner(declined, true, now)!.action).toBe('manage')
@@ -588,7 +626,7 @@ describe('the evaluation banner', () => {
       mount(PaymentBanner, {
         props: {
           slug: 'acme',
-          subscription: subscription({ evaluation: expired, readOnly: true }),
+          subscription: evaluating({ evaluation: expired, readOnly: true }),
           isOwner,
         },
         global: { stubs: { RouterLink: RouterLinkStub } },
@@ -1025,6 +1063,25 @@ describe('the Plan page', () => {
     const cta = button(wrapper, 'plan-hosted')
     expect(cta.text()).toBe('Subscribe')
     expect(cta.attributes('disabled')).toBeUndefined()
+  })
+
+  it('drops the evaluation once the organization has subscribed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-21T12:00:00Z') })
+    stubFetch(
+      respond({
+        summary: hostedSummary,
+        subscription: evaluating({
+          subscribedPlan: 'hosted',
+          status: 'active',
+          currentPeriodEnd: '2026-10-21T00:00:00Z',
+          hasBillingAccount: true,
+        }),
+      }),
+    )
+    const wrapper = await renderPage()
+
+    expect(wrapper.text()).toContain('Current plan')
+    expect(wrapper.find('[data-testid="evaluation-panel"]').exists()).toBe(false)
   })
 
   it('warns when the evaluation has ended, with its date and the way out for owners', async () => {
