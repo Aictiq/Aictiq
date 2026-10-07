@@ -25,5 +25,9 @@ auditConfig:
 # (source-map-js, via the Vue compiler and postcss): force the patched releases, which
 # stay inside every dependent's declared range. Drop once upstream lockfiles move on.
 overrides:
+  # GHSA-6qxp-vccf-f47h: shadcn-vue's MCP OAuth client can send credentials to an
+  # authorization server chosen by the MCP server. Pin the patched SDK within
+  # shadcn-vue's ^1.29.0 range until its dependency floor requires a fixed version.
+  '@modelcontextprotocol/sdk': 1.31.0
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
