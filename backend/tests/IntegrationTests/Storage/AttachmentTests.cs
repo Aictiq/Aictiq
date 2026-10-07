@@ -96,6 +96,51 @@ public sealed class AttachmentTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Theory]
+    [InlineData("archive.zip", "application/zip", "application/zip")]
+    [InlineData("archive.zip", "application/x-zip-compressed", "application/zip")]
+    [InlineData("archive.zip", "application/x-zip", "application/zip")]
+    [InlineData("archive.zip", "multipart/x-zip", "application/zip")]
+    [InlineData("archive.ZIP", "application/octet-stream", "application/zip")]
+    [InlineData("archive.zip", null, "application/zip")]
+    [InlineData("manual.pdf", "application/pdf", "application/pdf")]
+    [InlineData("manual.pdf", null, "application/pdf")]
+    [InlineData("notes.txt", "text/plain", "text/plain")]
+    [InlineData("notes.txt", "application/octet-stream", "text/plain")]
+    [InlineData("README.md", "text/markdown", "text/markdown")]
+    [InlineData("README.md", "text/x-markdown", "text/markdown")]
+    [InlineData("README.md", null, "text/markdown")]
+    [InlineData("README.markdown", "application/octet-stream", "text/markdown")]
+    public async Task default_file_types_upload_under_the_names_browsers_give_them(string name, string? suppliedType, string expectedType)
+    {
+        byte[] payload = [0x50, 0x4b, 0x03, 0x04, 0, 1, 2, 255];
+        var response = await UploadAsync(name, suppliedType, payload);
+        response.EnsureSuccessStatusCode();
+        var attachment = (await response.Content.ReadFromJsonAsync<AttachmentView>(ApiTestContext.Json, CancellationToken))!;
+        Assert.Equal(expectedType, attachment.ContentType);
+        Assert.Equal(name, attachment.FileName);
+        var item = await CreateAsync(WorkItemType.Bug, "Archive owner");
+        (await Client.PostAsJsonAsync(AttachmentPath(attachment.Id, "commit"),
+            new CommitAttachmentRequest(item.Id, null), ApiTestContext.Json, CancellationToken)).EnsureSuccessStatusCode();
+        var download = await Client.GetAsync(AttachmentPath(attachment.Id, "download"), CancellationToken);
+        download.EnsureSuccessStatusCode();
+        Assert.Equal(expectedType, download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal(payload, await download.Content.ReadAsByteArrayAsync(CancellationToken));
+    }
+
+    [Fact]
+    public async Task zip_aliases_still_obey_the_configured_allowlist()
+    {
+        var policy = Context.Factory.Services.GetRequiredService<IOptions<AttachmentsOptions>>().Value;
+        policy.AllowedContentTypes = ["text/plain"];
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await UploadAsync("archive.zip", "application/x-zip-compressed", "zip"u8.ToArray())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await UploadAsync("archive.zip", "application/octet-stream", "zip"u8.ToArray())).StatusCode);
+        Assert.Equal(0L, await CountAttachmentsAsync());
+    }
+
+    [Theory]
     [InlineData("report.html", "application/octet-stream")]
     [InlineData("report.exe", "application/octet-stream")]
     [InlineData("report.svg", null)]
