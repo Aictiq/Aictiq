@@ -27,28 +27,38 @@ public sealed class DailySnapshotService(IServiceScopeFactory scopes, TimeProvid
         }
     }
 
-    internal async Task RunOnceAsync(CancellationToken cancellationToken)
+    /// <summary>One sweep over every organization. Public so tests can drive it.</summary>
+    public async Task RunOnceAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopes.CreateAsyncScope();
         var organizations = scope.ServiceProvider.GetRequiredService<IOrganizationTimeZoneSource>();
         foreach (var organization in await organizations.ListAsync(cancellationToken))
         {
-            var zone = ResolveTimeZone(organization.TimeZone);
-            var localNow = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone);
-            // The service may start at any time; only write today's sample once local
-            // midnight has passed.  The next cadence after 00:05 provides normal timing.
-            if (localNow.TimeOfDay < TimeSpan.FromMinutes(5)) continue;
-            await SnapshotOrganizationAsync(scope.ServiceProvider, organization.OrganizationId,
-                DateOnly.FromDateTime(localNow.DateTime), cancellationToken);
+            // One organization's bad row or failed page must not cost every other
+            // organization its sample for the day; the next cadence retries it.
+            try
+            {
+                var zone = ResolveTimeZone(organization.TimeZone);
+                var localNow = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone);
+                // The service may start at any time; only write today's sample once local
+                // midnight has passed.  The next cadence after 00:05 provides normal timing.
+                if (localNow.TimeOfDay < TimeSpan.FromMinutes(5)) continue;
+                await SnapshotOrganizationAsync(scope.ServiceProvider, organization.OrganizationId,
+                    DateOnly.FromDateTime(localNow.DateTime), cancellationToken);
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                scope.ServiceProvider.GetRequiredService<AnalyticsDbContext>().ChangeTracker.Clear();
+                logger.LogError(exception, "Analytics daily snapshot failed for organization {OrganizationId}",
+                    organization.OrganizationId);
+            }
         }
     }
 
-    internal static TimeZoneInfo ResolveTimeZone(string value)
-    {
-        try { return TimeZoneInfo.FindSystemTimeZoneById(value); }
-        catch (TimeZoneNotFoundException) { return TimeZoneInfo.Utc; }
-        catch (InvalidTimeZoneException) { return TimeZoneInfo.Utc; }
-    }
+    /// <summary>A missing, blank or unknown zone is UTC, as everywhere else that reads one.</summary>
+    internal static TimeZoneInfo ResolveTimeZone(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && TimeZoneInfo.TryFindSystemTimeZoneById(value, out var zone)
+            ? zone : TimeZoneInfo.Utc;
 
     private async Task SnapshotOrganizationAsync(IServiceProvider services, Guid organizationId, DateOnly day,
         CancellationToken cancellationToken)
