@@ -5,17 +5,22 @@ import {
   type PlanOption,
   type Subscription,
 } from '@/api/billing'
-import { ApiError } from '@/utils/api'
+import { ApiError, type ProblemDetails } from '@/utils/api'
 
 /**
  * The decisions the Plan page and the shell banner make, kept out of the components so they
  * can be tested without mounting anything.
  *
- * The hosted offer is one flat price per organization with a 30-day
- * evaluation, so there is no higher tier to sell: a refusal says what to delete, never
- * where to upgrade, and the legacy per-seat plans survive only for the organizations that
- * already carry them.
+ * The hosted offer is one flat price per organization with a 30-day evaluation, and where
+ * the free tier runs, an evaluation that ends without a subscription lands on the free plan
+ * (`hosted_free`). Hosted itself has no higher tier to sell, so a paid organization refused
+ * for attachments is told what to delete, never where to upgrade; only a refusal caused by
+ * a free-plan limit points at Hosted. The legacy per-seat plans survive only for the
+ * organizations that already carry them.
  */
+
+/** The hosted free tier's plan code. */
+export const FREE_PLAN = 'hosted_free'
 
 /**
  * Leaving for Stripe Checkout or the Customer Portal: a full navigation, never a fetch -
@@ -26,6 +31,10 @@ export const navigation = {
 }
 
 export type PlanChange = 'current' | 'upgrade' | 'downgrade'
+
+/** What a plan is called on the page: the free tier is "Free", the rest by their code. */
+export const planName = (code: string) =>
+  code === FREE_PLAN ? 'Free' : code.charAt(0).toUpperCase() + code.slice(1)
 
 /**
  * The flat organization price, or null when this is a legacy per-seat plan. A zero counts
@@ -53,7 +62,7 @@ export function offeredPlans(plans: PlanOption[], currentPlan: string): PlanOpti
   return plans.filter((plan) => plan.code === currentPlan || (plan.purchasable && isFlatPlan(plan)))
 }
 
-/** "$49 per organization / month" for the hosted offer; the legacy plans still say per human. */
+/** "$79 per organization / month" for the hosted offer; the legacy plans still say per human. */
 export function planPriceLabel(plan: PlanOption): string {
   const flat = flatPrice(plan)
   if (flat != null) return `$${flat} per organization / month`
@@ -96,24 +105,54 @@ export function describeExceeded(limit: ExceededLimit): string {
   }
 }
 
+const isPlanLimit = (error: unknown): error is ApiError & { problem: ProblemDetails } =>
+  error instanceof ApiError && error.status === 402 && error.problem?.type === PLAN_LIMIT
+
 /**
- * The copy for a 402 `plan-limit` refusal, or null when the error is something else.
- *
- * The problem may still carry an `upgradeUrl`, and the browser deliberately ignores it:
- * the hosted offer has no higher tier, so an organization over its attachment allowance is
- * told to delete attachments - pointing at a plan that does not exist would be worse than
- * saying nothing. Nothing here ever returns a URL.
+ * The copy for a 402 `plan-limit` refusal, or null when the error is something else. The
+ * server's `detail` already says what happened and what to do about it; whether to offer
+ * the upgrade as well is {@link planLimitUpgrade}'s decision, and the URL is never taken
+ * from the problem - the link is always this organization's own Plan page.
  */
 export function planLimitMessage(error: unknown): string | null {
-  if (!(error instanceof ApiError) || error.status !== 402 || error.problem?.type !== PLAN_LIMIT) {
-    return null
-  }
+  if (!isPlanLimit(error)) return null
   const detail = typeof error.problem.detail === 'string' ? error.problem.detail.trim() : ''
   if (detail) return detail
   if (error.problem.limit === 'storage_bytes') {
     return 'This organization has reached its attachment allowance. Delete attachments to free space - existing files stay readable.'
   }
   return error.title
+}
+
+/**
+ * Whether a 402 `plan-limit` refusal was caused by a free-plan limit, which paying for
+ * Hosted lifts: the people limit, the runner limit, or the pooled free attachment
+ * allowance. Paid Hosted refuses attachments too, but with no `upgradeUrl`, because there
+ * is no larger allowance to buy - that refusal says what to delete and offers nothing else.
+ * A self-hosted instance never refuses at all.
+ */
+export function planLimitUpgrade(error: unknown): boolean {
+  if (!isPlanLimit(error)) return false
+  switch (error.problem.limit) {
+    case 'free_people':
+    case 'runners':
+      return true
+    case 'storage_bytes':
+      return typeof error.problem.upgradeUrl === 'string' && error.problem.upgradeUrl !== ''
+    default:
+      return false
+  }
+}
+
+/** A plan-limit refusal as a page shows it: the server's words, and whether to offer Hosted. */
+export interface PlanLimitRefusal {
+  message: string
+  upgrade: boolean
+}
+
+export function planLimitRefusal(error: unknown): PlanLimitRefusal | null {
+  const message = planLimitMessage(error)
+  return message == null ? null : { message, upgrade: planLimitUpgrade(error) }
 }
 
 export interface PaymentBanner {
@@ -127,6 +166,22 @@ const DAY = 86_400_000
 const daysUntil = (date: Date, now: Date) =>
   Math.max(0, Math.ceil((date.getTime() - now.getTime()) / DAY))
 const plural = (count: number) => `${count} day${count === 1 ? '' : 's'}`
+
+const KIB = 1_024
+const MIB = 1_048_576
+/**
+ * "200 MiB", "1.5 GiB", "5.9 KiB" - the free allowance is small enough that GiB would read
+ * as 0.2, and an operator may tune it below a mebibyte.
+ */
+export function sizeLabel(bytes: number): string {
+  const [value, unit] =
+    bytes >= GIB
+      ? [bytes / GIB, 'GiB']
+      : bytes >= MIB || bytes === 0
+        ? [bytes / MIB, 'MiB']
+        : [bytes / KIB, 'KiB']
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} ${unit}`
+}
 
 /** What the shell says about an organization whose *payment* failed; see {@link shellBanner}. */
 export function paymentBanner(
@@ -187,13 +242,40 @@ export function evaluationNotice(
 export const EVALUATION_WARNING_DAYS = 7
 
 /**
- * An expired evaluation pauses writes the way a failed payment does, but the cause and the
- * remedy are different: nothing is wrong in Stripe and no card will be charged on its own -
- * the way forward is subscribing, which only an owner can do. The last week counts down, so
- * the day writes stop is not the day anyone hears about it.
+ * A free organization whose Owner is over the people limit - counted across every unpaid
+ * organization that Owner has - is read-only until people are removed or it pays. The
+ * remedy is the Owner's either way, so everyone else is told whom to ask.
+ */
+export function freePeopleBanner(
+  subscription:
+    Pick<Subscription, 'enabled' | 'readOnly' | 'readOnlyReason' | 'freeTier'> | null | undefined,
+  isOwner: boolean,
+): PaymentBanner | null {
+  if (!subscription?.enabled || !subscription.readOnly) return null
+  if (subscription.readOnlyReason !== 'free_people') return null
+  const max = subscription.freeTier?.maxPeople
+  const allows =
+    max != null ? `${max} ${max === 1 ? 'person' : 'people'}` : 'a limited number of people'
+  return {
+    tone: 'danger',
+    action: isOwner ? 'plan' : 'ask-owner',
+    message: isOwner
+      ? `This organization is read-only: the free plan allows ${allows} across your free organizations, owner included. Remove someone or revoke an invitation, or upgrade to Hosted.`
+      : `This organization is read-only: the free plan allows ${allows} across an owner's free organizations, owner included. Ask an owner to remove someone or upgrade to Hosted.`,
+  }
+}
+
+/**
+ * Where the free tier runs, an evaluation that ends moves the organization to the free
+ * plan: nothing stops, the limits just tighten. Elsewhere an expired evaluation pauses
+ * writes the way a failed payment does, but the cause and the remedy are different: nothing
+ * is wrong in Stripe and no card will be charged on its own - the way forward is
+ * subscribing, which only an owner can do. Either way the last week counts down, so the
+ * day things change is not the day anyone hears about it.
  */
 export function evaluationBanner(
-  subscription: Pick<Subscription, 'enabled' | 'readOnly' | 'evaluation'> | null | undefined,
+  subscription:
+    Pick<Subscription, 'enabled' | 'readOnly' | 'evaluation' | 'freeTier'> | null | undefined,
   isOwner: boolean,
   now: Date = new Date(),
 ): PaymentBanner | null {
@@ -201,7 +283,10 @@ export function evaluationBanner(
   const notice = evaluationNotice(subscription, now)
   if (!notice) return null
   const action = isOwner ? 'plan' : 'ask-owner'
+  const freeTier = subscription.freeTier
   if (notice.expired) {
+    // On the free plan now, and writable: that is the plan working, not a problem to report.
+    if (freeTier && !subscription.readOnly) return null
     const paused = subscription.readOnly
       ? ' Reading, downloading and exporting still work; new changes and agent runs are paused.'
       : ''
@@ -212,6 +297,13 @@ export function evaluationBanner(
     }
   }
   if (notice.daysLeft > EVALUATION_WARNING_DAYS) return null
+  if (freeTier) {
+    return {
+      tone: 'warning',
+      action,
+      message: `This organization's evaluation ends in ${plural(notice.daysLeft)} (${notice.endsAt.toLocaleDateString()}). Nothing is charged automatically - it then moves to the free plan: ${freeTier.maxPeople} people and ${sizeLabel(freeTier.storageBytes)} of attachments across ${isOwner ? 'your' : "an owner's"} free organizations. ${isOwner ? 'Subscribe' : 'Ask an owner to subscribe'} to keep Hosted.`,
+    }
+  }
   return {
     tone: 'warning',
     action,
@@ -219,20 +311,34 @@ export function evaluationBanner(
   }
 }
 
+/** Everything about a subscription the shell banner reads. */
+export type BannerSubscription = Pick<
+  Subscription,
+  | 'enabled'
+  | 'readOnly'
+  | 'readOnlyReason'
+  | 'graceEndsAt'
+  | 'paymentFailedAt'
+  | 'evaluation'
+  | 'freeTier'
+>
+
 /**
- * What the shell says across the top of the app. A failed payment is checked first: both
- * causes end in the same `readOnly`, and an organization whose card was declined must not
- * be told its evaluation ran out.
+ * What the shell says across the top of the app. A failed payment is checked first: every
+ * cause ends in the same `readOnly`, and an organization whose card was declined must not
+ * be told its evaluation ran out or that it has too many people. The free plan's people
+ * limit comes next, because an organization over it may also carry an expired evaluation.
  */
 export function shellBanner(
-  subscription:
-    | Pick<Subscription, 'enabled' | 'readOnly' | 'graceEndsAt' | 'paymentFailedAt' | 'evaluation'>
-    | null
-    | undefined,
+  subscription: BannerSubscription | null | undefined,
   isOwner: boolean,
   now: Date = new Date(),
 ): PaymentBanner | null {
-  return paymentBanner(subscription, isOwner, now) ?? evaluationBanner(subscription, isOwner, now)
+  return (
+    paymentBanner(subscription, isOwner, now) ??
+    freePeopleBanner(subscription, isOwner) ??
+    evaluationBanner(subscription, isOwner, now)
+  )
 }
 
 export interface FoundingNotice {

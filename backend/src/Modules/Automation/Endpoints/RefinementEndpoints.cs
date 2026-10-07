@@ -293,7 +293,7 @@ public static class RefinementEndpoints
             case DispatchOutcome.ReadOnly:
                 return Results.Problem(
                     title: "This organization is read-only.",
-                    detail: "The evaluation has ended or a payment problem is unresolved, so new agent runs are paused.",
+                    detail: "The evaluation has ended, a payment problem is unresolved or the free plan's people limit is exceeded, so new agent runs are paused.",
                     type: ProblemTypes.OrganizationReadOnly, statusCode: StatusCodes.Status409Conflict);
             case DispatchOutcome.ItemClaimed:
             case DispatchOutcome.RunInProgress:

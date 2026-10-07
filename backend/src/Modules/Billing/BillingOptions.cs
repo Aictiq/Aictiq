@@ -52,7 +52,44 @@ public sealed class BillingOptions
     [Range(7, 3650)]
     public int StripeEventRetentionDays { get; init; } = 30;
 
+    /// <summary>The hosted free tier. Read only in SaaS mode; off by default.</summary>
+    public FreeTierOptions FreeTier { get; init; } = new();
+
     public bool IsSaas => string.Equals(Mode, "saas", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SaaS mode <em>and</em> the switch on. Self-hosted never has a free tier, whatever is set:
+    /// everything is unlimited there already.
+    /// </summary>
+    public bool FreeTierEnabled => IsSaas && FreeTier.Enabled;
+}
+
+/// <summary>
+/// What an unpaid hosted organization keeps once its evaluation ends. The people and storage
+/// limits belong to a person, not to an organization: they are counted across every unpaid
+/// organization an Owner owns, so ten organizations are not ten times the allowance. The
+/// numbers are configuration so they can be tuned without a release.
+/// </summary>
+public sealed class FreeTierOptions
+{
+    /// <summary>Off: an evaluation ends in read-only, exactly as before the free tier existed.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Distinct humans per Owner across their unpaid organizations, the Owner included.</summary>
+    [Range(1, 1000)]
+    public int MaxPeople { get; init; } = 3;
+
+    /// <summary>Committed attachment bytes per Owner across their unpaid organizations. 200 MiB.</summary>
+    [Range(1, 1_099_511_627_776)]
+    public long StorageBytes { get; init; } = 209_715_200;
+
+    /// <summary>Days a finished run's raw log is kept on a free organization.</summary>
+    [Range(1, 3650)]
+    public int RunLogDays { get; init; } = 30;
+
+    /// <summary>Registered runners per free organization, disabled ones included.</summary>
+    [Range(0, 1000)]
+    public int MaxRunners { get; init; } = 2;
 }
 
 /// <summary>

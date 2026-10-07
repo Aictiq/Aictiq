@@ -40,8 +40,12 @@ and `MigrationRunner`, and mirror the integration tests under `tests/Integration
 - `IgnoreQueryFilters()` is the only way past it, and it is rare, deliberate and greppable.
   The sanctioned uses are the ones that *decide* the tenant or span every tenant: the
   membership check the tenant middleware runs before a tenant exists, `GET /orgs`, the
-  invitation-token preview, and the runner secret lookup. Each carries a user-id or
-  unique-token predicate - that, not the filter, is what keeps it safe.
+  invitation-token preview, the runner secret lookup, and the free tier's "which
+  organizations does this person own" (`TenancyPeopleSource`). Each carries a user-id or
+  unique-token predicate - that, not the filter, is what keeps it safe - and RLS admits
+  each only through a capability set for that one read (`app.user_id`,
+  `app.invitation_token_hash`, `app.runner_token_hash`, `app.owner_lookup`, the last
+  limited to Owner rows of one user).
 - Postgres row-level security is the second guard, for the runtime application role.
 
 ## Authorization

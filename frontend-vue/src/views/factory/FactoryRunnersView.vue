@@ -19,6 +19,7 @@ import {
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
+import PlanLimitNotice from '@/components/common/PlanLimitNotice.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Badge } from '@/components/ui/badge'
@@ -40,6 +41,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
+import { planLimitRefusal, type PlanLimitRefusal } from '@/lib/billing'
 import { since } from '@/lib/claims'
 import {
   runnerPlatformGuess,
@@ -77,6 +79,8 @@ const registering = ref(route?.query.register === '1')
 const name = ref('')
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
+/** A free organization may register only so many runners; the refusal stays in the dialog. */
+const refused = ref<PlanLimitRefusal | null>(null)
 
 /** "Use a runner I already have": the caller's machines in their other organizations. */
 const usingExisting = ref(false)
@@ -148,6 +152,11 @@ function showSecret(value: RunnerIssued, forExisting = false) {
   issuedOpen.value = true
 }
 
+// A refusal belongs to the attempt it answered: opening either dialog again starts clean.
+watch([registering, usingExisting], () => {
+  refused.value = null
+})
+
 watch(issuedOpen, (open) => {
   // The secret leaves memory with the dialog: there is no second look.
   if (!open) issued.value = null
@@ -166,6 +175,7 @@ function continueSetup() {
 async function submit() {
   submitting.value = true
   fieldErrors.value = {}
+  refused.value = null
   try {
     const created = await registerRunner(slug.value, name.value.trim())
     runners.value = [...runners.value, created.runner].sort((a, b) => a.name.localeCompare(b.name))
@@ -177,6 +187,8 @@ async function submit() {
       fieldErrors.value = error.fieldErrors
     } else if (error instanceof ApiError && error.status === 409) {
       fieldErrors.value = { name: ['Another runner in this organization already has that name.'] }
+    } else if (planLimitRefusal(error)) {
+      refused.value = planLimitRefusal(error)
     } else {
       toast.error(error)
     }
@@ -218,6 +230,7 @@ async function connect() {
   if (!machine) return
   connecting.value = true
   connectErrors.value = {}
+  refused.value = null
   try {
     const name = machineName.value.trim()
     const created = await registerRunnerOnMachine(
@@ -235,6 +248,8 @@ async function connect() {
       connectErrors.value = {
         name: ['Another runner in this organization already has that name. Pick another.'],
       }
+    } else if (planLimitRefusal(error)) {
+      refused.value = planLimitRefusal(error)
     } else {
       toast.error(error)
     }
@@ -497,6 +512,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               {{ message }}
             </p>
           </div>
+          <PlanLimitNotice v-if="refused" :slug="slug" :refusal="refused" />
         </form>
 
         <DialogFooter>
@@ -618,6 +634,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
             >
               {{ message }}
             </p>
+            <PlanLimitNotice v-if="refused" :slug="slug" :refusal="refused" />
           </form>
         </div>
 

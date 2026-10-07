@@ -19,6 +19,8 @@ public static class BillingModule
     {
         services.AddModuleDbContext<BillingDbContext>("billing");
         services.AddOptions<BillingOptions>().Bind(configuration.GetSection(BillingOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        // Data annotations do not recurse, so the nested free-tier section is validated on its own.
+        services.AddOptions<FreeTierOptions>().Bind(configuration.GetSection($"{BillingOptions.SectionName}:FreeTier")).ValidateDataAnnotations().ValidateOnStart();
         // Bound, never validated: no Stripe keys is how every self-hosted instance runs.
         services.AddOptions<StripeOptions>().Bind(configuration.GetSection(StripeOptions.SectionName));
 
@@ -28,6 +30,7 @@ public static class BillingModule
 
         services.AddSingleton<BillingAvailability>();
         services.AddScoped<BillingUsage>();
+        services.AddScoped<FreeTierLedger>();
         services.AddScoped<SeatSynchronizer>();
         services.AddScoped<StripeWebhookProcessor>();
         // The SDK client is built lazily inside, so registering it costs nothing without keys.

@@ -29,6 +29,14 @@ that turns member changes into Stripe quantities now applies only to legacy
 subscriptions. Stripe webhook deliveries failing with 400 mean the
 `Stripe:WebhookSecret` is wrong.
 
+The hosted free tier is off until `Billing__FreeTier__Enabled=true` is set on the API and
+Workers; its limits (`Billing__FreeTier__MaxPeople`, `__StorageBytes`, `__RunLogDays`,
+`__MaxRunners`) can be tuned there without a release - a restart applies them, and
+nothing is removed when a number goes down: Owners over a lowered people limit get
+read-only Free organizations until they are back under it. Turning the switch off again
+returns expired evaluations to read-only. The Hosted price is $79: the Stripe price id
+in `Stripe__Prices__hosted_organization` must be a $79 recurring monthly price.
+
 ## The managed service
 
 Hosted Aictiq sells **operation of the shared service**, not extra product. The paid
@@ -114,7 +122,7 @@ what came back.
 ### Hosted resource safeguards
 
 These are independent of pricing: they protect the shared service and apply to every
-hosted organization, evaluating or paid. The values below are the shipped defaults, read
+hosted organization, evaluating, Free or paid. The values below are the shipped defaults, read
 from the code rather than aspirational.
 
 | Area | Safeguard in place | Where |
@@ -125,7 +133,8 @@ from the code rather than aspirational.
 | MCP | 600 transport requests/minute per token, and a lower 60 tool calls/minute per token that answers with a protocol error carrying `Retry-After` rather than an opaque 429. | `RateLimiting:McpRequestPermitLimitPerMinute`, `:McpPermitLimitPerMinute` |
 | Request bodies | MCP requests are capped at 1 MiB, enforced on Kestrel's streaming limit before parsing. The Stripe webhook body is capped at 512 KiB and answers 413 above it. | `Mcp:MaxRequestBodyBytes`; `BillingEndpoints` |
 | Uploads | Attachments 25 MiB each; still images are re-encoded to WebP no wider than 1920px, with the pixel count checked from the header before decoding. Avatars 2 MiB, and the commit HEADs the object and deletes what it refuses. CSV import 20 MB. | `Attachments:MaxBytes`, `Attachments:MaxImageWidth`, `Avatar.MaxBytes` |
-| Storage | 10 GiB of committed attachments per organization, refused at commit with `402 plan-limit` and `limit: "storage_bytes"`. `Billing:StorageAllowanceBytes` can narrow that for a deployment; it never widens it. | `BillingPlanLimits` |
+| Storage | 10 GiB of committed attachments per organization, refused at commit with `402 plan-limit` and `limit: "storage_bytes"`. On the free tier, 200 MiB pooled per Owner across their unpaid organizations instead. `Billing:StorageAllowanceBytes` can narrow either for a deployment; it never widens it. | `BillingPlanLimits`, `Billing:FreeTier:StorageBytes` |
+| Free tier people | With the free tier on, 3 distinct humans per Owner across their unpaid organizations (pending invitations included, agents not); the 4th is refused with `402 plan-limit` / `free_people`, and an Owner already over it has their Free organizations read-only until back under. | `Billing:FreeTier:MaxPeople` |
 | Log ingestion | 64 KiB per log batch, 8 MiB per run. Over the cap the API answers 413 and leaves a truncation marker at `RunLogChunk.TruncatedSeq`. Chunks insert `ON CONFLICT DO NOTHING`, so a retrying runner cannot inflate a log. | `Automation:MaxLogBatchBytes`, `Automation:MaxLogBytes` |
 | Runner connections | A claim poll holds for 25 seconds; heartbeats every 60 seconds; a run whose runner has been silent for 5 minutes is swept and failed rather than left live. A disabled or deleted runner answers `401 token-revoked`. | `Automation:PollTimeoutSeconds`, `:HeartbeatIntervalSeconds`, `:RunnerLostAfterMinutes` |
 | Run duration | A playbook's time limit is capped at 720 minutes, and the timeout sweep ends a run that passes its own deadline. | `Automation:MaxRunMinutes` |
@@ -143,10 +152,12 @@ Missing safeguards, stated as blockers rather than implied as capacity:
 > promise throughput, and pilot usage must be watched for an organization that queues far
 > more than it can drain.
 
-> **Launch blocker - no cap on runner registrations per organization.** `POST
-> /orgs/{slug}/runners` is open to any organization Admin without a count limit. Each
-> runner holds a long poll and a rate-limit partition of its own, so a large number of
-> registered runners is a shared-service cost that nothing currently bounds.
+> **Launch blocker - no cap on runner registrations per paid or evaluating organization.**
+> A Free organization may register at most 2 runners (`Billing:FreeTier:MaxRunners`,
+> `402 plan-limit` / `runners` beyond it), but `POST /orgs/{slug}/runners` is open to any
+> Admin of an evaluating or paid Hosted organization without a count limit. Each runner
+> holds a long poll and a rate-limit partition of its own, so a large number of
+> registered runners is a shared-service cost that nothing yet bounds there.
 
 > **Launch blocker - no rate limit on rule firings per organization.** The loop guard and
 > the firing idempotency key prevent a rule re-triggering itself and prevent duplicate

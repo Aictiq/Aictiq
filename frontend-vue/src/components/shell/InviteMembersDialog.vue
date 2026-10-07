@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Copy, Loader2, TriangleAlert } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import {
   createInvitation,
@@ -21,6 +22,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
+import { planLimitRefusal } from '@/lib/billing'
+import { orgSettingsPath } from '@/router/paths'
 
 /**
  * Inviting people, one paste at a time.
@@ -37,6 +40,10 @@ import { useToast } from '@/composables/useToast'
  * client, who follows one project: a member of that project who can see the board, add
  * items and comment, and may not start AI work. It is a preset over the same request, so an
  * admin never has to know that a flag exists to get it right.
+ *
+ * On the free plan an invitation counts as a person from the moment it is sent, so the
+ * people limit can refuse one; that refusal says so in the server's words and offers the
+ * way to Hosted, which lifts it.
  */
 const open = defineModel<boolean>('open', { required: true })
 
@@ -55,7 +62,7 @@ const projectId = ref('')
 const projects = ref<Project[]>([])
 const sending = ref(false)
 const results = ref<InvitationLink[]>([])
-const failures = ref<{ email: string; message: string }[]>([])
+const failures = ref<{ email: string; message: string; upgrade: boolean }[]>([])
 const copied = ref<string | null>(null)
 
 const addresses = computed(() => parseAddresses(input.value))
@@ -123,8 +130,13 @@ async function submit() {
       results.value.push(await request(email))
     } catch (error) {
       // Named, not counted: "3 failed" in a paste of twenty is not something anyone can
-      // act on. The API's own message says whether it was a typo or a duplicate.
-      failures.value.push({ email, message: (error as Error).message })
+      // act on. The API's own message says whether it was a typo, a duplicate or the plan.
+      const refusal = planLimitRefusal(error)
+      failures.value.push({
+        email,
+        message: refusal?.message ?? (error as Error).message,
+        upgrade: refusal?.upgrade ?? false,
+      })
     }
   }
 
@@ -273,7 +285,18 @@ async function copy(link: InvitationLink) {
           class="text-destructive flex items-start gap-1.5 text-xs"
         >
           <TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          <span><span class="font-medium">{{ failure.email }}</span> - {{ failure.message }}</span>
+          <span>
+            <span class="font-medium">{{ failure.email }}</span> - {{ failure.message }}
+            <RouterLink
+              v-if="failure.upgrade"
+              :to="orgSettingsPath(props.slug, 'billing')"
+              class="font-medium underline underline-offset-2"
+              data-testid="plan-limit-upgrade"
+              @click="open = false"
+            >
+              Upgrade to Hosted
+            </RouterLink>
+          </span>
         </p>
       </div>
 
