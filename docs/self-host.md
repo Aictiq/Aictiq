@@ -48,9 +48,12 @@ with the editor's attachment button, or drag it into the editor.
 
 The API enforces `Attachments:MaxBytes` (25 MiB by default) and
 `Attachments:AllowedContentTypes`. When a client omits the MIME type or sends
-`application/octet-stream`, the API resolves only the listed document extensions, then
+`application/octet-stream`, the API resolves only the listed document extensions (plus
+`.zip`, `.pdf`, `.txt`, `.md` and `.markdown`), then
 checks the resolved type against the configured allowlist. This does not enable arbitrary
-binary uploads or override an explicitly disallowed MIME type.
+binary uploads or override an explicitly disallowed MIME type. Common aliases are stored
+under the canonical type: a ZIP that Windows sends as `application/x-zip-compressed` is
+`application/zip`, and `text/x-markdown` is `text/markdown`.
 
 Documents retain their original bytes and filename. Downloads require access to the
 project and attachment owner, use `Content-Disposition: attachment` and `nosniff`, and are
