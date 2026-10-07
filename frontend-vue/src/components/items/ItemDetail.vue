@@ -836,7 +836,7 @@ function logged(updated: TimeTrackingItem) {
 <template>
   <div
     v-if="currentItem"
-    class="grid w-full gap-0 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-8"
+    class="grid min-w-0 w-full grid-cols-1 gap-0 [overflow-wrap:anywhere] lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-8"
     :class="modal ? 'p-5' : 'px-5 py-8'"
     @keydown.meta.s.prevent="save"
     @keydown.ctrl.s.prevent="save"
@@ -844,7 +844,7 @@ function logged(updated: TimeTrackingItem) {
     <!-- On a phone the metadata rail follows the long description and activity stream,
          so its actions need a compact copy at the top where they remain discoverable. -->
     <div
-      class="bg-background sticky top-0 z-20 mb-5 flex min-h-13 min-w-0 shrink-0 items-center gap-2 py-2 lg:hidden"
+      class="bg-background sticky top-0 z-20 mb-5 flex min-h-13 min-w-0 shrink-0 flex-wrap items-center gap-2 py-2 lg:hidden"
     >
       <button
         class="border-input rounded border px-3"
@@ -865,14 +865,14 @@ function logged(updated: TimeTrackingItem) {
       </button>
       <span
         v-if="isDirty"
-        class="text-muted-foreground self-center text-xs"
+        class="text-muted-foreground order-last w-full self-center text-xs sm:order-none sm:w-auto"
         title="There are unsaved changes"
         >Unsaved</span
       >
       <button
         v-if="modal"
         type="button"
-        class="text-muted-foreground hover:text-foreground hover:bg-muted mr-1 ml-auto inline-flex items-center justify-center rounded px-1.5"
+        class="text-muted-foreground hover:text-foreground hover:bg-muted mr-1 ml-auto inline-flex shrink-0 items-center justify-center rounded px-1.5"
         aria-label="Close item"
         title="Close (Esc)"
         @click="emit('close')"
@@ -881,7 +881,8 @@ function logged(updated: TimeTrackingItem) {
       </button>
     </div>
 
-    <section>
+    <!-- Keep wide code and logs inside their own scroll boxes rather than sizing the grid. -->
+    <section class="min-w-0">
       <label class="sr-only" for="item-title">Title</label>
       <textarea
         id="item-title"
@@ -1024,14 +1025,14 @@ function logged(updated: TimeTrackingItem) {
             <span>{{ entry.agentName ?? 'Agent' }}</span>
             <span
               v-if="runScheduledLabel(entry)"
-              class="text-muted-foreground shrink-0 text-xs"
+              class="text-muted-foreground max-w-full text-xs"
               data-testid="run-scheduled"
               >{{ runScheduledLabel(entry) }}</span
             >
             <span class="text-muted-foreground truncate text-xs">
               {{ entry.playbookName ?? '' }}
             </span>
-            <span v-if="runRequesterLabel(entry)" class="text-muted-foreground shrink-0 text-xs italic">
+            <span v-if="runRequesterLabel(entry)" class="text-muted-foreground max-w-full text-xs italic">
               {{ runRequesterLabel(entry) }}
             </span>
             <RouterLink
@@ -1041,7 +1042,7 @@ function logged(updated: TimeTrackingItem) {
               data-testid="run-trigger-comment"
               >{{ entry.followsUpRunId ? 'Follow-up from a comment' : 'From a comment' }}</RouterLink
             >
-            <span class="ml-auto flex shrink-0 items-center gap-3">
+            <span class="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2">
               <a
                 v-if="entry.pullRequestUrl"
                 :href="entry.pullRequestUrl"
@@ -1069,7 +1070,7 @@ function logged(updated: TimeTrackingItem) {
                   data-testid="run-resume-command"
                   @click="copyResumeCommand(resumeCommand(entry)!, entry.runnerName)"
                 >
-                  <SquareTerminal class="size-3.5" aria-hidden="true" />
+                  <SquareTerminal class="size-3.5 shrink-0" aria-hidden="true" />
                   Copy resume command
                 </button>
               </template>
@@ -1244,7 +1245,7 @@ function logged(updated: TimeTrackingItem) {
         >
       </section>
     </section>
-    <aside class="mt-8 space-y-5 lg:mt-0">
+    <aside class="mt-8 min-w-0 space-y-5 lg:mt-0">
       <div class="hidden h-9 shrink-0 gap-2 lg:flex">
         <button
           class="border-input rounded border px-3"
