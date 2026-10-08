@@ -13,6 +13,22 @@ export interface RunnerHarness {
   version: string | null
 }
 
+/** A harness the CLI knows that the runner does not offer, and why. */
+export interface RunnerMissingHarness {
+  name: string
+  /** `not-on-path`: no executable found; `version-failed`: found, but `--version` failed. */
+  reason: 'not-on-path' | 'version-failed'
+  /** The executable looked for, or the one found. */
+  command: string
+}
+
+/** The runner's last self-update that did not take; it keeps working on its current version. */
+export interface RunnerUpdateFailure {
+  version: string
+  error: string
+  at: string
+}
+
 /** What the runner reported about itself on its last hello or heartbeat. */
 export interface RunnerCapabilities {
   v: number
@@ -29,6 +45,12 @@ export interface RunnerCapabilities {
   workspaces?: string[] | null
   /** This organization's repository roots on the machine. Absent from older runners. */
   repoRoots?: string[] | null
+  /** Known harnesses the runner does not offer, and why. Absent from older runners. */
+  missingHarnesses?: RunnerMissingHarness[] | null
+  /** The PATH the runner looked for harnesses on: a service's, not a login shell's. */
+  path?: string | null
+  /** Set while the runner's last self-update attempt failed. */
+  updateFailure?: RunnerUpdateFailure | null
 }
 
 export interface Runner {
@@ -90,7 +112,8 @@ export interface RunnerChoice {
   isOnline: boolean
 }
 
-export const listRunnerChoices = (slug: string) => apiFetch<RunnerChoice[]>(`/orgs/${slug}/runners/choices`)
+export const listRunnerChoices = (slug: string) =>
+  apiFetch<RunnerChoice[]>(`/orgs/${slug}/runners/choices`)
 
 export const listRunnerMachinesElsewhere = (slug: string) =>
   apiFetch<RunnerMachine[]>(`/orgs/${slug}/runners/elsewhere`)

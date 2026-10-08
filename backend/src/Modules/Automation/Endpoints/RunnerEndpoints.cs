@@ -478,6 +478,21 @@ public static partial class RunnerEndpoints
         {
             errors["capabilities.repoRoots"] = [$"At most {MaxReportedPaths} paths of at most 1024 characters."];
         }
+        if (capabilities.MissingHarnesses is { } missing
+            && (missing.Count > 16 || missing.Any(m => m is null || !HarnessName().IsMatch(m.Name ?? "")
+                || m.Reason is not ("not-on-path" or "version-failed") || m.Command is null or { Length: 0 or > 64 })))
+        {
+            errors["capabilities.missingHarnesses"] = ["At most 16 harnesses, each with a reason (not-on-path or version-failed) and a command of at most 64 characters."];
+        }
+        if (capabilities.Path is { Length: > 4096 })
+        {
+            errors["capabilities.path"] = ["At most 4096 characters."];
+        }
+        if (capabilities.UpdateFailure is { } failure
+            && (failure.Version is null or { Length: 0 or > 64 } || failure.Error is null or { Length: 0 or > 1000 }))
+        {
+            errors["capabilities.updateFailure"] = ["A version of at most 64 characters and an error of at most 1000."];
+        }
 
         return errors;
     }

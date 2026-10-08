@@ -109,6 +109,19 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
         Assert.True(reported.Service);
         Assert.Empty(reported.Workspaces!);
+
+        // Why a harness is missing and a self-update that failed reach the runner page.
+        var troubled = setUp with
+        {
+            MissingHarnesses = [new RunnerMissingHarness("cursor", "not-on-path", "agent")],
+            Path = "/usr/local/bin:/usr/bin",
+            UpdateFailure = new RunnerUpdateFailure("0.8.1", "/usr/lib/node_modules/@aictiq is not writable by this user", DateTimeOffset.UtcNow),
+        };
+        await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(troubled), ApiTestContext.Json, Ct);
+        reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
+        Assert.Equal("not-on-path", Assert.Single(reported.MissingHarnesses!).Reason);
+        Assert.Equal("/usr/local/bin:/usr/bin", reported.Path);
+        Assert.Equal("0.8.1", reported.UpdateFailure!.Version);
     }
 
     [Fact]
@@ -251,6 +264,9 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
             Claude with { MaxParallel = 0 },
             Claude with { Workspaces = [.. Enumerable.Range(0, 201).Select(i => $"P{i}")] },
             Claude with { RepoRoots = [new string('a', 1025)] },
+            Claude with { MissingHarnesses = [new RunnerMissingHarness("claude", "broken", "claude")] },
+            Claude with { Path = new string('a', 4097) },
+            Claude with { UpdateFailure = new RunnerUpdateFailure("0.8.1", "", DateTimeOffset.UtcNow) },
         })
         {
             var refused = await runner.PostAsJsonAsync("/api/v1/runner/hello", new RunnerHelloRequest(bad), ApiTestContext.Json, Ct);

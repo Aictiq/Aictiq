@@ -11,6 +11,7 @@ import {
   type Runner,
 } from '@/api/runners'
 import {
+  runnerMissingHarnessLabel,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
@@ -118,6 +119,17 @@ describe('runnerStatus', () => {
 
   it('says disabled before anything else', () => {
     expect(runnerStatus(runner({ isDisabled: true, isOnline: true }))).toBe('disabled')
+  })
+})
+
+describe('runnerMissingHarnessLabel', () => {
+  it('says whether to fix PATH or the harness itself', () => {
+    expect(
+      runnerMissingHarnessLabel({ name: 'claude', reason: 'not-on-path', command: 'claude' }),
+    ).toBe("claude is not on the runner's PATH")
+    expect(
+      runnerMissingHarnessLabel({ name: 'codex', reason: 'version-failed', command: 'codex' }),
+    ).toBe('codex is on PATH, but `codex --version` failed')
   })
 })
 

@@ -235,7 +235,11 @@ systemctl --user status aictiq-runner
 ```
 
 Generate the unit from a shell whose `PATH` finds Node.js, `aictiq`, and every harness: that
-path is embedded in the unit. Use `journalctl --user -u aictiq-runner -f` for its local log.
+path is embedded in the unit. The runner also searches the usual per-user install
+directories (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.opencode/bin`, pnpm's home)
+on every heartbeat, so a harness installed there later is found without regenerating it. A
+runner card in Factory → Runners lists the harnesses it did not find, why, and the `PATH` it
+searched. Use `journalctl --user -u aictiq-runner -f` for its local log.
 The service finishes runs in flight on its first stop signal; a second signal cancels them.
 
 ### macOS (launchd)

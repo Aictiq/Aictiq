@@ -19,7 +19,8 @@ import {
 } from '../runner/config.js'
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
-import { harnesses, probeHarnesses } from '../runner/harness/index.js'
+import { describeMissing, harnesses, probeAllHarnesses } from '../runner/harness/index.js'
+import { extendProcessPath, harnessDirs, withHarnessDirs } from '../runner/path.js'
 import {
   serviceDefinition,
   servicePlatform,
@@ -29,7 +30,7 @@ import {
 } from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
-import type { RunnerCapabilities } from '../runner/types.js'
+import type { RunnerCapabilities, UpdateFailure } from '../runner/types.js'
 import {
   cliEntryPath,
   PackageName,
@@ -279,13 +280,27 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       )
       print('')
       print(
-        capabilities.harnesses.length === 0
-          ? 'No harness found on PATH (claude, codex, opencode, cursor agent, copilot).'
-          : renderTable(capabilities.harnesses, [
-              { header: 'HARNESS', value: (h) => h.name },
-              { header: 'VERSION', value: (h) => h.version ?? '' },
-            ]),
+        renderTable(
+          [
+            ...capabilities.harnesses.map((h) => ({ name: h.name, version: h.version ?? '', note: '' })),
+            ...(capabilities.missingHarnesses ?? []).map((m) => ({
+              name: m.name,
+              version: 'missing',
+              note: describeMissing(m),
+            })),
+          ],
+          [
+            { header: 'HARNESS', value: (h) => h.name },
+            { header: 'VERSION', value: (h) => h.version },
+            { header: 'WHY', value: (h) => h.note },
+          ],
+        ),
       )
+      // A service has its own PATH (its definition's, plus the same per-user directories), so
+      // a harness this shell finds can still be missing there: the Factory runner page shows
+      // what the service itself reported.
+      print('')
+      print(renderFields([['PATH', capabilities.path ?? '']]))
       for (const { profile, hello, text } of registrations) {
         const org = hello?.organizationSlug ?? profileLabel(profile)
         print('')
@@ -340,6 +355,20 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         const workspaceRoot = resolve(options.workspaceRoot ?? defaultWorkspaceRoot())
         // Workspaces failed runs kept for a continue expire while the runner is down too.
         if (options.keepWorkspaces !== true) await pruneKeptWorkspaces(workspaceRoot)
+        /**
+         * The last self-update that did not take, reported with every heartbeat so the Factory
+         * runner page shows it; otherwise it only reaches this process's log.
+         */
+        let updateFailure: UpdateFailure | null = null
+        const failUpdate = (target: string, error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          updateFailure = {
+            version: target,
+            error: message.length > MaxReportedUpdateError ? `${message.slice(0, MaxReportedUpdateError - 1)}…` : message,
+            at: new Date().toISOString(),
+          }
+          return message
+        }
         const createSupervisor = () =>
           new RunnerSupervisor({
             readConfig: () => readRunnerConfig(),
@@ -366,6 +395,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                   return {
                     ...(await probe(parallel, config.machineId, own)),
                     service: startedAsService(),
+                    ...(updateFailure ? { updateFailure } : {}),
                   }
                 },
                 local,
@@ -419,6 +449,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             return
           }
           if (result.status === 'current') {
+            updateFailure = null
             log(`Update check: ${version} is up to date (latest on npm: ${result.latest})`)
             return
           }
@@ -433,7 +464,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             await updater.installation()
           } catch (error) {
             log(
-              `Update check: ${PackageName} ${result.latest} is available (running ${version}), but ${error instanceof Error ? error.message : String(error)}`,
+              `Update check: ${PackageName} ${result.latest} is available (running ${version}), but ${failUpdate(result.latest, error)}`,
             )
             return
           }
@@ -478,9 +509,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                 upgraded = await updater.install(target)
               } catch (error) {
                 // Back to work on this version; the next check (hours away) tries again.
-                log(
-                  `Upgrade to ${target} failed (${error instanceof Error ? error.message : String(error)}); staying on ${version}`,
-                )
+                log(`Upgrade to ${target} failed (${failUpdate(target, error)}); staying on ${version}`)
                 target = null
                 supervisor = createSupervisor()
               }
@@ -568,7 +597,12 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           node: process.execPath,
           entry: cliEntry(),
           parallel: options.parallel,
-          path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          // `runner start` appends these again on every probe, so a harness installed later
+          // in one of them is found without regenerating the definition.
+          path:
+            platform === servicePlatform()
+              ? withHarnessDirs(process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', harnessDirs())
+              : (process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'),
           home: homedir(),
         }),
       )
@@ -582,9 +616,15 @@ async function probe(
   machineId: string,
   profile?: Pick<RunnerProfile, 'workspaces' | 'repoRoots'>,
 ): Promise<RunnerCapabilities> {
+  // A service's PATH was frozen when its definition was generated, and lacks every per-user
+  // directory a shell profile adds; the probe, each harness and git all use the extended one.
+  const path = extendProcessPath()
+  const { harnesses: found, missing } = await probeAllHarnesses()
   return {
     v: 1,
-    harnesses: await probeHarnesses(),
+    harnesses: found,
+    missingHarnesses: missing,
+    path: path.length > MaxReportedPath ? `${path.slice(0, MaxReportedPath - 1)}…` : path,
     os: platform(),
     arch: arch(),
     cliVersion: version,
@@ -643,6 +683,10 @@ function selectProfile(config: RunnerConfig, org: string | undefined): RunnerPro
     ExitCode.Validation,
   )
 }
+
+/** What the instance accepts as `capabilities.path` and `capabilities.updateFailure.error`. */
+const MaxReportedPath = 4096
+const MaxReportedUpdateError = 1000
 
 /** The CLI that is running now, so the agent's MCP bridge is this exact version. */
 function cliEntry(): string {
