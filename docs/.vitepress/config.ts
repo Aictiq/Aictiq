@@ -54,7 +54,8 @@ export default defineConfig({
           { text: 'Operations', link: '/operations' },
           { text: 'Billing (SaaS)', link: '/billing' },
           { text: 'Performance', link: '/performance' },
-          { text: 'Usage telemetry', link: '/telemetry' }
+          { text: 'Usage telemetry', link: '/telemetry' },
+          { text: 'Harness usage limits', link: '/harness-usage-limits' }
         ]
       }
     ]

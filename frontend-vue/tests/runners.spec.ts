@@ -9,6 +9,7 @@ import {
   rotateRunner,
   updateRunner,
   type Runner,
+  type RunnerUsageLimits,
 } from '@/api/runners'
 import {
   runnerMissingHarnessLabel,
@@ -16,6 +17,9 @@ import {
   runnerRegisterCommand,
   runnerServiceSteps,
   runnerStatus,
+  usageLimitsForRun,
+  usageSummary,
+  usageWindowStale,
 } from '@/lib/runners'
 import { factoryLinks, factoryPath, factoryRunPath, factorySetupPath } from '@/router/paths'
 
@@ -187,5 +191,60 @@ describe('the Factory area', () => {
     expect(factorySetupPath('acme', { runner: 'r 1', project: 'WEB' })).toBe(
       '/o/acme/factory/setup?runner=r+1&project=WEB',
     )
+  })
+})
+
+describe('harness usage limits', () => {
+  const now = new Date('2026-10-08T12:00:00Z')
+  const limits = (
+    observedAt: string,
+    over: Partial<RunnerUsageLimits> = {},
+  ): RunnerUsageLimits => ({
+    harness: 'claude',
+    observedAt,
+    fiveHour: { usedPercent: 40.4, resetsAt: '2026-10-08T14:00:00Z' },
+    weekly: { usedPercent: 71.6, resetsAt: '2026-10-12T09:00:00Z' },
+    ...over,
+  })
+
+  it('summarises both windows and the weekly reset in one short line', () => {
+    const summary = usageSummary(limits('2026-10-08T11:50:00Z'), now)
+    expect(summary).toMatch(/^5h 40% · wk 72% · resets \S+$/)
+  })
+
+  it('marks a window stale once it is older than it lasts or its reset has passed', () => {
+    const old = limits('2026-10-08T06:00:00Z')
+    expect(usageWindowStale(old, 'fiveHour', now)).toBe(true)
+    expect(usageWindowStale(old, 'weekly', now)).toBe(false)
+    expect(usageSummary(old, now)).toMatch(/^5h stale · wk 72%/)
+
+    const reset = limits('2026-10-08T11:00:00Z', {
+      fiveHour: { usedPercent: 90, resetsAt: '2026-10-08T11:30:00Z' },
+    })
+    expect(usageWindowStale(reset, 'fiveHour', now)).toBe(true)
+    expect(usageWindowStale(limits('2026-09-30T12:00:00Z'), 'weekly', now)).toBe(true)
+  })
+
+  it('leaves out a window the harness did not report', () => {
+    expect(
+      usageSummary(
+        limits('2026-10-08T11:50:00Z', {
+          fiveHour: null,
+          weekly: { usedPercent: 3, resetsAt: null },
+        }),
+        now,
+      ),
+    ).toBe('wk 3%')
+  })
+
+  it('takes the most recently read runner for the harness, and nothing without one', () => {
+    const runners = [
+      { name: 'vps-1', usageLimits: [limits('2026-10-08T10:00:00Z')] },
+      { name: 'laptop', usageLimits: [limits('2026-10-08T11:00:00Z')] },
+      { name: 'old', usageLimits: null },
+    ]
+    expect(usageLimitsForRun(runners, 'claude')?.runner).toBe('laptop')
+    expect(usageLimitsForRun(runners, 'codex')).toBeNull()
+    expect(usageLimitsForRun(runners, null)).toBeNull()
   })
 })

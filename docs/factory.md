@@ -346,8 +346,10 @@ Open an unclaimed item and choose **Hand to agent**, then select the playbook an
 default, the first free runner that has the playbook's harness takes the run. When the
 organization has more than one runner, the dialog also offers **Runner**: pick one, and only
 that machine takes the run. If it is offline, the run waits in the queue until it comes back.
-If an Admin disables or deletes that runner while the run waits, any runner may take it. The
-equivalent CLI command is:
+If an Admin disables or deletes that runner while the run waits, any runner may take it. For
+Claude Code and Codex, the dialog also shows how much of the harness's 5-hour and weekly
+allowance the last run reported; **Factory → Runners** has the detail per runner. See
+[Harness usage limits](harness-usage-limits.md). The equivalent CLI command is:
 
 ```bash
 aictiq run start ACME-123 --playbook Implement --agent worker

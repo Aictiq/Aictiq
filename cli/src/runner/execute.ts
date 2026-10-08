@@ -11,7 +11,9 @@ import type {
   ClaimedRun,
   FinishReport,
   HarnessAdapter,
+  HarnessName,
   InvocationContext,
+  ParsedLine,
   RunnerHello,
 } from './types.js'
 import { continuePrompt } from './harness/failure.js'
@@ -53,6 +55,12 @@ export interface ExecuteOptions {
   ) => Promise<string | null>
   /** Asks GitHub whether a follow-up's earlier pull request is still open. */
   pullRequestState?: PullRequestStateLookup
+  /** Usage windows the harness reported during the run, with when it last did. */
+  onLimits?: (
+    harness: HarnessName,
+    limits: NonNullable<ParsedLine['limits']>,
+    observedAt: Date,
+  ) => void
   heartbeatMs?: number
   graceMs?: number
   flushIntervalMs?: number
@@ -329,6 +337,8 @@ export async function executeRun(
     let costUsd: number | undefined
     let inputTokens: number | undefined
     let outputTokens: number | undefined
+    let limits: NonNullable<ParsedLine['limits']> | undefined
+    let limitsAt = new Date()
     const remember = (line: string) => {
       lastLines.push(line)
       if (lastLines.length > 20) lastLines.shift()
@@ -373,6 +383,10 @@ export async function executeRun(
         inputTokens = tally(inputTokens, parsed.inputTokens)
         outputTokens = tally(outputTokens, parsed.outputTokens)
         if (parsed.result !== undefined) lastResult = parsed.result
+        if (parsed.limits) {
+          limits = { ...limits, ...parsed.limits }
+          limitsAt = new Date()
+        }
         if (parsed.sessionId && parsed.sessionId !== sessionId) {
           sessionId = parsed.sessionId
           event(`Harness session ${sessionId}`)
@@ -391,6 +405,18 @@ export async function executeRun(
     const written = adapter.usage?.(context)
     inputTokens = written?.inputTokens ?? inputTokens
     outputTokens = written?.outputTokens ?? outputTokens
+    const reported = adapter.limits?.(sessionId)
+    if (reported) {
+      limits = { ...limits, ...reported }
+      limitsAt = new Date()
+    }
+    if (limits) {
+      try {
+        options.onLimits?.(adapter.name, limits, limitsAt)
+      } catch (error) {
+        options.local?.(`Could not record ${adapter.name} usage limits: ${message(error)}`)
+      }
+    }
     event(exitCode === null ? 'Harness was killed' : `Harness exited with code ${exitCode}`)
     const usage = { costUsd, inputTokens, outputTokens, exitCode }
     if (stopReason) return stopped(exitCode, lastLines, usage)

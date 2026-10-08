@@ -20,6 +20,7 @@ import {
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
 import { describeMissing, harnesses, probeAllHarnesses } from '../runner/harness/index.js'
+import { readUsageLimits, recordUsageLimits } from '../runner/limits.js'
 import { extendProcessPath, harnessDirs, withHarnessDirs } from '../runner/path.js'
 import {
   serviceDefinition,
@@ -396,6 +397,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                     ...(await probe(parallel, config.machineId, own)),
                     service: startedAsService(),
                     ...(updateFailure ? { updateFailure } : {}),
+                    usageLimits: readUsageLimits(),
                   }
                 },
                 local,
@@ -414,6 +416,9 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                     runnerToken: profile.token,
                     shutdown,
                     local,
+                    onLimits: (harness, limits, observedAt) => {
+                      recordUsageLimits(harness, limits, observedAt)
+                    },
                     workspace: {
                       root: workspaceRoot,
                       repositories: own.workspaces,
