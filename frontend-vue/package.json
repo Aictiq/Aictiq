@@ -18,7 +18,7 @@
     "@lucide/vue": "^1.38.0",
     "@microsoft/signalr": "^10.0.9",
     "@tanstack/vue-query": "^5.102.8",
-    "@tanstack/vue-table": "^8.21.3",
+    "@tanstack/vue-table": "^9.2.6",
     "@tiptap/extension-image": "^3.31.2",
     "@tiptap/extension-table": "^3.31.2",
     "@tiptap/extension-table-cell": "^3.31.2",
