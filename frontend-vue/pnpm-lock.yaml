@@ -122,16 +122,16 @@ importers:
         version: 5.3.0
       '@lucide/vue':
         specifier: ^1.38.0
-        version: 1.38.0(vue@3.5.42(typescript@5.9.3))
+        version: 1.38.0(vue@3.5.42(typescript@6.0.3))
       '@microsoft/signalr':
         specifier: ^10.0.9
         version: 10.0.11
       '@tanstack/vue-query':
         specifier: ^5.102.8
-        version: 5.102.8(vue@3.5.42(typescript@5.9.3))
+        version: 5.102.8(vue@3.5.42(typescript@6.0.3))
       '@tanstack/vue-table':
         specifier: ^8.21.3
-        version: 8.21.3(vue@3.5.42(typescript@5.9.3))
+        version: 8.21.3(vue@3.5.42(typescript@6.0.3))
       '@tiptap/extension-image':
         specifier: ^3.31.2
         version: 3.31.2(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))
@@ -164,13 +164,13 @@ importers:
         version: 3.31.2
       '@tiptap/vue-3':
         specifier: ^3.31.2
-        version: 3.31.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)(vue@3.5.42(typescript@5.9.3))
+        version: 3.31.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)(vue@3.5.42(typescript@6.0.3))
       '@vee-validate/zod':
         specifier: ^4.15.1
-        version: 4.15.1(vue@3.5.42(typescript@5.9.3))(zod@4.5.4)
+        version: 4.15.1(vue@3.5.42(typescript@6.0.3))(zod@4.5.4)
       '@vueuse/core':
         specifier: ^15.0.0
-        version: 15.0.0(vue@3.5.42(typescript@5.9.3))
+        version: 15.0.0(vue@3.5.42(typescript@6.0.3))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -185,7 +185,7 @@ importers:
         version: 6.1.0
       grid-layout-plus:
         specifier: ^1.1.1
-        version: 1.1.1(vue@3.5.42(typescript@5.9.3))
+        version: 1.1.1(vue@3.5.42(typescript@6.0.3))
       katex:
         specifier: ^0.18.4
         version: 0.18.4
@@ -197,10 +197,10 @@ importers:
         version: 1.5.1
       pinia:
         specifier: ^4.0.3
-        version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))
+        version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3))
       reka-ui:
         specifier: ^2.10.4
-        version: 2.10.4(vue@3.5.42(typescript@5.9.3))
+        version: 2.10.4(vue@3.5.42(typescript@6.0.3))
       shiki:
         specifier: ^4.4.3
         version: 4.4.3
@@ -209,16 +209,16 @@ importers:
         version: 3.6.0
       vee-validate:
         specifier: ^4.15.1
-        version: 4.15.1(vue@3.5.42(typescript@5.9.3))
+        version: 4.15.1(vue@3.5.42(typescript@6.0.3))
       vue:
         specifier: ^3.5.42
-        version: 3.5.42(typescript@5.9.3)
+        version: 3.5.42(typescript@6.0.3)
       vue-echarts:
         specifier: ^8.3.0
-        version: 8.3.0(echarts@6.1.0)(vue@3.5.42(typescript@5.9.3))
+        version: 8.3.0(echarts@6.1.0)(vue@3.5.42(typescript@6.0.3))
       vue-router:
         specifier: ^5.3.0
-        version: 5.3.0(@vue/compiler-sfc@3.5.42)(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3)))(rolldown@1.2.6)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@5.9.3))
+        version: 5.3.0(@vue/compiler-sfc@3.5.42)(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3)))(rolldown@1.2.6)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@6.0.3))
       vue-sonner:
         specifier: ^2.0.9
         version: 2.0.9
@@ -240,25 +240,25 @@ importers:
         version: 26.4.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.8
-        version: 6.0.8(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@5.9.3))
+        version: 6.0.8(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@6.0.3))
       '@vue/eslint-config-prettier':
         specifier: ^10.2.0
         version: 10.2.0(eslint@10.9.1(jiti@2.7.0))(prettier@3.9.6)
       '@vue/eslint-config-typescript':
         specifier: ^14.9.0
-        version: 14.9.0(eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))))(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+        version: 14.9.0(eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))))(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       '@vue/test-utils':
         specifier: ^2.5.0
-        version: 2.5.0(@vue/compiler-dom@3.5.42)(@vue/server-renderer@3.5.42)(vue@3.5.42(typescript@5.9.3))
+        version: 2.5.0(@vue/compiler-dom@3.5.42)(@vue/server-renderer@3.5.42)(vue@3.5.42(typescript@6.0.3))
       '@vue/tsconfig':
         specifier: ^0.9.1
-        version: 0.9.1(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))
+        version: 0.9.1(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3))
       eslint:
         specifier: ^10.9.1
         version: 10.9.1(jiti@2.7.0)
       eslint-plugin-vue:
         specifier: ^10.10.0
-        version: 10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0)))
+        version: 10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0)))
       globals:
         specifier: ^17.11.0
         version: 17.11.0
@@ -276,7 +276,7 @@ importers:
         version: 3.9.6
       shadcn-vue:
         specifier: ^2.8.2
-        version: 2.8.2(eslint@10.9.1(jiti@2.7.0))(vue@3.5.42(typescript@5.9.3))
+        version: 2.8.2(eslint@10.9.1(jiti@2.7.0))(vue@3.5.42(typescript@6.0.3))
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -284,8 +284,8 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
       typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
       vite:
         specifier: ^8.2.2
         version: 8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0)
@@ -294,7 +294,7 @@ importers:
         version: 5.0.3(@types/node@26.4.0)(happy-dom@20.12.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))
       vue-tsc:
         specifier: ^3.3.11
-        version: 3.3.11(typescript@5.9.3)
+        version: 3.3.11(typescript@6.0.3)
 
 packages:
 
@@ -3308,6 +3308,11 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   uc.micro@3.0.0:
     resolution: {integrity: sha512-U3PppEkleoTnIfi8BozMx3yju3qc/L6SwqWo2Sw+54PX+PX0q9I+r1Um5HCmqD7n9VDX5/v3vQH/AjA6deDdtw==}
 
@@ -3995,11 +4000,11 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@floating-ui/vue@1.1.11(vue@3.5.42(typescript@5.9.3))':
+  '@floating-ui/vue@1.1.11(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@floating-ui/utils': 0.2.12
-      vue-demi: 0.14.10(vue@3.5.42(typescript@5.9.3))
+      vue-demi: 0.14.10(vue@3.5.42(typescript@6.0.3))
     transitivePeerDependencies:
       - '@vue/composition-api'
       - vue
@@ -4061,9 +4066,9 @@ snapshots:
 
   '@juggle/resize-observer@3.4.0': {}
 
-  '@lucide/vue@1.38.0(vue@3.5.42(typescript@5.9.3))':
+  '@lucide/vue@1.38.0(vue@3.5.42(typescript@6.0.3))':
     dependencies:
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   '@microsoft/signalr@10.0.11':
     dependencies:
@@ -4286,23 +4291,23 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.8': {}
 
-  '@tanstack/vue-query@5.102.8(vue@3.5.42(typescript@5.9.3))':
+  '@tanstack/vue-query@5.102.8(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@tanstack/match-sorter-utils': 8.19.4
       '@tanstack/query-core': 5.102.8
       '@vue/devtools-api': 6.6.4
-      vue: 3.5.42(typescript@5.9.3)
-      vue-demi: 0.14.10(vue@3.5.42(typescript@5.9.3))
+      vue: 3.5.42(typescript@6.0.3)
+      vue-demi: 0.14.10(vue@3.5.42(typescript@6.0.3))
 
-  '@tanstack/vue-table@8.21.3(vue@3.5.42(typescript@5.9.3))':
+  '@tanstack/vue-table@8.21.3(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@tanstack/table-core': 8.21.3
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
-  '@tanstack/vue-virtual@3.13.36(vue@3.5.42(typescript@5.9.3))':
+  '@tanstack/vue-virtual@3.13.36(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@tanstack/virtual-core': 3.17.8
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   '@tiptap/core@3.31.2(@tiptap/pm@3.31.2)':
     dependencies:
@@ -4495,12 +4500,12 @@ snapshots:
       '@tiptap/extensions': 3.31.2(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)
       '@tiptap/pm': 3.31.2
 
-  '@tiptap/vue-3@3.31.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)(vue@3.5.42(typescript@5.9.3))':
+  '@tiptap/vue-3@3.31.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@tiptap/core': 3.31.2(@tiptap/pm@3.31.2)
       '@tiptap/pm': 3.31.2
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
     optionalDependencies:
       '@tiptap/extension-bubble-menu': 3.31.2(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)
       '@tiptap/extension-floating-menu': 3.31.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.2(@tiptap/pm@3.31.2))(@tiptap/pm@3.31.2)
@@ -4558,40 +4563,40 @@ snapshots:
     dependencies:
       '@types/node': 26.4.0
 
-  '@typescript-eslint/eslint-plugin@8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       '@typescript-eslint/scope-manager': 8.68.0
-      '@typescript-eslint/type-utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/type-utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 8.68.0
       eslint: 10.9.1(jiti@2.7.0)
       ignore: 7.0.8
       natural-compare: 1.4.0
-      ts-api-utils: 2.5.0(typescript@5.9.3)
-      typescript: 5.9.3
+      ts-api-utils: 2.5.0(typescript@6.0.3)
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)':
+  '@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.68.0
       '@typescript-eslint/types': 8.68.0
-      '@typescript-eslint/typescript-estree': 8.68.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.68.0(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 8.68.0
       debug: 4.4.3
       eslint: 10.9.1(jiti@2.7.0)
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/project-service@8.68.0(typescript@5.9.3)':
+  '@typescript-eslint/project-service@8.68.0(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/tsconfig-utils': 8.68.0(typescript@5.9.3)
+      '@typescript-eslint/tsconfig-utils': 8.68.0(typescript@6.0.3)
       '@typescript-eslint/types': 8.68.0
       debug: 4.4.3
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -4600,47 +4605,47 @@ snapshots:
       '@typescript-eslint/types': 8.68.0
       '@typescript-eslint/visitor-keys': 8.68.0
 
-  '@typescript-eslint/tsconfig-utils@8.68.0(typescript@5.9.3)':
+  '@typescript-eslint/tsconfig-utils@8.68.0(typescript@6.0.3)':
     dependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
-  '@typescript-eslint/type-utils@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)':
+  '@typescript-eslint/type-utils@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/types': 8.68.0
-      '@typescript-eslint/typescript-estree': 8.68.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.68.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       debug: 4.4.3
       eslint: 10.9.1(jiti@2.7.0)
-      ts-api-utils: 2.5.0(typescript@5.9.3)
-      typescript: 5.9.3
+      ts-api-utils: 2.5.0(typescript@6.0.3)
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
   '@typescript-eslint/types@8.68.0': {}
 
-  '@typescript-eslint/typescript-estree@8.68.0(typescript@5.9.3)':
+  '@typescript-eslint/typescript-estree@8.68.0(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/project-service': 8.68.0(typescript@5.9.3)
-      '@typescript-eslint/tsconfig-utils': 8.68.0(typescript@5.9.3)
+      '@typescript-eslint/project-service': 8.68.0(typescript@6.0.3)
+      '@typescript-eslint/tsconfig-utils': 8.68.0(typescript@6.0.3)
       '@typescript-eslint/types': 8.68.0
       '@typescript-eslint/visitor-keys': 8.68.0
       debug: 4.4.3
       minimatch: 10.2.6
       semver: 7.8.5
       tinyglobby: 0.2.17
-      ts-api-utils: 2.5.0(typescript@5.9.3)
-      typescript: 5.9.3
+      ts-api-utils: 2.5.0(typescript@6.0.3)
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)':
+  '@typescript-eslint/utils@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@10.9.1(jiti@2.7.0))
       '@typescript-eslint/scope-manager': 8.68.0
       '@typescript-eslint/types': 8.68.0
-      '@typescript-eslint/typescript-estree': 8.68.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.68.0(typescript@6.0.3)
       eslint: 10.9.1(jiti@2.7.0)
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -4664,28 +4669,28 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vee-validate/zod@4.15.1(vue@3.5.42(typescript@5.9.3))(zod@4.5.4)':
+  '@vee-validate/zod@4.15.1(vue@3.5.42(typescript@6.0.3))(zod@4.5.4)':
     dependencies:
       type-fest: 4.41.0
-      vee-validate: 4.15.1(vue@3.5.42(typescript@5.9.3))
+      vee-validate: 4.15.1(vue@3.5.42(typescript@6.0.3))
       zod: 4.5.4
     transitivePeerDependencies:
       - vue
 
-  '@vexip-ui/hooks@2.9.4(vue@3.5.42(typescript@5.9.3))':
+  '@vexip-ui/hooks@2.9.4(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@juggle/resize-observer': 3.4.0
       '@vexip-ui/utils': 2.16.4
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   '@vexip-ui/utils@2.16.4': {}
 
-  '@vitejs/plugin-vue@6.0.8(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@5.9.3))':
+  '@vitejs/plugin-vue@6.0.8(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0)
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   '@vitest/mocker@5.0.3(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))':
     dependencies:
@@ -4704,15 +4709,15 @@ snapshots:
 
   '@volar/source-map@2.4.28': {}
 
-  '@volar/typescript@2.4.28(typescript@5.9.3)':
+  '@volar/typescript@2.4.28(typescript@6.0.3)':
     dependencies:
       '@volar/language-core': 2.4.28
       path-browserify: 1.0.1
       vscode-uri: 3.2.0
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
-  '@vue-macros/common@3.1.4(vue@3.5.42(typescript@5.9.3))':
+  '@vue-macros/common@3.1.4(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@vue/compiler-sfc': 3.5.42
       ast-kit: 2.2.0
@@ -4720,7 +4725,7 @@ snapshots:
       magic-string-ast: 1.0.3
       unplugin-utils: 0.3.2
     optionalDependencies:
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   '@vue/compiler-core@3.5.42':
     dependencies:
@@ -4794,16 +4799,16 @@ snapshots:
     transitivePeerDependencies:
       - '@types/eslint'
 
-  '@vue/eslint-config-typescript@14.9.0(eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))))(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)':
+  '@vue/eslint-config-typescript@14.9.0(eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))))(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       eslint: 10.9.1(jiti@2.7.0)
-      eslint-plugin-vue: 10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0)))
+      eslint-plugin-vue: 10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0)))
       fast-glob: 3.3.3
-      typescript-eslint: 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      typescript-eslint: 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       vue-eslint-parser: 10.4.1(eslint@10.9.1(jiti@2.7.0))
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -4841,49 +4846,49 @@ snapshots:
 
   '@vue/shared@3.5.42': {}
 
-  '@vue/test-utils@2.5.0(@vue/compiler-dom@3.5.42)(@vue/server-renderer@3.5.42)(vue@3.5.42(typescript@5.9.3))':
+  '@vue/test-utils@2.5.0(@vue/compiler-dom@3.5.42)(@vue/server-renderer@3.5.42)(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@vue/compiler-dom': 3.5.42
       js-beautify: 2.0.3
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
       vue-component-type-helpers: 3.3.11
     optionalDependencies:
       '@vue/server-renderer': 3.5.42
 
-  '@vue/tsconfig@0.9.1(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))':
+  '@vue/tsconfig@0.9.1(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3))':
     optionalDependencies:
-      typescript: 5.9.3
-      vue: 3.5.42(typescript@5.9.3)
+      typescript: 6.0.3
+      vue: 3.5.42(typescript@6.0.3)
 
   '@vuedx/template-ast-types@0.7.1':
     dependencies:
       '@vue/compiler-core': 3.5.42
 
-  '@vueuse/core@14.4.0(vue@3.5.42(typescript@5.9.3))':
+  '@vueuse/core@14.4.0(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@types/web-bluetooth': 0.0.21
       '@vueuse/metadata': 14.4.0
-      '@vueuse/shared': 14.4.0(vue@3.5.42(typescript@5.9.3))
-      vue: 3.5.42(typescript@5.9.3)
+      '@vueuse/shared': 14.4.0(vue@3.5.42(typescript@6.0.3))
+      vue: 3.5.42(typescript@6.0.3)
 
-  '@vueuse/core@15.0.0(vue@3.5.42(typescript@5.9.3))':
+  '@vueuse/core@15.0.0(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@types/web-bluetooth': 0.0.21
       '@vueuse/metadata': 15.0.0
-      '@vueuse/shared': 15.0.0(vue@3.5.42(typescript@5.9.3))
-      vue: 3.5.42(typescript@5.9.3)
+      '@vueuse/shared': 15.0.0(vue@3.5.42(typescript@6.0.3))
+      vue: 3.5.42(typescript@6.0.3)
 
   '@vueuse/metadata@14.4.0': {}
 
   '@vueuse/metadata@15.0.0': {}
 
-  '@vueuse/shared@14.4.0(vue@3.5.42(typescript@5.9.3))':
+  '@vueuse/shared@14.4.0(vue@3.5.42(typescript@6.0.3))':
     dependencies:
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
-  '@vueuse/shared@15.0.0(vue@3.5.42(typescript@5.9.3))':
+  '@vueuse/shared@15.0.0(vue@3.5.42(typescript@6.0.3))':
     dependencies:
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   abbrev@5.0.0: {}
 
@@ -5294,7 +5299,7 @@ snapshots:
     optionalDependencies:
       eslint-config-prettier: 10.1.8(eslint@10.9.1(jiti@2.7.0))
 
-  eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))):
+  eslint-plugin-vue@10.10.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0))):
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@10.9.1(jiti@2.7.0))
       eslint: 10.9.1(jiti@2.7.0)
@@ -5305,7 +5310,7 @@ snapshots:
       vue-eslint-parser: 10.4.1(eslint@10.9.1(jiti@2.7.0))
       xml-name-validator: 5.0.0
     optionalDependencies:
-      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
 
   eslint-scope@9.1.2:
     dependencies:
@@ -5596,12 +5601,12 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  grid-layout-plus@1.1.1(vue@3.5.42(typescript@5.9.3)):
+  grid-layout-plus@1.1.1(vue@3.5.42(typescript@6.0.3)):
     dependencies:
-      '@vexip-ui/hooks': 2.9.4(vue@3.5.42(typescript@5.9.3))
+      '@vexip-ui/hooks': 2.9.4(vue@3.5.42(typescript@6.0.3))
       '@vexip-ui/utils': 2.16.4
       interactjs: 1.10.28
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   happy-dom@20.12.0:
     dependencies:
@@ -6205,13 +6210,13 @@ snapshots:
 
   picomatch@4.0.7: {}
 
-  pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3)):
+  pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3)):
     dependencies:
       '@vue/devtools-api': 8.2.1
       nostics: 1.2.0
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   pkce-challenge@5.0.1: {}
 
@@ -6415,19 +6420,19 @@ snapshots:
     dependencies:
       regex-utilities: 2.3.0
 
-  reka-ui@2.10.4(vue@3.5.42(typescript@5.9.3)):
+  reka-ui@2.10.4(vue@3.5.42(typescript@6.0.3)):
     dependencies:
       '@floating-ui/dom': 1.8.0
-      '@floating-ui/vue': 1.1.11(vue@3.5.42(typescript@5.9.3))
+      '@floating-ui/vue': 1.1.11(vue@3.5.42(typescript@6.0.3))
       '@internationalized/date': 3.12.3
       '@internationalized/number': 3.6.7
-      '@tanstack/vue-virtual': 3.13.36(vue@3.5.42(typescript@5.9.3))
-      '@vueuse/core': 14.4.0(vue@3.5.42(typescript@5.9.3))
-      '@vueuse/shared': 14.4.0(vue@3.5.42(typescript@5.9.3))
+      '@tanstack/vue-virtual': 3.13.36(vue@3.5.42(typescript@6.0.3))
+      '@vueuse/core': 14.4.0(vue@3.5.42(typescript@6.0.3))
+      '@vueuse/shared': 14.4.0(vue@3.5.42(typescript@6.0.3))
       aria-hidden: 1.2.6
       defu: 6.1.7
       ohash: 2.0.12
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
     transitivePeerDependencies:
       - '@vue/composition-api'
 
@@ -6532,7 +6537,7 @@ snapshots:
 
   setprototypeof@1.2.0: {}
 
-  shadcn-vue@2.8.2(eslint@10.9.1(jiti@2.7.0))(vue@3.5.42(typescript@5.9.3)):
+  shadcn-vue@2.8.2(eslint@10.9.1(jiti@2.7.0))(vue@3.5.42(typescript@6.0.3)):
     dependencies:
       '@dotenvx/dotenvx': 2.23.0
       '@modelcontextprotocol/sdk': 1.31.0(zod@3.25.76)
@@ -6557,7 +6562,7 @@ snapshots:
       postcss: 8.5.26
       postcss-selector-parser: 7.1.5
       prompts: 2.4.2
-      reka-ui: 2.10.4(vue@3.5.42(typescript@5.9.3))
+      reka-ui: 2.10.4(vue@3.5.42(typescript@6.0.3))
       semver: 7.8.5
       stringify-object: 7.0.0
       tailwindcss: 4.3.3
@@ -6773,9 +6778,9 @@ snapshots:
 
   trim-lines@3.0.1: {}
 
-  ts-api-utils@2.5.0(typescript@5.9.3):
+  ts-api-utils@2.5.0(typescript@6.0.3):
     dependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   ts-morph@28.0.0:
     dependencies:
@@ -6800,18 +6805,20 @@ snapshots:
       media-typer: 1.1.1
       mime-types: 3.0.2
 
-  typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3):
+  typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3))(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
-      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
-      '@typescript-eslint/typescript-estree': 8.68.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3))(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
+      '@typescript-eslint/parser': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
+      '@typescript-eslint/typescript-estree': 8.68.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@6.0.3)
       eslint: 10.9.1(jiti@2.7.0)
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
   typescript@5.9.3: {}
+
+  typescript@6.0.3: {}
 
   uc.micro@3.0.0: {}
 
@@ -6885,11 +6892,11 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vee-validate@4.15.1(vue@3.5.42(typescript@5.9.3)):
+  vee-validate@4.15.1(vue@3.5.42(typescript@6.0.3)):
     dependencies:
       '@vue/devtools-api': 7.7.10
       type-fest: 4.41.0
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   vfile-message@4.0.3:
     dependencies:
@@ -6941,14 +6948,14 @@ snapshots:
 
   vue-component-type-helpers@3.3.11: {}
 
-  vue-demi@0.14.10(vue@3.5.42(typescript@5.9.3)):
+  vue-demi@0.14.10(vue@3.5.42(typescript@6.0.3)):
     dependencies:
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
-  vue-echarts@8.3.0(echarts@6.1.0)(vue@3.5.42(typescript@5.9.3)):
+  vue-echarts@8.3.0(echarts@6.1.0)(vue@3.5.42(typescript@6.0.3)):
     dependencies:
       echarts: 6.1.0
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
 
   vue-eslint-parser@10.4.1(eslint@10.9.1(jiti@2.7.0)):
     dependencies:
@@ -6988,9 +6995,9 @@ snapshots:
       - eslint
       - supports-color
 
-  vue-router@5.3.0(@vue/compiler-sfc@3.5.42)(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3)))(rolldown@1.2.6)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@5.9.3)):
+  vue-router@5.3.0(@vue/compiler-sfc@3.5.42)(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3)))(rolldown@1.2.6)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))(vue@3.5.42(typescript@6.0.3)):
     dependencies:
-      '@vue-macros/common': 3.1.4(vue@3.5.42(typescript@5.9.3))
+      '@vue-macros/common': 3.1.4(vue@3.5.42(typescript@6.0.3))
       '@vue/devtools-api': 8.2.1
       ast-walker-scope: 0.9.0
       chokidar: 5.0.0
@@ -7006,10 +7013,10 @@ snapshots:
       tinyglobby: 0.2.17
       unplugin: 3.3.0(rolldown@1.2.6)(vite@8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0))
       unplugin-utils: 0.3.2
-      vue: 3.5.42(typescript@5.9.3)
+      vue: 3.5.42(typescript@6.0.3)
     optionalDependencies:
       '@vue/compiler-sfc': 3.5.42
-      pinia: 4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))
+      pinia: 4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.42(typescript@6.0.3))
       vite: 8.2.2(@types/node@26.4.0)(jiti@2.7.0)(stylus@0.57.0)
     transitivePeerDependencies:
       - '@farmfe/core'
@@ -7023,13 +7030,13 @@ snapshots:
 
   vue-sonner@2.0.9: {}
 
-  vue-tsc@3.3.11(typescript@5.9.3):
+  vue-tsc@3.3.11(typescript@6.0.3):
     dependencies:
-      '@volar/typescript': 2.4.28(typescript@5.9.3)
+      '@volar/typescript': 2.4.28(typescript@6.0.3)
       '@vue/language-core': 3.3.11
-      typescript: 5.9.3
+      typescript: 6.0.3
 
-  vue@3.5.42(typescript@5.9.3):
+  vue@3.5.42(typescript@6.0.3):
     dependencies:
       '@vue/compiler-dom': 3.5.42
       '@vue/compiler-sfc': 3.5.42
@@ -7037,7 +7044,7 @@ snapshots:
       '@vue/server-renderer': 3.5.42
       '@vue/shared': 3.5.42
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   w3c-keyname@2.2.8: {}
 
