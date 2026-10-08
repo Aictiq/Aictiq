@@ -78,6 +78,7 @@ const skipReasonText: Record<string, string> = {
   invalid: 'Skipped: invalid',
   'rule-loop': "Skipped: its own run moved the item here",
   'project-read-only': 'Skipped: the project is read-only',
+  'org-read-only': 'Skipped: the organization is read-only',
 }
 
 export function ruleSkipReasonText(reason: string): string {

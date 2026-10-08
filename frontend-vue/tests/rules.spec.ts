@@ -92,6 +92,11 @@ describe('ruleSkipReasonText', () => {
     expect(ruleSkipReasonText('rule-loop')).toBe('Skipped: its own run moved the item here')
   })
 
+  it('knows both read-only reasons the backend records', () => {
+    expect(ruleSkipReasonText('project-read-only')).toBe('Skipped: the project is read-only')
+    expect(ruleSkipReasonText('org-read-only')).toBe('Skipped: the organization is read-only')
+  })
+
   it('falls back to the raw reason for one this build does not know', () => {
     expect(ruleSkipReasonText('some-new-reason')).toBe('Skipped: some-new-reason')
   })
