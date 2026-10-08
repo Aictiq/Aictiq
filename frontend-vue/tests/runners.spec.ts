@@ -1,7 +1,11 @@
+import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
+import RunnerLoad from '@/components/factory/RunnerLoad.vue'
 import {
   deleteRunner,
+  getRunnerLoad,
   listRunnerMachinesElsewhere,
   listRunners,
   registerRunner,
@@ -9,10 +13,16 @@ import {
   rotateRunner,
   updateRunner,
   type Runner,
+  type RunnerLoadEntry,
   type RunnerUsageLimits,
 } from '@/api/runners'
 import {
   claudeUsagePollHint,
+  loadBarClass,
+  loadFor,
+  loadLabel,
+  loadLevel,
+  loadPercent,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
@@ -20,6 +30,7 @@ import {
   usageLimitsForRun,
   usageSummary,
   usageWindowStale,
+  waitingSummary,
 } from '@/lib/runners'
 import { factoryLinks, factoryPath, factoryRunPath, factorySetupPath } from '@/router/paths'
 
@@ -251,5 +262,134 @@ describe('harness usage limits', () => {
     expect(usageLimitsForRun(runners, 'claude')?.runner).toBe('laptop')
     expect(usageLimitsForRun(runners, 'codex')).toBeNull()
     expect(usageLimitsForRun(runners, null)).toBeNull()
+  })
+})
+
+describe('runner load', () => {
+  const now = new Date('2026-10-08T12:00:00Z')
+
+  const entry = (overrides: Partial<RunnerLoadEntry> = {}): RunnerLoadEntry => ({
+    runnerId: 'r1',
+    running: 0,
+    queued: 0,
+    scheduled: 0,
+    nextScheduledFor: null,
+    active: [],
+    ...overrides,
+  })
+
+  it('reads the load from the roster', async () => {
+    const fetchMock = stubFetch({ runners: [], unassignedQueued: 0, unassignedScheduled: 0 })
+    await getRunnerLoad('acme')
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/v1/orgs/acme/runners/load')
+  })
+
+  it('fills the bar by slots: idle, busy, full', () => {
+    expect([loadPercent(2, 4), loadLabel(2, 4), loadLevel(2, 4)]).toEqual([
+      50,
+      '2 / 4 running',
+      'busy',
+    ])
+    expect([loadPercent(0, 4), loadLabel(0, 4), loadLevel(0, 4)]).toEqual([0, 'idle', 'idle'])
+    expect([loadPercent(4, 4), loadLevel(4, 4)]).toEqual([100, 'full'])
+    // More runs than slots after --parallel shrank is still a full bar, not an overflow.
+    expect([loadPercent(5, 4), loadLevel(5, 4)]).toEqual([100, 'full'])
+    expect(loadBarClass('full', false)).toBe('bg-amber-500')
+    expect(loadBarClass('busy', false)).toBe('bg-success')
+    expect(loadBarClass('full', true)).toBe('bg-muted-foreground/40')
+  })
+
+  it('says what waits, and when the next scheduled run starts', () => {
+    expect(waitingSummary(0, 0, null, now)).toBe('')
+    expect(waitingSummary(1, 0, null, now)).toBe('1 queued')
+    expect(waitingSummary(2, 3, '2026-10-08T14:00:00Z', now)).toBe(
+      '2 queued · 3 scheduled · next in 2h',
+    )
+    expect(waitingSummary(0, 1, '2026-10-08T12:30:00Z', now)).toBe('1 scheduled · next in 30m')
+    expect(waitingSummary(0, 1, '2026-10-11T12:00:00Z', now)).toBe('1 scheduled · next in 3d')
+  })
+
+  it('gives a runner with no live runs an empty load', () => {
+    const load = {
+      runners: [entry({ runnerId: 'r1', running: 2 })],
+      unassignedQueued: 0,
+      unassignedScheduled: 0,
+      nextUnassignedScheduledFor: null,
+    }
+    expect(loadFor(load, 'r1').running).toBe(2)
+    expect(loadFor(load, 'r2')).toEqual(entry({ runnerId: 'r2' }))
+    expect(loadFor(null, 'r1')).toEqual(entry())
+  })
+
+  async function mountLoad(props: { entry: RunnerLoadEntry; slots: number; muted?: boolean }) {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    return mount(RunnerLoad, {
+      props: { slug: 'acme', runnerName: 'vps-1', muted: false, ...props },
+      global: { plugins: [router] },
+    })
+  }
+
+  it('draws an accessible meter and links each active run', async () => {
+    const wrapper = await mountLoad({
+      slots: 4,
+      entry: entry({
+        running: 2,
+        queued: 1,
+        active: [
+          {
+            id: 'a1',
+            itemKey: 'WEB-1',
+            playbookName: 'Implement',
+            status: 'running',
+            startedAt: null,
+          },
+          { id: 'a2', itemKey: 'WEB-2', playbookName: null, status: 'assigned', startedAt: null },
+        ],
+      }),
+    })
+    const meter = wrapper.get('[role="meter"]')
+    expect(meter.attributes('aria-label')).toBe('Slots in use on vps-1')
+    expect(meter.attributes('aria-valuenow')).toBe('2')
+    expect(meter.attributes('aria-valuemax')).toBe('4')
+    expect(meter.get('span').attributes('style')).toContain('width: 50%')
+    expect(wrapper.text()).toContain('2 / 4 running')
+    expect(wrapper.get('[data-testid="runner-waiting"]').text()).toBe('1 queued')
+    const link = wrapper.get('[data-testid="runner-active-run-a1"]')
+    expect(link.attributes('href')).toBe('/o/acme/factory/runs/a1')
+    expect(link.attributes('title')).toBe('WEB-1 · Implement')
+  })
+
+  it('links the rest to Runs filtered by the runner once there are too many', async () => {
+    const active = ['a', 'b', 'c', 'd', 'e'].map((id) => ({
+      id,
+      itemKey: `WEB-${id}`,
+      playbookName: null,
+      status: 'running' as const,
+      startedAt: null,
+    }))
+    const wrapper = await mountLoad({ slots: 5, entry: entry({ running: 5, active }) })
+    expect(wrapper.get('[data-testid="runner-load"]').attributes('data-level')).toBe('full')
+    expect(wrapper.findAll('[data-testid^="runner-active-run-"]')).toHaveLength(3)
+    const more = wrapper.findAll('a').at(-1)!
+    expect(more.text()).toBe('+2 more')
+    expect(more.attributes('href')).toBe('/o/acme/factory/runs?runner=r1')
+  })
+
+  it('mutes an idle or offline runner but still says what waits for it', async () => {
+    const wrapper = await mountLoad({
+      slots: 2,
+      muted: true,
+      entry: entry({
+        scheduled: 1,
+        nextScheduledFor: new Date(Date.now() + 2 * 3_600_000).toISOString(),
+      }),
+    })
+    expect(wrapper.text()).toContain('idle')
+    expect(wrapper.get('[role="meter"] span').classes()).toContain('bg-muted-foreground/40')
+    expect(wrapper.get('[data-testid="runner-waiting"]').text()).toBe('1 scheduled · next in 2h')
   })
 })

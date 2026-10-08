@@ -1,4 +1,10 @@
-import type { Runner, RunnerCapabilities, RunnerUsageLimits } from '@/api/runners'
+import type {
+  Runner,
+  RunnerCapabilities,
+  RunnerLoad,
+  RunnerLoadEntry,
+  RunnerUsageLimits,
+} from '@/api/runners'
 
 /**
  * The rules the Runners tab shows, kept out of the component so they can be tested: what
@@ -212,5 +218,74 @@ export function usageSummary(limits: RunnerUsageLimits, now: Date = new Date()):
   const reset = limits.weekly?.resetsAt
   if (reset && !usageWindowStale(limits, 'weekly', now))
     parts.push(`resets ${usageResetLabel(reset)}`)
+  return parts.join(' · ')
+}
+
+// ── Load ─────────────────────────────────────────────────────────────────────────
+
+export type LoadLevel = 'idle' | 'busy' | 'full'
+
+/** Idle with nothing running, full when every slot is taken, busy in between. */
+export function loadLevel(running: number, slots: number): LoadLevel {
+  if (running <= 0) return 'idle'
+  return running >= slots ? 'full' : 'busy'
+}
+
+/**
+ * The load bar's fill: green while there is a free slot, like the online dot; amber when every
+ * slot is taken, so new work will wait; greyed out when the runner cannot work.
+ */
+export function loadBarClass(level: LoadLevel, muted: boolean): string {
+  if (muted) return 'bg-muted-foreground/40'
+  return level === 'full' ? 'bg-amber-500' : 'bg-success'
+}
+
+/** `2 / 4 running`, or `idle` with nothing running. */
+export function loadLabel(running: number, slots: number): string {
+  return running > 0 ? `${running} / ${slots} running` : 'idle'
+}
+
+/** The share of slots taken, 0 to 100; more runs than slots (after `--parallel` shrank) is full. */
+export function loadPercent(running: number, slots: number): number {
+  return slots > 0 ? Math.min(100, Math.round((running / slots) * 100)) : 0
+}
+
+/** `in 45m`, `in 2h`, `in 3d`: how long until a scheduled run may start. */
+export function startsIn(iso: string, now: Date = new Date()): string {
+  const minutes = Math.max(0, Math.round((new Date(iso).getTime() - now.getTime()) / 60_000))
+  if (minutes < 1) return 'now'
+  if (minutes < 60) return `in ${minutes}m`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `in ${hours}h`
+  return `in ${Math.round(hours / 24)}d`
+}
+
+const noLoad: RunnerLoadEntry = {
+  runnerId: '',
+  running: 0,
+  queued: 0,
+  scheduled: 0,
+  nextScheduledFor: null,
+  active: [],
+}
+
+/** One runner's load, or nothing running and nothing waiting when it has no live runs. */
+export function loadFor(load: RunnerLoad | null, runnerId: string): RunnerLoadEntry {
+  return load?.runners.find((entry) => entry.runnerId === runnerId) ?? { ...noLoad, runnerId }
+}
+
+/** `1 queued · 3 scheduled · next in 2h`; empty when nothing waits. */
+export function waitingSummary(
+  queued: number,
+  scheduled: number,
+  nextScheduledFor: string | null,
+  now: Date = new Date(),
+): string {
+  const parts: string[] = []
+  if (queued > 0) parts.push(`${queued} queued`)
+  if (scheduled > 0) {
+    parts.push(`${scheduled} scheduled`)
+    if (nextScheduledFor) parts.push(`next ${startsIn(nextScheduledFor, now)}`)
+  }
   return parts.join(' · ')
 }

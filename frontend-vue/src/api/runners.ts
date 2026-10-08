@@ -1,3 +1,4 @@
+import type { RunStatus } from '@/api/runs'
 import { apiFetch } from '@/utils/api'
 
 /**
@@ -122,6 +123,42 @@ export interface RunnerMachine {
 }
 
 export const listRunners = (slug: string) => apiFetch<Runner[]>(`/orgs/${slug}/runners`)
+
+/** A run a runner holds right now. */
+export interface RunnerActiveRun {
+  id: string
+  itemKey: string
+  playbookName: string | null
+  status: RunStatus
+  startedAt: string | null
+}
+
+/** What one runner is doing and what waits for it. */
+export interface RunnerLoadEntry {
+  runnerId: string
+  /** Runs it holds (assigned or running), out of its `maxParallel` slots. */
+  running: number
+  /** Due runs sent to this runner, waiting for a slot. */
+  queued: number
+  /** Runs sent to this runner, scheduled for later. */
+  scheduled: number
+  nextScheduledFor: string | null
+  /** The runs it holds, oldest first. */
+  active: RunnerActiveRun[]
+}
+
+/**
+ * How busy the roster is, from the live runs in projects the caller can see. Runners with
+ * nothing live are left out; runs for any runner are counted once, for the organization.
+ */
+export interface RunnerLoad {
+  runners: RunnerLoadEntry[]
+  unassignedQueued: number
+  unassignedScheduled: number
+  nextUnassignedScheduledFor: string | null
+}
+
+export const getRunnerLoad = (slug: string) => apiFetch<RunnerLoad>(`/orgs/${slug}/runners/load`)
 
 /**
  * A runner as someone starting a run sees it. Open to factory operators, not only Admins,
