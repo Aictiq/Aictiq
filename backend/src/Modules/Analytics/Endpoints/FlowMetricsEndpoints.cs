@@ -52,7 +52,12 @@ public static class FlowMetricsEndpoints
         var earliest = await history.EarliestAsync(tenant.OrganizationId!.Value, ct);
         if (start < earliest) start = earliest;
         if (end < start) return Results.Ok(new CumulativeFlowView([], earliest));
-        var projectId = http.ResolvedProjectId()!.Value;
+        return Results.Ok(await BuildFlowAsync(analytics, work, http.ResolvedProjectId()!.Value, start, end, team, typeFilter, earliest, ct));
+    }
+
+    internal static async Task<CumulativeFlowView> BuildFlowAsync(AnalyticsDbContext analytics, WorkItemsDbContext work, Guid projectId,
+        DateOnly start, DateOnly end, Guid? team, HashSet<WorkItemType>? typeFilter, DateOnly earliest, CancellationToken ct)
+    {
         var states = await work.WorkflowStates.AsNoTracking().ToDictionaryAsync(state => state.Id, state => state.Category, ct);
         var snapshots = await analytics.ItemStateDaily.AsNoTracking().Where(row => row.ProjectId == projectId && row.Day >= start && row.Day <= end).ToListAsync(ct);
         var itemTypes = typeFilter is null && team is null ? null : await work.Items.AsNoTracking().Where(item => item.ProjectId == projectId)
@@ -65,7 +70,7 @@ public static class FlowMetricsEndpoints
                 .ToDictionary(group => group.Key, group => group.Count());
             return new CumulativeFlowDay(day, counts);
         }).ToList();
-        return Results.Ok(new CumulativeFlowView(days, earliest));
+        return new CumulativeFlowView(days, earliest);
     }
 
     private static async Task<IResult> CycleTime(HttpContext http, DateOnly? from, DateOnly? to, Guid? team, string? types, string? groupBy,
@@ -77,7 +82,12 @@ public static class FlowMetricsEndpoints
         var earliest = await history.EarliestAsync(tenant.OrganizationId!.Value, ct);
         if (start < earliest) start = earliest;
         if (end < start) return Results.Ok(new CycleTimeView(Summary([]), Summary([]), [], [], earliest));
-        var projectId = http.ResolvedProjectId()!.Value;
+        return Results.Ok(await BuildCycleTimeAsync(analytics, work, http.ResolvedProjectId()!.Value, start, end, team, typeFilter, earliest, ct));
+    }
+
+    internal static async Task<CycleTimeView> BuildCycleTimeAsync(AnalyticsDbContext analytics, WorkItemsDbContext work, Guid projectId,
+        DateOnly start, DateOnly end, Guid? team, HashSet<WorkItemType>? typeFilter, DateOnly earliest, CancellationToken ct)
+    {
         var states = await work.WorkflowStates.AsNoTracking().ToDictionaryAsync(state => state.Id, state => state.Category, ct);
         var items = await work.Items.AsNoTracking().Where(item => item.ProjectId == projectId && (team == null || item.TeamId == team)
             && (typeFilter == null || typeFilter.Contains(item.Type))).Select(item => new { item.Id, Key = item.ProjectKey + "-" + item.Number, item.CreatedAt, item.AssigneeId, item.Type }).ToListAsync(ct);
@@ -97,8 +107,8 @@ public static class FlowMetricsEndpoints
         }
         var throughput = points.GroupBy(row => Week(row.Completed)).OrderBy(group => group.Key).Select(group =>
             new ThroughputPoint(group.Key, group.Count(), 0, group.Count())).ToList();
-        return Results.Ok(new CycleTimeView(Summary(points.Select(row => row.Point.LeadDays)), Summary(points.Select(row => row.Point.CycleDays)),
-            points.Select(row => row.Point).OrderBy(row => row.ItemKey).ToList(), throughput, earliest));
+        return new CycleTimeView(Summary(points.Select(row => row.Point.LeadDays)), Summary(points.Select(row => row.Point.CycleDays)),
+            points.Select(row => row.Point).OrderBy(row => row.ItemKey).ToList(), throughput, earliest);
     }
 
     internal static CycleMetricSummary Summary(IEnumerable<decimal> source)
