@@ -30,6 +30,7 @@ import {
 import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
 import { avatarUrl } from '@/api/profile'
+import { addItemLabel, listLabels, removeItemLabel, type Label } from '@/api/labels'
 import { listItemRuns } from '@/api/runs'
 import { getProject, hasProjectRole, listProjectMembers } from '@/api/projects'
 import { createGitHubBranch, listGitHubBindings } from '@/api/github'
@@ -37,6 +38,8 @@ import { listLinks, listRelations } from '@/api/relations'
 import { listWorkflows } from '@/api/workflows'
 import ClaimBanner from '@/components/common/ClaimBanner.vue'
 import DeleteConfirmDialog from '@/components/common/DeleteConfirmDialog.vue'
+import LabelChip from '@/components/common/LabelChip.vue'
+import LabelPicker from '@/components/common/LabelPicker.vue'
 import Markdown from '@/components/common/Markdown.vue'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
@@ -289,6 +292,22 @@ const saving = ref(false)
 const conflict = ref(false)
 const changingAssignee = ref(false)
 const assigneeError = ref<string | null>(null)
+// ── Labels ──────────────────────────────────────────────────────────────────────────
+// Applied one at a time through the item-scoped endpoints, which leave the item's version
+// alone, so labelling never races a pending title or description edit into a 409.
+const mayLabel = computed(
+  () =>
+    hasProjectRole(project.data.value?.role ?? 'guest', 'member') &&
+    !project.data.value?.isArchived,
+)
+const projectLabels = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'labels']),
+  queryFn: () => listLabels(props.slug, props.projectKey),
+  enabled: mayLabel,
+})
+const itemLabelIds = computed(() => currentItem.value?.labels.map((label) => label.id) ?? [])
+const savingLabels = ref(false)
+const labelsError = ref<string | null>(null)
 const priorities: { value: WorkItemPriority; label: string }[] = [
   { value: 'none', label: 'No priority' },
   { value: 'low', label: 'Low' },
@@ -636,6 +655,59 @@ async function changeAssignee(event: Event) {
   } finally {
     changingAssignee.value = false
   }
+}
+function onLabelCreated(label: Label) {
+  client.setQueryData<Label[]>([props.slug, props.projectKey, 'labels'], (labels) =>
+    labels ? [...labels, label] : [label],
+  )
+}
+/**
+ * The picker stays open for several picks in a row, so the item is updated optimistically
+ * and the writes are chained: a quick add-then-remove of one label must reach the server
+ * in that order. Any failure drops the optimistic copy and refetches the real one.
+ */
+let labelWrites = Promise.resolve()
+function changeLabels(next: string[]) {
+  const current = item.data.value
+  if (!current) return
+  const before = current.labels.map((label) => label.id)
+  const added = next.filter((id) => !before.includes(id))
+  const removed = before.filter((id) => !next.includes(id))
+  if (!added.length && !removed.length) return
+  const known = new Map(
+    [...current.labels, ...(projectLabels.data.value ?? [])].map((label) => [label.id, label]),
+  )
+  client.setQueryData<WorkItem>([props.slug, props.itemKey], {
+    ...current,
+    labels: next.flatMap((id) => {
+      const label = known.get(id)
+      return label
+        ? [{ id: label.id, name: label.name, color: label.color, group: label.group }]
+        : []
+    }),
+  })
+  labelsError.value = null
+  savingLabels.value = true
+  const write = labelWrites.then(async () => {
+    try {
+      await Promise.all([
+        ...added.map((id) => addItemLabel(props.slug, current.key, id)),
+        ...removed.map((id) => removeItemLabel(props.slug, current.key, id)),
+      ])
+    } catch (error) {
+      labelsError.value = toApiError(error).title
+      await client.invalidateQueries({ queryKey: [props.slug, props.itemKey], exact: true })
+    }
+  })
+  labelWrites = write
+  void write.then(async () => {
+    if (labelWrites !== write) return
+    savingLabels.value = false
+    await Promise.all([
+      invalidateLists(current),
+      client.invalidateQueries({ queryKey: [props.slug, props.projectKey, 'labels'] }),
+    ])
+  })
 }
 const acceptedFiles = attachmentAccept
 // The item exists, so a description's file is committed to it straight away.
@@ -1351,6 +1423,33 @@ function logged(updated: TimeTrackingItem) {
           Updating assignment…
         </p>
         <p v-else-if="assigneeError" class="text-destructive mt-1 text-xs">{{ assigneeError }}</p>
+      </div>
+      <div class="rounded-md border p-3">
+        <p class="font-label">Labels</p>
+        <LabelPicker
+          v-if="mayLabel"
+          class="mt-2"
+          :model-value="itemLabelIds"
+          :labels="projectLabels.data.value ?? []"
+          :slug="slug"
+          :project-key="projectKey"
+          can-create
+          :disabled="projectLabels.isPending.value"
+          @update:model-value="changeLabels"
+          @created="onLabelCreated"
+        />
+        <div v-else-if="currentItem.labels.length" class="mt-2 flex flex-wrap gap-1.5">
+          <LabelChip
+            v-for="label in currentItem.labels"
+            :key="label.id"
+            :name="label.name"
+            :color="label.color"
+            :group="label.group"
+          />
+        </div>
+        <p v-else class="text-muted-foreground mt-2 text-sm">None</p>
+        <p v-if="savingLabels" class="text-muted-foreground mt-1 text-xs">Saving labels…</p>
+        <p v-else-if="labelsError" class="text-destructive mt-1 text-xs">{{ labelsError }}</p>
       </div>
       <div
         v-if="
