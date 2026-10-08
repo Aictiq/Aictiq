@@ -12,7 +12,7 @@ namespace Aictiq.Modules.WorkItems.Endpoints;
 /// The rule is <see cref="IProjectAccess.CanOperateFactoryAsync"/>, the same door runs and
 /// their logs already stand behind, so the two can never disagree about who is let in.
 /// </summary>
-internal static class FactoryVisibility
+public static class FactoryVisibility
 {
     /// <summary>
     /// The agents whose comments this caller may not see, or null when they may see
