@@ -156,9 +156,13 @@ function usageOf(event: Record<string, unknown>): Record<string, unknown> | null
 /** Day directories looked through for a session's rollout, newest first: a resume appends to the original. */
 const MaxRolloutDays = 60
 
-/** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl`. */
-function rolloutFile(sessionId: string): string | null {
-  const sessions = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')
+/** `$CODEX_HOME/sessions`, where Codex keeps a rollout file per session. */
+export function codexSessionsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')
+}
+
+/** `sessions/YYYY/MM/DD` directories, newest first, at most `max` of them. */
+export function rolloutDays(sessions: string, max: number): string[] {
   const newestFirst = (dir: string) => {
     try {
       return readdirSync(dir).filter((name) => /^\d+$/.test(name)).sort().reverse()
@@ -166,19 +170,26 @@ function rolloutFile(sessionId: string): string | null {
       return []
     }
   }
-  let days = 0
+  const days: string[] = []
   for (const year of newestFirst(sessions)) {
     for (const month of newestFirst(join(sessions, year))) {
       for (const day of newestFirst(join(sessions, year, month))) {
-        if (++days > MaxRolloutDays) return null
-        const dir = join(sessions, year, month, day)
-        try {
-          const name = readdirSync(dir).find((file) => file.endsWith(`-${sessionId}.jsonl`))
-          if (name) return join(dir, name)
-        } catch {
-          // Removed meanwhile.
-        }
+        if (days.length >= max) return days
+        days.push(join(sessions, year, month, day))
       }
+    }
+  }
+  return days
+}
+
+/** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl`. */
+function rolloutFile(sessionId: string): string | null {
+  for (const dir of rolloutDays(codexSessionsDir(), MaxRolloutDays)) {
+    try {
+      const name = readdirSync(dir).find((file) => file.endsWith(`-${sessionId}.jsonl`))
+      if (name) return join(dir, name)
+    } catch {
+      // Removed meanwhile.
     }
   }
   return null
@@ -188,7 +199,7 @@ function rolloutFile(sessionId: string): string | null {
  * `rate_limits` on a `token_count` event: `primary` and `secondary` windows, told apart by their
  * length (300 minutes, 10080 minutes) rather than their order.
  */
-function limitsOf(event: Record<string, unknown>): ParsedLine['limits'] | null {
+export function limitsOf(event: Record<string, unknown>): ParsedLine['limits'] | null {
   const payload = recordOf(event.payload)
   const rateLimits = recordOf(event.rate_limits) ?? recordOf(payload?.rate_limits)
   if (!rateLimits) return null

@@ -184,6 +184,7 @@ aictiq runner map ACME --remove [--org <slug>]
 aictiq runner remove <org>            # stop running for one organization on this machine
 aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
 aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>] [--no-auto-update]
+aictiq runner usage [--claude-oauth on|off] # stored 5-hour and weekly usage; opt in to the live Claude poll
 aictiq runner update                  # install the latest @aictiq/cli now and report old → new
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
@@ -195,8 +196,8 @@ never gets from a shell profile (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bi
 `~/.opencode/bin`, `$NVM_BIN`, pnpm's home, the directory of the Node.js running it, and
 Homebrew's on macOS), so a harness installed there after the service was set up is found at
 the next heartbeat. `status` lists every known harness it did not find with the reason (not
-on `PATH`, or `--version` failed) and the `PATH` it searched; the runner reports the same to
-the Factory runner page. Each run gets
+on `PATH`, or `--version` failed) and the `PATH` it searched. The runner reports the same to
+the instance, but the Factory runner page does not show missing harnesses. Each run gets
 `~/.local/share/aictiq/runner/<run-id>/`: `repo/` is a git worktree of the mapped clone (or
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
 MCP configuration sit beside it, outside anything the agent could commit. The harness runs

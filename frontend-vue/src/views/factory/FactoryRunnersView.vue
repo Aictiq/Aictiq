@@ -44,10 +44,12 @@ import { useToast } from '@/composables/useToast'
 import { planLimitRefusal, type PlanLimitRefusal } from '@/lib/billing'
 import { since } from '@/lib/claims'
 import {
+  claudeUsagePollCommand,
+  claudeUsagePollDocsUrl,
+  claudeUsagePollHint,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
-  runnerMissingHarnessLabel,
   runnerStatus,
   runnerStatusLabel,
   usageLimitsFor,
@@ -91,7 +93,9 @@ function usageRows(runner: Runner) {
     limits: usageLimitsFor(runner.capabilities?.usageLimits, harness.name),
   }))
   return {
-    reported: rows.flatMap((row) => (row.limits ? [{ harness: row.harness, limits: row.limits }] : [])),
+    reported: rows.flatMap((row) =>
+      row.limits ? [{ harness: row.harness, limits: row.limits }] : [],
+    ),
     unavailable: rows.filter((row) => !row.limits).map((row) => row.harness),
   }
 }
@@ -501,9 +505,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                     >
                       {{ usagePercent(limits[kind]!.usedPercent) }}
                     </span>
-                    <span
-                      v-if="usageWindowStale(limits, kind)"
-                      class="text-muted-foreground italic"
+                    <span v-if="usageWindowStale(limits, kind)" class="text-muted-foreground italic"
                       >stale</span
                     >
                   </span>
@@ -530,6 +532,22 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                   >: {{ usageRows(runner).unavailable.join(', ') }}</template
                 >
               </li>
+              <li
+                v-if="claudeUsagePollHint(runner.capabilities)"
+                class="text-muted-foreground/70"
+                data-testid="runner-usage-claude-hint"
+              >
+                Claude usage is updated after runs only. Live usage: run
+                <code class="font-mono">{{ claudeUsagePollCommand }}</code> on this machine.
+                <a
+                  :href="claudeUsagePollDocsUrl"
+                  target="_blank"
+                  rel="noopener"
+                  class="underline underline-offset-2"
+                  title="The runner reads Claude Code's OAuth token on that machine and sends it only to api.anthropic.com. Only the percentages and reset times reach Aictiq."
+                  >What it sends</a
+                >
+              </li>
             </ul>
             <p
               v-if="runner.capabilities?.updateFailure"
@@ -540,26 +558,6 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               {{ since(runner.capabilities.updateFailure.at) }}:
               {{ runner.capabilities.updateFailure.error }}
             </p>
-            <details
-              v-if="runner.capabilities?.missingHarnesses?.length"
-              class="text-muted-foreground mt-1 text-[11px]"
-            >
-              <summary class="cursor-pointer select-none">
-                {{ runner.capabilities.missingHarnesses.length }} known
-                {{ runner.capabilities.missingHarnesses.length === 1 ? 'harness' : 'harnesses' }}
-                not found
-              </summary>
-              <ul class="mt-1 space-y-0.5 pl-3">
-                <li v-for="missing in runner.capabilities.missingHarnesses" :key="missing.name">
-                  <span class="font-mono">{{ missing.name }}</span
-                  >:
-                  {{ runnerMissingHarnessLabel(missing) }}
-                </li>
-              </ul>
-              <p v-if="runner.capabilities.path" class="mt-1 pl-3 break-all">
-                PATH: <span class="font-mono">{{ runner.capabilities.path }}</span>
-              </p>
-            </details>
           </div>
 
           <Loader2

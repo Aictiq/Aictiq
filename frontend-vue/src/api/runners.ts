@@ -72,6 +72,8 @@ export interface RunnerCapabilities {
   updateFailure?: RunnerUpdateFailure | null
   /** Harness allowances seen in runs. Absent from older runners and until a run reports one. */
   usageLimits?: RunnerUsageLimits[] | null
+  /** Claude usage is read from Anthropic between runs (`aictiq runner usage --claude-oauth on`). */
+  claudeUsagePoll?: boolean | null
 }
 
 export interface Runner {

@@ -1,4 +1,4 @@
-import type { Runner, RunnerMissingHarness, RunnerUsageLimits } from '@/api/runners'
+import type { Runner, RunnerCapabilities, RunnerUsageLimits } from '@/api/runners'
 
 /**
  * The rules the Runners tab shows, kept out of the component so they can be tested: what
@@ -22,13 +22,6 @@ export const runnerStatusLabel: Record<RunnerStatus, string> = {
   offline: 'Offline',
   never: 'Waiting for first contact',
   disabled: 'Disabled',
-}
-
-/** Why a runner does not offer a harness, in the words of what to check on the machine. */
-export function runnerMissingHarnessLabel(missing: RunnerMissingHarness): string {
-  return missing.reason === 'version-failed'
-    ? `${missing.command} is on PATH, but \`${missing.command} --version\` failed`
-    : `${missing.command} is not on the runner's PATH`
 }
 
 /**
@@ -161,6 +154,23 @@ export function usageResetLabel(iso: string, withTime = false): string {
   return withTime
     ? `${day} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
     : day
+}
+
+/** What the Claude usage poll is and what it sends where, in the public guide. */
+export const claudeUsagePollDocsUrl =
+  'https://aictiq.github.io/Aictiq/harness-usage-limits#live-claude-usage'
+
+export const claudeUsagePollCommand = 'aictiq runner usage --claude-oauth on'
+
+/**
+ * Whether to say that a runner's Claude usage only moves after runs, and how to make it live: it
+ * offers Claude and has not turned the opt-in poll on (runners before 0.9.1 report nothing).
+ */
+export function claudeUsagePollHint(
+  capabilities: Pick<RunnerCapabilities, 'harnesses' | 'claudeUsagePoll'> | null | undefined,
+): boolean {
+  if (!capabilities?.harnesses.some((harness) => harness.name === 'claude')) return false
+  return capabilities.claudeUsagePoll !== true
 }
 
 /** The limits a runner reported for one harness, or null when it has none. */
