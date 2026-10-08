@@ -12,7 +12,7 @@ import {
   type RunnerUsageLimits,
 } from '@/api/runners'
 import {
-  runnerMissingHarnessLabel,
+  claudeUsagePollHint,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
@@ -126,14 +126,19 @@ describe('runnerStatus', () => {
   })
 })
 
-describe('runnerMissingHarnessLabel', () => {
-  it('says whether to fix PATH or the harness itself', () => {
-    expect(
-      runnerMissingHarnessLabel({ name: 'claude', reason: 'not-on-path', command: 'claude' }),
-    ).toBe("claude is not on the runner's PATH")
-    expect(
-      runnerMissingHarnessLabel({ name: 'codex', reason: 'version-failed', command: 'codex' }),
-    ).toBe('codex is on PATH, but `codex --version` failed')
+describe('claudeUsagePollHint', () => {
+  const claude = [{ name: 'claude', version: '2.1.294' }]
+
+  it('shows for a runner with Claude whose poll is off', () => {
+    expect(claudeUsagePollHint({ harnesses: claude, claudeUsagePoll: false })).toBe(true)
+    // A runner before 0.9.1 reports nothing, and its Claude usage only moves after runs too.
+    expect(claudeUsagePollHint({ harnesses: claude })).toBe(true)
+  })
+
+  it('stays away once the poll is on, or without Claude', () => {
+    expect(claudeUsagePollHint({ harnesses: claude, claudeUsagePoll: true })).toBe(false)
+    expect(claudeUsagePollHint({ harnesses: [{ name: 'codex', version: '0.160.0' }] })).toBe(false)
+    expect(claudeUsagePollHint(null)).toBe(false)
   })
 })
 

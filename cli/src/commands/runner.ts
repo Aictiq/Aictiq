@@ -20,7 +20,7 @@ import {
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
 import { describeMissing, harnesses, probeAllHarnesses } from '../runner/harness/index.js'
-import { readUsageLimits, recordUsageLimits } from '../runner/limits.js'
+import { readUsageLimits, recordUsageLimits, usageLimitsPath } from '../runner/limits.js'
 import { extendProcessPath, harnessDirs, withHarnessDirs } from '../runner/path.js'
 import {
   serviceDefinition,
@@ -31,6 +31,7 @@ import {
 } from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
+import { UsagePoller } from '../runner/usagePoll.js'
 import type { RunnerCapabilities, UpdateFailure } from '../runner/types.js'
 import {
   cliEntryPath,
@@ -370,6 +371,11 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           }
           return message
         }
+        // One for the machine, however many organizations it serves: harness-limits.json is its own.
+        const usage = new UsagePoller({
+          claudeEnabled: () => readRunnerConfig()?.claudeUsagePoll === true,
+          log,
+        })
         const createSupervisor = () =>
           new RunnerSupervisor({
             readConfig: () => readRunnerConfig(),
@@ -392,12 +398,15 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                 probe: async () => {
                   // Re-read, like each run does: a new mapping or root shows up in the web UI's
                   // setup guide on the next heartbeat. Only this profile's are reported.
-                  const own = readRunnerConfig()?.profiles.find((p) => p.token === profile.token) ?? profile
+                  const current = readRunnerConfig()
+                  const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
+                  await usage.refresh()
                   return {
                     ...(await probe(parallel, config.machineId, own)),
                     service: startedAsService(),
                     ...(updateFailure ? { updateFailure } : {}),
                     usageLimits: readUsageLimits(),
+                    claudeUsagePoll: current?.claudeUsagePoll === true,
                   }
                 },
                 local,
@@ -546,6 +555,54 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     )
 
   runner
+    .command('usage')
+    .description("Show the harness usage this machine last saw, or turn the Claude usage poll on or off")
+    .option(
+      '--claude-oauth <state>',
+      "on: read Claude Code's OAuth token and ask api.anthropic.com for 5-hour and weekly usage every 5 minutes; off: only after runs",
+    )
+    .action((options: { claudeOauth?: string }) => {
+      const config = requireConfig()
+      if (options.claudeOauth !== undefined) {
+        const state = options.claudeOauth.toLowerCase()
+        if (state !== 'on' && state !== 'off') {
+          throw new CliError('--claude-oauth is on or off.', ExitCode.Validation)
+        }
+        config.claudeUsagePoll = state === 'on'
+        writeRunnerConfig(config)
+      }
+      const enabled = config.claudeUsagePoll === true
+      const limits = readUsageLimits()
+      if (globals().json) {
+        printJson({ claudeUsagePoll: enabled, usageLimits: limits })
+        return
+      }
+      if (options.claudeOauth !== undefined && enabled) print(`${ClaudeOAuthNotice}\n`)
+      print(
+        renderFields([
+          ['Claude usage', enabled ? 'polled from Anthropic every 5 minutes' : 'updated after runs only'],
+          ['Codex usage', 'read from the newest local Codex session every minute'],
+          ['Stored in', usageLimitsPath()],
+        ]),
+      )
+      if (options.claudeOauth !== undefined) {
+        print('A running `aictiq runner start` picks this up at its next heartbeat.')
+      }
+      if (limits.length === 0) return
+      print('')
+      const percent = (window: { usedPercent: number } | null) => (window ? `${window.usedPercent}%` : '')
+      print(
+        renderTable(limits, [
+          { header: 'HARNESS', value: (l) => l.harness },
+          { header: '5H', value: (l) => percent(l.fiveHour) },
+          { header: 'WEEKLY', value: (l) => percent(l.weekly) },
+          { header: 'WEEKLY RESETS', value: (l) => l.weekly?.resetsAt ?? '' },
+          { header: 'AS OF', value: (l) => l.observedAt },
+        ]),
+      )
+    })
+
+  runner
     .command('update')
     .description(`Install the latest ${PackageName} from npm now, with the package manager it was installed with`)
     .action(async () => {
@@ -688,6 +745,13 @@ function selectProfile(config: RunnerConfig, org: string | undefined): RunnerPro
     ExitCode.Validation,
   )
 }
+
+/** Printed when the Claude usage poll is turned on; docs/harness-usage-limits.md repeats it. */
+const ClaudeOAuthNotice =
+  "The runner will read Claude Code's OAuth access token on this machine and send it only to " +
+  'api.anthropic.com to read your 5-hour and weekly usage. The token never leaves this machine ' +
+  'for any other host, is not stored by Aictiq, and is not sent to the Aictiq server. Only the ' +
+  'percentages and reset times are.'
 
 /** What the instance accepts as `capabilities.path` and `capabilities.updateFailure.error`. */
 const MaxReportedPath = 4096

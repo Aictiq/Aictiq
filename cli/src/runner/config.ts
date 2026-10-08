@@ -52,6 +52,12 @@ export interface RunnerConfig {
    * it. Absent means on. `--no-auto-update` turns it off for one start.
    */
   autoUpdate?: boolean
+  /**
+   * True lets the runner read Claude Code's OAuth token on this machine and ask Anthropic for the
+   * account's 5-hour and weekly usage between runs (`aictiq runner usage --claude-oauth on`).
+   * Absent means off.
+   */
+  claudeUsagePoll?: boolean
 }
 
 export function runnerConfigPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -103,6 +109,7 @@ export function readRunnerConfig(path = runnerConfigPath()): RunnerConfig | null
       maxBytes: validLimit(rawLimits.maxBytes, DefaultAttachmentMaxBytes),
     },
     ...(typeof raw.autoUpdate === 'boolean' ? { autoUpdate: raw.autoUpdate } : {}),
+    ...(typeof raw.claudeUsagePoll === 'boolean' ? { claudeUsagePoll: raw.claudeUsagePoll } : {}),
   }
 }
 
@@ -113,6 +120,7 @@ export function writeRunnerConfig(config: RunnerConfig, path = runnerConfigPath(
     ...(config.name ? { name: config.name } : {}),
     attachments: config.attachments,
     ...(config.autoUpdate === undefined ? {} : { autoUpdate: config.autoUpdate }),
+    ...(config.claudeUsagePoll === undefined ? {} : { claudeUsagePoll: config.claudeUsagePoll }),
     profiles: config.profiles.map((profile) => ({
       ...(profile.organization ? { organization: profile.organization } : {}),
       url: profile.url,
