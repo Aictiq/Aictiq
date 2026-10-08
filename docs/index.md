@@ -12,6 +12,9 @@ hero:
     - theme: alt
       text: Connect an agent
       link: /agents
+    - theme: alt
+      text: Join Discord
+      link: https://discord.gg/yFzzTPSXU
 
 features:
   - title: A safe loop for agents
