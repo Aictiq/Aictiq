@@ -28,6 +28,26 @@ export interface UpdateFailure {
   at: string
 }
 
+/** One usage window of a harness plan, as the harness last reported it. */
+export interface HarnessUsageWindow {
+  /** Share of the window's allowance used, 0-100. */
+  usedPercent: number
+  /** ISO 8601; when the window's allowance resets, when the harness said. */
+  resetsAt: string | null
+}
+
+/**
+ * A harness account's 5-hour and weekly usage on this machine, read from run output the
+ * runner already parses. Only harnesses that report it have one (see docs/harness-usage-limits.md).
+ */
+export interface HarnessUsageLimits {
+  harness: HarnessName
+  /** ISO 8601; when the harness reported it. */
+  observedAt: string
+  fiveHour: HarnessUsageWindow | null
+  weekly: HarnessUsageWindow | null
+}
+
 /** `RunnerCapabilities` on the server - a versioned contract, not an implementation detail. */
 export interface RunnerCapabilities {
   v: 1
@@ -53,6 +73,8 @@ export interface RunnerCapabilities {
   path?: string
   /** Set by `runner start` while its last self-update attempt failed. */
   updateFailure?: UpdateFailure
+  /** The last 5-hour and weekly usage each harness reported on this machine. */
+  usageLimits?: HarnessUsageLimits[]
 }
 
 export interface RunnerHello {
@@ -183,6 +205,8 @@ export interface ParsedLine {
   result?: string
   /** The harness's session or thread id, when this line names it. */
   sessionId?: string
+  /** Usage windows this line reports; a window it leaves out keeps its earlier value. */
+  limits?: Partial<Pick<HarnessUsageLimits, 'fiveHour' | 'weekly'>>
 }
 
 export interface HarnessInvocation {
@@ -243,6 +267,13 @@ export interface HarnessAdapter {
   parse(line: string): ParsedLine
   /** Token counts a harness only writes down when it exits; read once it has. */
   usage?(context: InvocationContext): Pick<ParsedLine, 'inputTokens' | 'outputTokens'> | null
+  /**
+   * Usage windows a harness only writes down outside its output (Codex's session file); read
+   * once it has exited.
+   */
+  limits?(
+    sessionId: string | undefined,
+  ): Partial<Pick<HarnessUsageLimits, 'fiveHour' | 'weekly'>> | null
   /** `resuming` is set when the invocation resumed a session, so a lost session can be told apart. */
   outcome(
     exitCode: number | null,

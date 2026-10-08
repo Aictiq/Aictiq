@@ -26,7 +26,10 @@ public sealed record RunnerView(
 /// A runner as someone starting a run sees it: enough to pick one, nothing about who
 /// registered it or its secret. Disabled runners are left out; they cannot take a run.
 /// </summary>
-public sealed record RunnerChoiceView(Guid Id, string Name, IReadOnlyList<string> Harnesses, bool IsOnline);
+/// <param name="UsageLimits">The harness allowances the runner last reported, so the dialog can show what is left.</param>
+public sealed record RunnerChoiceView(
+    Guid Id, string Name, IReadOnlyList<string> Harnesses, bool IsOnline,
+    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null);
 
 /// <param name="Secret">Returned exactly once. Aictiq keeps only its hash.</param>
 public sealed record RunnerIssuedView(RunnerView Runner, string Secret);
@@ -134,7 +137,8 @@ public static partial class RunnerEndpoints
         return Results.Ok(runners.Select(r => new RunnerChoiceView(
             r.Id, r.Name,
             [.. (r.Capabilities?.Harnesses ?? []).Select(h => h.Name)],
-            IsOnline(r, options.Value, now))).ToList());
+            IsOnline(r, options.Value, now),
+            r.Capabilities?.UsageLimits)).ToList());
     }
 
     /// <summary>
@@ -493,9 +497,20 @@ public static partial class RunnerEndpoints
         {
             errors["capabilities.updateFailure"] = ["A version of at most 64 characters and an error of at most 1000."];
         }
+        if (capabilities.UsageLimits is { } limits
+            && (limits.Count > 16
+                || limits.Any(l => l is null || !HarnessName().IsMatch(l.Harness ?? "")
+                    || !UsageWindowValid(l.FiveHour) || !UsageWindowValid(l.Weekly))
+                || limits.Select(l => l.Harness).Distinct(StringComparer.Ordinal).Count() != limits.Count))
+        {
+            errors["capabilities.usageLimits"] = ["At most 16 harnesses, each once, named in lower case, with a used percentage between 0 and 1000."];
+        }
 
         return errors;
     }
+
+    private static bool UsageWindowValid(RunnerUsageWindow? window) =>
+        window is null || (double.IsFinite(window.UsedPercent) && window.UsedPercent is >= 0 and <= 1000);
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,31}$")]
     internal static partial Regex HarnessName();

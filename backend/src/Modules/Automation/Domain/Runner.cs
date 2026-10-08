@@ -130,6 +130,11 @@ public static class RunnerCredential
 /// that difference is the usual reason a harness that works in a terminal is missing.
 /// </param>
 /// <param name="UpdateFailure">The runner's last self-update that did not take, while it still stands.</param>
+/// <param name="UsageLimits">
+/// The last 5-hour and weekly allowance each harness account on the machine reported in a run's
+/// output, per harness. Only harnesses that report one appear (Claude Code and Codex today).
+/// Display only, and possibly old: <see cref="RunnerUsageLimits.ObservedAt"/> says when it was read.
+/// </param>
 public sealed record RunnerCapabilities(
     int V,
     IReadOnlyList<RunnerHarness> Harnesses,
@@ -143,7 +148,8 @@ public sealed record RunnerCapabilities(
     IReadOnlyList<string>? RepoRoots = null,
     IReadOnlyList<RunnerMissingHarness>? MissingHarnesses = null,
     string? Path = null,
-    RunnerUpdateFailure? UpdateFailure = null);
+    RunnerUpdateFailure? UpdateFailure = null,
+    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>, <c>cursor</c>, <c>copilot</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);
@@ -155,3 +161,14 @@ public sealed record RunnerMissingHarness(string Name, string Reason, string Com
 /// <param name="Version">The CLI version the runner tried to install.</param>
 /// <param name="Error">Why it failed, as the package manager said it.</param>
 public sealed record RunnerUpdateFailure(string Version, string Error, DateTimeOffset At);
+
+/// <param name="Harness">The harness whose account this is, named as in <see cref="RunnerHarness.Name"/>.</param>
+/// <param name="ObservedAt">When the harness reported it, which is when a run last used it.</param>
+/// <param name="FiveHour">The rolling 5-hour window, or null when the harness did not report one.</param>
+/// <param name="Weekly">The weekly window, or null when the harness did not report one.</param>
+public sealed record RunnerUsageLimits(
+    string Harness, DateTimeOffset ObservedAt, RunnerUsageWindow? FiveHour, RunnerUsageWindow? Weekly);
+
+/// <param name="UsedPercent">How much of the window's allowance was used, 0 to 100 (a little more past the limit).</param>
+/// <param name="ResetsAt">When the window starts over, when the harness said.</param>
+public sealed record RunnerUsageWindow(double UsedPercent, DateTimeOffset? ResetsAt);

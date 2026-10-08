@@ -50,6 +50,11 @@ import {
   runnerMissingHarnessLabel,
   runnerStatus,
   runnerStatusLabel,
+  usageLimitsFor,
+  usagePercent,
+  usageResetLabel,
+  usageWindowLabel,
+  usageWindowStale,
   type RunnerPlatform,
 } from '@/lib/runners'
 import { factorySetupPath } from '@/router/paths'
@@ -72,6 +77,32 @@ const slug = computed(() => org.slug.value)
 const mayManage = computed(() => hasOrgRole(org.record.value?.role, 'admin'))
 
 const runners = ref<Runner[]>([])
+
+const usageKinds = ['fiveHour', 'weekly'] as const
+const usageWindowName = { fiveHour: '5-hour', weekly: 'Weekly' } as const
+
+/**
+ * A row per offered harness whose account reported usage, and the rest named on one line, so a
+ * runner whose harnesses report nothing adds a single line rather than one per harness.
+ */
+function usageRows(runner: Runner) {
+  const rows = (runner.capabilities?.harnesses ?? []).map((harness) => ({
+    harness: harness.name,
+    limits: usageLimitsFor(runner.capabilities?.usageLimits, harness.name),
+  }))
+  return {
+    reported: rows.flatMap((row) => (row.limits ? [{ harness: row.harness, limits: row.limits }] : [])),
+    unavailable: rows.filter((row) => !row.limits).map((row) => row.harness),
+  }
+}
+
+/** Amber close to the limit, red at it; a stale figure is greyed out whatever it says. */
+function usageBarClass(percent: number, stale: boolean): string {
+  if (stale) return 'bg-muted-foreground/40'
+  if (percent >= 95) return 'bg-red-500'
+  if (percent >= 80) return 'bg-amber-500'
+  return 'bg-primary'
+}
 const loading = ref(true)
 const busyId = ref<string | null>(null)
 
@@ -433,6 +464,73 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 {{ harness.name }}
               </Badge>
             </div>
+            <ul
+              v-if="runner.capabilities && runner.capabilities.harnesses.length"
+              class="mt-1.5 space-y-1 text-[11px]"
+              :aria-label="`Harness usage on ${runner.name}`"
+            >
+              <li
+                v-for="{ harness, limits } in usageRows(runner).reported"
+                :key="harness"
+                class="flex flex-wrap items-center gap-x-3 gap-y-0.5"
+                :data-testid="`runner-usage-${harness}`"
+              >
+                <span class="text-muted-foreground w-14 flex-none font-mono">{{ harness }}</span>
+                <template v-for="kind in usageKinds" :key="kind">
+                  <span v-if="limits[kind]" class="flex items-center gap-1.5">
+                    <span class="text-muted-foreground">{{ usageWindowLabel[kind] }}</span>
+                    <span
+                      class="bg-muted h-1.5 w-16 overflow-hidden rounded-full"
+                      role="meter"
+                      :aria-label="`${usageWindowName[kind]} usage`"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      :aria-valuenow="Math.round(limits[kind]!.usedPercent)"
+                    >
+                      <span
+                        class="block h-full rounded-full"
+                        :class="
+                          usageBarClass(limits[kind]!.usedPercent, usageWindowStale(limits, kind))
+                        "
+                        :style="{ width: `${Math.min(100, limits[kind]!.usedPercent)}%` }"
+                      />
+                    </span>
+                    <span
+                      class="tabular-nums"
+                      :class="usageWindowStale(limits, kind) ? 'text-muted-foreground' : ''"
+                    >
+                      {{ usagePercent(limits[kind]!.usedPercent) }}
+                    </span>
+                    <span
+                      v-if="usageWindowStale(limits, kind)"
+                      class="text-muted-foreground italic"
+                      >stale</span
+                    >
+                  </span>
+                </template>
+                <span
+                  v-if="limits.weekly?.resetsAt && !usageWindowStale(limits, 'weekly')"
+                  class="text-muted-foreground"
+                >
+                  weekly resets {{ usageResetLabel(limits.weekly.resetsAt, true) }}
+                </span>
+                <span
+                  class="text-muted-foreground"
+                  :title="new Date(limits.observedAt).toLocaleString()"
+                >
+                  as of {{ since(limits.observedAt) }}
+                </span>
+              </li>
+              <li
+                v-if="usageRows(runner).unavailable.length"
+                class="text-muted-foreground/70"
+                data-testid="runner-usage-unavailable"
+              >
+                Usage not available<template v-if="usageRows(runner).reported.length"
+                  >: {{ usageRows(runner).unavailable.join(', ') }}</template
+                >
+              </li>
+            </ul>
             <p
               v-if="runner.capabilities?.updateFailure"
               class="mt-1 line-clamp-2 text-[11px] text-amber-700 dark:text-amber-400"

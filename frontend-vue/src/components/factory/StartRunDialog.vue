@@ -19,7 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useToast } from '@/composables/useToast'
+import { since } from '@/lib/claims'
+import {
+  usageLimitsForRun,
+  usagePercent,
+  usageResetLabel,
+  usageSummary,
+  usageWindowStale,
+} from '@/lib/runners'
 import { orgSettingsPath, projectSettingsPath } from '@/router/paths'
 import {
   defaultScheduleValue,
@@ -102,6 +111,30 @@ watch(scheduled, (on) => {
 })
 
 const chosenRunner = computed(() => runners.value.find((runner) => runner.id === runnerId.value) ?? null)
+
+/**
+ * What is left of the harness account the run will use: the chosen runner's, or the most
+ * recently read one among the runners that could take it. Null hides the line.
+ */
+const usage = computed(() =>
+  usageLimitsForRun(
+    chosenRunner.value ? [chosenRunner.value] : compatibleRunners.value,
+    playbookHarness.value,
+  ),
+)
+
+const usageWindows = computed(() => {
+  const limits = usage.value?.limits
+  if (!limits) return []
+  return (['fiveHour', 'weekly'] as const).flatMap((kind) => {
+    const window = limits[kind]
+    if (!window) return []
+    const stale = usageWindowStale(limits, kind)
+    const name = kind === 'fiveHour' ? '5-hour' : 'Weekly'
+    const reset = window.resetsAt ? `, resets ${usageResetLabel(window.resetsAt, true)}` : ''
+    return [`${name}: ${usagePercent(window.usedPercent)} used${stale ? ' (stale)' : reset}`]
+  })
+})
 
 // A playbook with another harness may rule the chosen runner out.
 watch(playbookHarness, (harness) => {
@@ -267,7 +300,27 @@ async function submit() {
           </select>
         </div>
         <div class="space-y-1.5">
-          <label for="start-run-agent" class="text-sm font-medium">Agent</label>
+          <div class="flex items-center justify-between gap-2">
+            <label for="start-run-agent" class="text-sm font-medium">Agent</label>
+            <TooltipProvider v-if="usage">
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <span
+                    tabindex="0"
+                    data-testid="start-run-usage"
+                    class="text-muted-foreground truncate font-mono text-[11px]"
+                  >
+                    {{ usageSummary(usage.limits) }}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent class="text-xs">
+                  <p class="font-medium">{{ playbookHarness }} usage on {{ usage.runner }}</p>
+                  <p v-for="line in usageWindows" :key="line">{{ line }}</p>
+                  <p>As of {{ since(usage.limits.observedAt) }}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <select
             id="start-run-agent"
             v-model="agentId"

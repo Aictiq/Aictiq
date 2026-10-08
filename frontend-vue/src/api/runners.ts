@@ -29,6 +29,25 @@ export interface RunnerUpdateFailure {
   at: string
 }
 
+/** One usage window of a harness account: how much of its allowance is used, and when it starts over. */
+export interface RunnerUsageWindow {
+  /** 0 to 100; a little more past the limit. */
+  usedPercent: number
+  resetsAt: string | null
+}
+
+/**
+ * The 5-hour and weekly allowance a harness account on the machine last reported in a run's
+ * output. Only harnesses that report one appear (Claude Code and Codex today).
+ */
+export interface RunnerUsageLimits {
+  harness: string
+  /** When a run last read it; the figures are only as current as this. */
+  observedAt: string
+  fiveHour: RunnerUsageWindow | null
+  weekly: RunnerUsageWindow | null
+}
+
 /** What the runner reported about itself on its last hello or heartbeat. */
 export interface RunnerCapabilities {
   v: number
@@ -51,6 +70,8 @@ export interface RunnerCapabilities {
   path?: string | null
   /** Set while the runner's last self-update attempt failed. */
   updateFailure?: RunnerUpdateFailure | null
+  /** Harness allowances seen in runs. Absent from older runners and until a run reports one. */
+  usageLimits?: RunnerUsageLimits[] | null
 }
 
 export interface Runner {
@@ -110,6 +131,8 @@ export interface RunnerChoice {
   /** What the runner last reported; empty until it has said hello. */
   harnesses: string[]
   isOnline: boolean
+  /** Harness allowances the runner last reported. Absent from older servers and runners. */
+  usageLimits?: RunnerUsageLimits[] | null
 }
 
 export const listRunnerChoices = (slug: string) =>
