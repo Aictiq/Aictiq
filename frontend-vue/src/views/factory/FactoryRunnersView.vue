@@ -47,6 +47,7 @@ import {
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
+  runnerMissingHarnessLabel,
   runnerStatus,
   runnerStatusLabel,
   type RunnerPlatform,
@@ -432,6 +433,35 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 {{ harness.name }}
               </Badge>
             </div>
+            <p
+              v-if="runner.capabilities?.updateFailure"
+              class="mt-1 line-clamp-2 text-[11px] text-amber-700 dark:text-amber-400"
+              :title="runner.capabilities.updateFailure.error"
+            >
+              Self-update to {{ runner.capabilities.updateFailure.version }} failed
+              {{ since(runner.capabilities.updateFailure.at) }}:
+              {{ runner.capabilities.updateFailure.error }}
+            </p>
+            <details
+              v-if="runner.capabilities?.missingHarnesses?.length"
+              class="text-muted-foreground mt-1 text-[11px]"
+            >
+              <summary class="cursor-pointer select-none">
+                {{ runner.capabilities.missingHarnesses.length }} known
+                {{ runner.capabilities.missingHarnesses.length === 1 ? 'harness' : 'harnesses' }}
+                not found
+              </summary>
+              <ul class="mt-1 space-y-0.5 pl-3">
+                <li v-for="missing in runner.capabilities.missingHarnesses" :key="missing.name">
+                  <span class="font-mono">{{ missing.name }}</span
+                  >:
+                  {{ runnerMissingHarnessLabel(missing) }}
+                </li>
+              </ul>
+              <p v-if="runner.capabilities.path" class="mt-1 pl-3 break-all">
+                PATH: <span class="font-mono">{{ runner.capabilities.path }}</span>
+              </p>
+            </details>
           </div>
 
           <Loader2
@@ -446,7 +476,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" class="w-60">
-              <DropdownMenuItem @select="router.push(factorySetupPath(slug, { runner: runner.id }))">
+              <DropdownMenuItem
+                @select="router.push(factorySetupPath(slug, { runner: runner.id }))"
+              >
                 Setup guide
               </DropdownMenuItem>
               <DropdownMenuItem @select="rotate(runner)">New secret (re-register)</DropdownMenuItem>

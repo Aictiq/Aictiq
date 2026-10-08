@@ -1,4 +1,4 @@
-import type { Runner } from '@/api/runners'
+import type { Runner, RunnerMissingHarness } from '@/api/runners'
 
 /**
  * The rules the Runners tab shows, kept out of the component so they can be tested: what
@@ -22,6 +22,13 @@ export const runnerStatusLabel: Record<RunnerStatus, string> = {
   offline: 'Offline',
   never: 'Waiting for first contact',
   disabled: 'Disabled',
+}
+
+/** Why a runner does not offer a harness, in the words of what to check on the machine. */
+export function runnerMissingHarnessLabel(missing: RunnerMissingHarness): string {
+  return missing.reason === 'version-failed'
+    ? `${missing.command} is on PATH, but \`${missing.command} --version\` failed`
+    : `${missing.command} is not on the runner's PATH`
 }
 
 /**

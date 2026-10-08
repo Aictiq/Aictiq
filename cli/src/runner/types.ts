@@ -11,6 +11,23 @@ export interface HarnessInfo {
   version: string | null
 }
 
+/** A harness the CLI has an adapter for that this machine does not offer, and why. */
+export interface MissingHarness {
+  name: HarnessName
+  /** `not-on-path`: no executable found; `version-failed`: found, but `--version` failed. */
+  reason: 'not-on-path' | 'version-failed'
+  /** The executable looked for, or the one found. */
+  command: string
+}
+
+/** A self-update that did not take; the runner keeps working on its current version. */
+export interface UpdateFailure {
+  version: string
+  error: string
+  /** ISO 8601. */
+  at: string
+}
+
 /** `RunnerCapabilities` on the server - a versioned contract, not an implementation detail. */
 export interface RunnerCapabilities {
   v: 1
@@ -30,6 +47,12 @@ export interface RunnerCapabilities {
   workspaces?: string[]
   /** This organization's repository roots (`runner root`), so the web UI can check a path hint. */
   repoRoots?: string[]
+  /** Every known harness not in `harnesses`, and why, so the web UI can say what to fix. */
+  missingHarnesses?: MissingHarness[]
+  /** The PATH the runner looked for harnesses on: a service's, not a login shell's. */
+  path?: string
+  /** Set by `runner start` while its last self-update attempt failed. */
+  updateFailure?: UpdateFailure
 }
 
 export interface RunnerHello {
