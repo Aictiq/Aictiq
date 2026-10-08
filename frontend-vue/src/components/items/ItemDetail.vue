@@ -249,6 +249,12 @@ const startRun = computed(() =>
     hasLiveRun: liveRun.value !== null,
   }),
 )
+const showAgentFeedback = computed(
+  () =>
+    startRun.value.visible &&
+    !session.user?.isAgent &&
+    itemRuns.value.some((entry) => entry.kind !== 'refine'),
+)
 const startRunOpen = ref(false)
 const claimRun = computed(() =>
   liveRun.value && liveRun.value.agentId === claimedBy.value ? liveRun.value : null,
@@ -1169,6 +1175,18 @@ function logged(updated: TimeTrackingItem) {
       </nav>
       <section v-if="tab === 'comments'" class="mt-4 space-y-4">
         <form v-if="mayComment" class="space-y-2" @submit.prevent="addComment">
+          <p
+            v-if="showAgentFeedback"
+            class="border-border bg-muted/50 text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+            data-testid="agent-feedback-hint"
+          >
+            <Bot class="text-primary mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              <strong class="text-foreground font-medium">Want changes?</strong>
+              Tag the agent with <span class="text-foreground font-mono">@</span> in a comment and
+              describe what to improve to request a follow-up.
+            </span>
+          </p>
           <MarkdownEditor
             ref="commentEditor"
             v-model="comment"
