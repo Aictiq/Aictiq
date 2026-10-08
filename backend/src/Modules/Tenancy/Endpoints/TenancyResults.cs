@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Aictiq.SharedKernel;
+using Aictiq.SharedKernel.Contracts;
 
 namespace Aictiq.Modules.Tenancy.Endpoints;
 
@@ -26,4 +27,16 @@ internal static class TenancyResults
             detail: detail,
             type: ProblemTypes.InsufficientRole,
             statusCode: StatusCodes.Status403Forbidden);
+
+    /// <summary>
+    /// 402 plan-limit: the stable <c>limit</c> name and, when paying lifts it (the hosted
+    /// free tier), where to go to pay.
+    /// </summary>
+    public static IResult PlanLimited(PlanLimitDecision decision) =>
+        Results.Problem(
+            title: "Plan limit reached.",
+            detail: decision.Reason ?? "This organization cannot add another member on its current plan.",
+            type: ProblemTypes.PlanLimit,
+            statusCode: StatusCodes.Status402PaymentRequired,
+            extensions: new Dictionary<string, object?> { ["limit"] = decision.Limit, ["upgradeUrl"] = decision.UpgradeUrl });
 }

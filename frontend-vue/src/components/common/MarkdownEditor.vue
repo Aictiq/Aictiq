@@ -13,16 +13,17 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import { EditorContent, Extension, useEditor } from '@tiptap/vue-3'
 import { Bold, Code, Hash, List, ListTodo, Minus, Paperclip, Plus, Table as TableIcon, Trash2 } from '@lucide/vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { routerKey, useRouter } from 'vue-router'
 
 import { searchProject, type SearchItem } from '@/api/search'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { useResolvedItemKeys } from '@/composables/useResolvedItemKeys'
 import { useToast } from '@/composables/useToast'
 import { mentionToken, type Mentionable, searchMentionables } from '@/lib/mentions'
-import { planLimitMessage } from '@/lib/billing'
+import { planLimitRefusal } from '@/lib/billing'
 import { itemHref, itemReferencePattern } from '@/lib/markdown'
+import { orgSettingsPath } from '@/router/paths'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -64,6 +65,9 @@ const props = withDefaults(
 const emit = defineEmits<{ 'update:modelValue': [markdown: string]; blur: [] }>()
 const toast = useToast()
 const uploading = ref(0)
+// Only for the free plan's "upgrade to Hosted" after a refused upload. Optional, so an
+// editor mounted without a router still works and simply offers no link.
+const uploadRouter = props.upload ? inject(routerKey, null) : null
 const fileInput = ref<HTMLInputElement | null>(null)
 defineExpose({
   uploading: computed(() => uploading.value > 0),
@@ -338,11 +342,21 @@ async function insertFile(file: File, at?: number) {
       : { type: 'text', text: file.name, marks: [{ type: 'link', attrs: { href: src } }] }
     current.chain().focus().insertContentAt(Math.min(position, current.state.doc.content.size), content).run()
   } catch (error) {
-    // A 402 is the organization's attachment allowance, and there is no larger one to sell:
-    // say what to delete rather than letting a generic "Plan limit reached" stand.
-    const quota = planLimitMessage(error)
+    // A 402 is the attachment allowance: say what to delete rather than letting a generic
+    // "Plan limit reached" stand. Only the free plan's pooled allowance has a larger one to
+    // buy, and only then does the toast offer it.
+    const quota = planLimitRefusal(error)
     const field = error instanceof ApiError ? Object.values(error.fieldErrors).flat()[0] : undefined
-    if (quota) toast.error(undefined, `${file.name}: ${quota}`)
+    const { slug } = props
+    if (quota) {
+      toast.limited(
+        `${file.name}: ${quota.message}`,
+        undefined,
+        quota.upgrade && slug && uploadRouter
+          ? () => void uploadRouter.push(orgSettingsPath(slug, 'billing'))
+          : undefined,
+      )
+    }
     else if (field) toast.error(undefined, `${file.name}: ${field}`)
     else toast.error(error, error instanceof Error ? error.message : `${file.name} could not be uploaded.`)
   } finally {

@@ -18,7 +18,7 @@ namespace Aictiq.IntegrationTests.Billing;
 /// <summary>
 /// The hosted launch offer: the evaluation a new organization is born with, what
 /// it entitles, what expiry takes away (and what it emphatically does not), and the flat
-/// $49 subscription that ends it. Stripe is <see cref="FakeStripeGateway"/> throughout, so
+/// $79 subscription that ends it. Stripe is <see cref="FakeStripeGateway"/> throughout, so
 /// "expiry never charges a card" is an assertion about recorded calls rather than a hope.
 /// </summary>
 [Trait("Category", "Billing")]
@@ -95,7 +95,7 @@ public sealed class HostedOfferTests(PostgresFixture postgres, GarageFixture gar
         // Owner's summary, which is what the quota checks read.
         var hosted = Assert.Single(subscription.Plans, plan => plan.Code == PlanCodes.Hosted);
         Assert.True(hosted.Purchasable);
-        Assert.Equal(49m, hosted.OrganizationPrice);
+        Assert.Equal(79m, hosted.OrganizationPrice);
         AssertHostedLimits(hosted.Limits);
         var summary = await SummaryAsync();
         Assert.Equal("saas", summary.Mode);
@@ -513,7 +513,7 @@ public sealed class FoundingOfferTests(PostgresFixture postgres, GarageFixture g
         Assert.Equal(29m, founding.Price);
         Assert.Equal(12, founding.Periods);
         Assert.Equal(periodsBilled, founding.PeriodsBilled);
-        Assert.Equal(49m, founding.RenewalPrice);
+        Assert.Equal(79m, founding.RenewalPrice);
         Assert.Equal(converted, founding.ConvertedAt is not null);
     }
 

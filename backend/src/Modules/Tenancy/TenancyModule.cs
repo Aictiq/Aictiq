@@ -30,6 +30,7 @@ public static class TenancyModule
         services.AddScoped<IProjectAccess, TenancyProjectAccess>();
         services.AddScoped<IOrganizationTimeZoneSource, OrganizationTimeZoneSource>();
         services.AddScoped<IOrganizationPlanUsageSource, TenancyPlanUsageSource>();
+        services.AddScoped<IOrganizationPeopleSource, TenancyPeopleSource>();
 
         // Outbox-only (integration events are never dispatched in-process), so registering
         // it here costs the API nothing and gives Workers the handler.

@@ -17,8 +17,12 @@ public sealed class BillingAllowances(
     IOptions<BillingOptions> options) : IPlanAllowances
 {
     public async Task<int?> GetRunLogRetentionDaysAsync(
-        Guid organizationId, CancellationToken cancellationToken = default) =>
-        (await PlanAsync(organizationId, cancellationToken))?.Limits.RunLogDays;
+        Guid organizationId, CancellationToken cancellationToken = default)
+    {
+        var plan = await PlanAsync(organizationId, cancellationToken);
+        // The free tier's number is configuration, tunable on a running deployment.
+        return plan?.Code == PlanCodes.HostedFree ? options.Value.FreeTier.RunLogDays : plan?.Limits.RunLogDays;
+    }
 
     public async Task<int?> GetAnalyticsHistoryDaysAsync(
         Guid organizationId, CancellationToken cancellationToken = default) =>

@@ -184,12 +184,20 @@ aictiq runner map ACME --remove [--org <slug>]
 aictiq runner remove <org>            # stop running for one organization on this machine
 aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
 aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>] [--no-auto-update]
+aictiq runner usage [--claude-oauth on|off] # stored 5-hour and weekly usage; opt in to the live Claude poll
 aictiq runner update                  # install the latest @aictiq/cli now and report old → new
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer
 ```
 
 `start` detects `claude`, `codex`, `opencode`, Cursor's `agent` (or `cursor-agent`) and
-`copilot` on `PATH` and reports them, so the instance only hands over runs the machine can execute. Each run gets
+`copilot` on `PATH` and reports them, so the instance only hands over runs the machine can execute.
+Before each probe it appends the per-user directories harness installers use and a service
+never gets from a shell profile (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`,
+`~/.opencode/bin`, `$NVM_BIN`, pnpm's home, the directory of the Node.js running it, and
+Homebrew's on macOS), so a harness installed there after the service was set up is found at
+the next heartbeat. `status` lists every known harness it did not find with the reason (not
+on `PATH`, or `--version` failed) and the `PATH` it searched. The runner reports the same to
+the instance, but the Factory runner page does not show missing harnesses. Each run gets
 `~/.local/share/aictiq/runner/<run-id>/`: `repo/` is a git worktree of the mapped clone (or
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
 MCP configuration sit beside it, outside anything the agent could commit. The harness runs
@@ -253,8 +261,11 @@ a service exits with code 75, which every `install-service` definition restarts 
 runner in a terminal starts itself again with the same arguments. Nothing happens when the
 running version is already the latest or newer (a local build). If the registry is
 unreachable, the install fails (for example, no permission to write the global prefix; the
-runner never prompts or uses sudo), or the CLI is not a global npm/pnpm install, the runner
-logs a warning, goes back to work on its current version, and tries again at the next check.
+runner never prompts or uses sudo; a global npm prefix it cannot write, as after
+`sudo npm install -g`, is refused before it stops claiming), or the CLI is not a global
+npm/pnpm install, the runner logs a warning, goes back to work on its current version, and
+tries again at the next check. A failed upgrade also shows on the runner's card in Factory →
+Runners until a later check succeeds.
 Turn installing off with `--no-auto-update` or `"autoUpdate": false` in `runner.json`; the
 check and its log line still happen. `aictiq runner update` runs the same check and install
 on demand. A running `start` picks up the new version at its next check.

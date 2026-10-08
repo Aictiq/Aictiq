@@ -1,5 +1,6 @@
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -10,7 +11,10 @@ import {
   type PlanOption,
   type Subscription,
 } from '@/api/billing'
+import type { Organization } from '@/api/organizations'
+import InviteMembersDialog from '@/components/shell/InviteMembersDialog.vue'
 import PaymentBanner from '@/components/shell/PaymentBanner.vue'
+import { orgScopeKey, type OrgScope } from '@/composables/useSettingsScope'
 import {
   describeExceeded,
   evaluationNotice,
@@ -22,11 +26,15 @@ import {
   paymentBanner,
   planChange,
   planLimitMessage,
+  planLimitRefusal,
+  planLimitUpgrade,
   planPriceLabel,
   shellBanner,
+  sizeLabel,
 } from '@/lib/billing'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { toApiError } from '@/utils/api'
+import FactoryRunnersView from '@/views/factory/FactoryRunnersView.vue'
 import OrgBillingView from '@/views/settings/OrgBillingView.vue'
 
 vi.mock('vue-router', async (importOriginal) => ({
@@ -40,8 +48,9 @@ vi.mock('vue-router', async (importOriginal) => ({
  * the price is never quoted per seat, the evaluation counts down and says when it ends,
  * the founding discount shows what it becomes and when, an organization over its
  * attachment allowance is told to delete rather than to upgrade, a read-only organization
- * is told which of the two causes stopped it, and a self-hosted instance is offered
- * nothing at all.
+ * is told which cause stopped it, and a self-hosted instance is offered nothing at all.
+ * Where the hosted free tier runs, its limits are shown per Owner, and only a refusal one
+ * of them caused offers the way to Hosted.
  */
 
 const GIB = 1_073_741_824
@@ -86,7 +95,7 @@ const legacy = (code: string, humanSeatPrice: number, purchasable = false): Plan
 const hostedPlan: PlanOption = {
   code: 'hosted',
   humanSeatPrice: 0,
-  organizationPrice: 49,
+  organizationPrice: 79,
   includedAgentsPerHuman: null,
   limits: {
     seatsHuman: null,
@@ -119,6 +128,8 @@ const subscription = (overrides: Partial<Subscription> = {}): Subscription => ({
   plans,
   evaluation: null,
   founding: null,
+  readOnlyReason: null,
+  freeTier: null,
   ...overrides,
 })
 
@@ -130,7 +141,53 @@ const evaluating = (overrides: Partial<Subscription> = {}) =>
     status: 'none',
     currentPeriodEnd: null,
     hasBillingAccount: false,
-    evaluation: { startedAt: '2026-08-22T00:00:00Z', endsAt: '2026-09-30T00:00:00Z', expired: false },
+    evaluation: {
+      startedAt: '2026-08-22T00:00:00Z',
+      endsAt: '2026-09-30T00:00:00Z',
+      expired: false,
+    },
+    ...overrides,
+  })
+
+const MIB = 1_048_576
+const freeTier = (overrides: Partial<NonNullable<Subscription['freeTier']>> = {}) => ({
+  maxPeople: 3,
+  people: 2,
+  storageBytes: 200 * MIB,
+  storedBytes: 50 * MIB,
+  maxRunners: 2,
+  runLogDays: 30,
+  ...overrides,
+})
+const freePlanOption: PlanOption = {
+  code: 'hosted_free',
+  humanSeatPrice: 0,
+  organizationPrice: 0,
+  includedAgentsPerHuman: null,
+  limits: {
+    seatsHuman: null,
+    seatsAgent: null,
+    projects: null,
+    storageBytes: 200 * MIB,
+    runLogDays: 30,
+  },
+  purchasable: true,
+}
+/** An organization whose evaluation ended where the free tier runs: on Free, writable. */
+const onFree = (overrides: Partial<Subscription> = {}) =>
+  subscription({
+    plan: 'hosted_free',
+    subscribedPlan: null,
+    status: 'none',
+    currentPeriodEnd: null,
+    hasBillingAccount: false,
+    plans: [freePlanOption, hostedPlan],
+    evaluation: {
+      startedAt: '2026-08-01T00:00:00Z',
+      endsAt: '2026-09-01T00:00:00Z',
+      expired: true,
+    },
+    freeTier: freeTier(),
     ...overrides,
   })
 
@@ -138,7 +195,9 @@ const localDate = (value: string) => new Date(value).toLocaleDateString()
 
 describe('the billing endpoints', () => {
   it('reads the subscription and posts plan changes with the CSRF header', async () => {
-    const fetchMock = stubFetch(() => ({ body: { url: 'https://checkout.stripe.test/x', changed: false } }))
+    const fetchMock = stubFetch(() => ({
+      body: { url: 'https://checkout.stripe.test/x', changed: false },
+    }))
 
     await getSubscription('acme')
     await startCheckout('acme', 'hosted')
@@ -157,7 +216,7 @@ describe('the billing endpoints', () => {
 
 describe('plan prices', () => {
   it('quotes the hosted plan per organization and the legacy ones per seat', () => {
-    expect(planPriceLabel(hostedPlan)).toBe('$49 per organization / month')
+    expect(planPriceLabel(hostedPlan)).toBe('$79 per organization / month')
     expect(planPriceLabel(starterPlan)).toBe('$9 per human / month')
     expect(planPriceLabel(freePlan)).toBe('Free')
   })
@@ -219,7 +278,7 @@ describe('refused actions', () => {
     expect(message.toLowerCase()).not.toContain('upgrade')
   })
 
-  it('states a 402 attachment refusal in the server’s words and ignores its upgrade URL', () => {
+  it('states a paid 402 attachment refusal in the server’s words and offers no upgrade', () => {
     const error = toApiError({
       status: 402,
       data: {
@@ -229,17 +288,54 @@ describe('refused actions', () => {
         detail:
           'This organization has reached its attachment allowance (10 GiB). Delete attachments to free space - existing files stay readable and downloadable.',
         limit: 'storage_bytes',
-        // The API may still carry one; the hosted offer has no higher tier, so the browser
-        // must never turn it into a link.
-        upgradeUrl: '/settings/billing',
+        // Paid Hosted has no higher tier, and the API says so by sending no URL.
+        upgradeUrl: null,
       },
     })
 
     const message = planLimitMessage(error)!
 
     expect(message).toContain('Delete attachments to free space')
-    expect(message).not.toContain('/settings/billing')
     expect(message.toLowerCase()).not.toContain('upgrade')
+    expect(planLimitUpgrade(error)).toBe(false)
+    expect(planLimitRefusal(error)).toEqual({ message, upgrade: false })
+  })
+
+  const refusal = (limit: string, upgradeUrl: string | null, detail = 'Refused.') =>
+    toApiError({
+      status: 402,
+      data: {
+        status: 402,
+        title: 'Plan limit reached.',
+        type: PLAN_LIMIT,
+        detail,
+        limit,
+        upgradeUrl,
+      },
+    })
+
+  it('offers Hosted only for a refusal a free-plan limit caused', () => {
+    expect(planLimitUpgrade(refusal('free_people', '/settings/billing'))).toBe(true)
+    expect(planLimitUpgrade(refusal('runners', '/settings/billing'))).toBe(true)
+    // The free tier's pooled attachments carry the URL; paid Hosted's allowance does not.
+    expect(planLimitUpgrade(refusal('storage_bytes', '/settings/billing'))).toBe(true)
+    expect(planLimitUpgrade(refusal('storage_bytes', null))).toBe(false)
+    // A legacy seat plan's refusal is not something Hosted is sold against here.
+    expect(planLimitUpgrade(refusal('seats_human', '/settings/billing'))).toBe(false)
+    expect(planLimitUpgrade(toApiError({ status: 409, data: { status: 409, title: 'x' } }))).toBe(
+      false,
+    )
+    expect(planLimitUpgrade(new Error('offline'))).toBe(false)
+  })
+
+  it('keeps the server’s words for a free-plan refusal', () => {
+    const detail =
+      'The free plan allows 3 people, owner included, across all the free organizations an owner has; this would make 4. Remove someone or revoke an invitation, or upgrade this organization to Hosted.'
+    expect(planLimitRefusal(refusal('free_people', '/settings/billing', detail))).toEqual({
+      message: detail,
+      upgrade: true,
+    })
+    expect(planLimitRefusal(new Error('offline'))).toBeNull()
   })
 
   it('falls back to allowance wording when the problem carries no detail, and ignores other errors', () => {
@@ -247,11 +343,18 @@ describe('refused actions', () => {
       planLimitMessage(
         toApiError({
           status: 402,
-          data: { status: 402, title: 'Plan limit reached.', type: PLAN_LIMIT, limit: 'storage_bytes' },
+          data: {
+            status: 402,
+            title: 'Plan limit reached.',
+            type: PLAN_LIMIT,
+            limit: 'storage_bytes',
+          },
         }),
       ),
     ).toContain('Delete attachments to free space')
-    expect(planLimitMessage(toApiError({ status: 409, data: { status: 409, title: 'x' } }))).toBeNull()
+    expect(
+      planLimitMessage(toApiError({ status: 409, data: { status: 409, title: 'x' } })),
+    ).toBeNull()
     expect(planLimitMessage(new Error('offline'))).toBeNull()
   })
 })
@@ -271,11 +374,55 @@ describe('the evaluation notice', () => {
     expect(active.endsAt).toEqual(new Date('2026-09-30T00:00:00Z'))
 
     const expired = evaluationNotice(
-      subscription({ evaluation: { startedAt: '2026-08-01T00:00:00Z', endsAt: '2026-09-01T00:00:00Z', expired: true } }),
+      evaluating({
+        evaluation: {
+          startedAt: '2026-08-01T00:00:00Z',
+          endsAt: '2026-09-01T00:00:00Z',
+          expired: true,
+        },
+      }),
       now,
     )!
     expect(expired.expired).toBe(true)
     expect(expired.daysLeft).toBe(0)
+  })
+
+  it('is history once the organization has subscribed, and stays history after it cancels', () => {
+    const lastWeek = {
+      startedAt: '2026-08-22T00:00:00Z',
+      endsAt: '2026-09-26T00:00:00Z',
+      expired: false,
+    }
+    // Still evaluating, nothing bought: the notice and the shell countdown both show.
+    expect(evaluationNotice(evaluating({ evaluation: lastWeek }), now)).not.toBeNull()
+    expect(shellBanner(evaluating({ evaluation: lastWeek }), true, now)).not.toBeNull()
+    // A checkout that never completed bought nothing either.
+    expect(evaluationNotice(evaluating({ status: 'incomplete' }), now)).not.toBeNull()
+
+    // Subscribed: the evaluation row is still there, but nothing is counting down.
+    for (const status of ['active', 'trialing'] as const) {
+      const paid = evaluating({
+        plan: 'hosted',
+        subscribedPlan: 'hosted',
+        status,
+        evaluation: lastWeek,
+      })
+      expect(evaluationNotice(paid, now)).toBeNull()
+      expect(shellBanner(paid, true, now)).toBeNull()
+    }
+
+    // Cancelled back to Free, before or after the evaluation's end: no evaluation again.
+    for (const expired of [false, true]) {
+      const cancelled = evaluating({
+        plan: 'hosted_free',
+        subscribedPlan: null,
+        status: 'canceled',
+        evaluation: { ...lastWeek, expired },
+        freeTier: freeTier(),
+      })
+      expect(evaluationNotice(cancelled, now)).toBeNull()
+      expect(shellBanner(cancelled, true, now)).toBeNull()
+    }
   })
 })
 
@@ -288,7 +435,7 @@ describe('the founding offer', () => {
           price: 29,
           periods: 12,
           periodsBilled: 4,
-          renewalPrice: 49,
+          renewalPrice: 79,
           convertedAt: null,
           endsAt: '2027-06-10T00:00:00Z',
         },
@@ -296,7 +443,7 @@ describe('the founding offer', () => {
     )!
 
     expect(notice.price).toBe(29)
-    expect(notice.renewalPrice).toBe(49)
+    expect(notice.renewalPrice).toBe(79)
     expect(notice.periodsLeft).toBe(8)
     expect(notice.converted).toBe(false)
     expect(notice.standardFrom).toEqual(new Date('2027-06-10T00:00:00Z'))
@@ -312,7 +459,7 @@ describe('the founding offer', () => {
           price: 29,
           periods: 12,
           periodsBilled: 10,
-          renewalPrice: 49,
+          renewalPrice: 79,
           convertedAt: null,
           endsAt: null,
         },
@@ -326,7 +473,14 @@ describe('the founding offer', () => {
   it('reports a completed offer by the date the server recorded, and nothing without one', () => {
     const notice = foundingNotice(
       subscription({
-        founding: { price: 29, periods: 12, periodsBilled: 12, renewalPrice: 49, convertedAt: '2027-10-01T00:00:00Z', endsAt: null },
+        founding: {
+          price: 29,
+          periods: 12,
+          periodsBilled: 12,
+          renewalPrice: 79,
+          convertedAt: '2027-10-01T00:00:00Z',
+          endsAt: null,
+        },
       }),
     )!
 
@@ -342,12 +496,21 @@ describe('the payment-failed banner', () => {
 
   it('says nothing while the account is healthy, or where nothing is billed', () => {
     expect(paymentBanner(subscription(), true, now)).toBeNull()
-    expect(paymentBanner(subscription({ enabled: false, graceEndsAt: '2026-09-20T00:00:00Z' }), true, now)).toBeNull()
+    expect(
+      paymentBanner(
+        subscription({ enabled: false, graceEndsAt: '2026-09-20T00:00:00Z' }),
+        true,
+        now,
+      ),
+    ).toBeNull()
     expect(paymentBanner(undefined, true, now)).toBeNull()
   })
 
   it('counts down the grace period, and tells a member whom to ask', () => {
-    const inGrace = subscription({ graceEndsAt: '2026-09-20T12:00:00Z', paymentFailedAt: '2026-09-06T12:00:00Z' })
+    const inGrace = subscription({
+      graceEndsAt: '2026-09-20T12:00:00Z',
+      paymentFailedAt: '2026-09-06T12:00:00Z',
+    })
 
     const owner = paymentBanner(inGrace, true, now)!
     const member = paymentBanner(inGrace, false, now)!
@@ -360,13 +523,21 @@ describe('the payment-failed banner', () => {
   })
 
   it('warns on a failed payment even before a grace window is known', () => {
-    const banner = paymentBanner(subscription({ paymentFailedAt: '2026-09-09T12:00:00Z' }), true, now)!
+    const banner = paymentBanner(
+      subscription({ paymentFailedAt: '2026-09-09T12:00:00Z' }),
+      true,
+      now,
+    )!
     expect(banner.tone).toBe('warning')
     expect(banner.message).toContain('A payment failed')
   })
 
   it('turns red once the organization is read-only', () => {
-    const banner = paymentBanner(subscription({ graceEndsAt: '2026-09-01T00:00:00Z', readOnly: true }), false, now)!
+    const banner = paymentBanner(
+      subscription({ graceEndsAt: '2026-09-01T00:00:00Z', readOnly: true }),
+      false,
+      now,
+    )!
     expect(banner.tone).toBe('danger')
     expect(banner.message).toContain('read-only until an owner')
   })
@@ -393,14 +564,24 @@ describe('the payment-failed banner', () => {
 
 describe('the evaluation banner', () => {
   const now = new Date('2026-09-21T12:00:00Z')
-  const expired = { startedAt: '2026-08-01T00:00:00Z', endsAt: '2026-09-01T00:00:00Z', expired: true }
+  const expired = {
+    startedAt: '2026-08-01T00:00:00Z',
+    endsAt: '2026-09-01T00:00:00Z',
+    expired: true,
+  }
 
   it('stays quiet until the last week, then counts down', () => {
     // Nine days left: still nothing across the top of every page.
     expect(shellBanner(evaluating(), true, now)).toBeNull()
 
     const banner = shellBanner(
-      evaluating({ evaluation: { startedAt: '2026-08-22T00:00:00Z', endsAt: '2026-09-26T00:00:00Z', expired: false } }),
+      evaluating({
+        evaluation: {
+          startedAt: '2026-08-22T00:00:00Z',
+          endsAt: '2026-09-26T00:00:00Z',
+          expired: false,
+        },
+      }),
       true,
       now,
     )!
@@ -411,7 +592,7 @@ describe('the evaluation banner', () => {
   })
 
   it('says writes have stopped once it expires, and whom a member should ask', () => {
-    const lapsed = subscription({ evaluation: expired, readOnly: true })
+    const lapsed = evaluating({ evaluation: expired, readOnly: true })
 
     const owner = shellBanner(lapsed, true, now)!
     expect(owner.tone).toBe('danger')
@@ -432,7 +613,7 @@ describe('the evaluation banner', () => {
       graceEndsAt: '2026-09-01T00:00:00Z',
       readOnly: true,
     })
-    const evaluationOnly = subscription({ evaluation: expired, readOnly: true })
+    const evaluationOnly = evaluating({ evaluation: expired, readOnly: true })
 
     expect(shellBanner(declined, true, now)!.message).toContain('A payment failed')
     expect(shellBanner(declined, true, now)!.action).toBe('manage')
@@ -443,7 +624,11 @@ describe('the evaluation banner', () => {
   it('offers owners the plans and members only the warning', () => {
     const render = (isOwner: boolean) =>
       mount(PaymentBanner, {
-        props: { slug: 'acme', subscription: subscription({ evaluation: expired, readOnly: true }), isOwner },
+        props: {
+          slug: 'acme',
+          subscription: evaluating({ evaluation: expired, readOnly: true }),
+          isOwner,
+        },
         global: { stubs: { RouterLink: RouterLinkStub } },
       })
 
@@ -452,6 +637,195 @@ describe('the evaluation banner', () => {
     expect(owner.findComponent(RouterLinkStub).text()).toBe('View plans')
     expect(owner.findComponent(RouterLinkStub).props('to')).toBe('/o/acme/settings/billing')
     expect(render(false).findComponent(RouterLinkStub).exists()).toBe(false)
+  })
+})
+
+describe('the free plan banners', () => {
+  const now = new Date('2026-09-21T12:00:00Z')
+
+  it('says why a free organization over the people limit is read-only, and who can fix it', () => {
+    const over = onFree({ readOnly: true, readOnlyReason: 'free_people' })
+
+    const owner = shellBanner(over, true, now)!
+    expect(owner.tone).toBe('danger')
+    expect(owner.action).toBe('plan')
+    expect(owner.message).toBe(
+      'This organization is read-only: the free plan allows 3 people across your free organizations, owner included. Remove someone or revoke an invitation, or upgrade to Hosted.',
+    )
+    // Not the expired evaluation it also carries: that is not what stopped it.
+    expect(owner.message).not.toContain('evaluation')
+
+    const member = shellBanner(over, false, now)!
+    expect(member.action).toBe('ask-owner')
+    expect(member.message).toContain('Ask an owner')
+  })
+
+  it('still names a failed payment first', () => {
+    const declined = onFree({
+      readOnly: true,
+      readOnlyReason: 'free_people',
+      paymentFailedAt: '2026-08-20T00:00:00Z',
+      graceEndsAt: '2026-09-01T00:00:00Z',
+    })
+    expect(shellBanner(declined, true, now)!.message).toContain('A payment failed')
+  })
+
+  it('says nothing once an evaluation has simply moved the organization to Free', () => {
+    expect(shellBanner(onFree(), true, now)).toBeNull()
+  })
+
+  it('counts down to the free plan rather than to read-only', () => {
+    const banner = shellBanner(
+      evaluating({
+        evaluation: {
+          startedAt: '2026-08-22T00:00:00Z',
+          endsAt: '2026-09-26T00:00:00Z',
+          expired: false,
+        },
+        freeTier: freeTier(),
+      }),
+      true,
+      now,
+    )!
+    expect(banner.tone).toBe('warning')
+    expect(banner.message).toContain('ends in 5 days')
+    expect(banner.message).toContain('moves to the free plan: 3 people and 200 MiB of attachments')
+    expect(banner.message).toContain('Subscribe to keep Hosted.')
+    expect(banner.message).not.toContain('read-only')
+  })
+
+  it('offers owners the plans from the banner', () => {
+    const wrapper = mount(PaymentBanner, {
+      props: {
+        slug: 'acme',
+        subscription: onFree({ readOnly: true, readOnlyReason: 'free_people' }),
+        isOwner: true,
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    expect(wrapper.get('[role="alert"]').text()).toContain('the free plan allows 3 people')
+    expect(wrapper.findComponent(RouterLinkStub).props('to')).toBe('/o/acme/settings/billing')
+  })
+
+  it('states sizes in the unit that reads naturally', () => {
+    expect(sizeLabel(200 * MIB)).toBe('200 MiB')
+    expect(sizeLabel(10 * GIB)).toBe('10 GiB')
+    expect(sizeLabel(6_000)).toBe('5.9 KiB')
+    expect(sizeLabel(0)).toBe('0 MiB')
+    expect(sizeLabel(1.5 * GIB)).toBe('1.5 GiB')
+  })
+})
+
+describe('free-plan refusals', () => {
+  const peopleRefusal = {
+    status: 402,
+    body: {
+      status: 402,
+      title: 'Plan limit reached.',
+      type: PLAN_LIMIT,
+      detail:
+        'The free plan allows 3 people, owner included, across all the free organizations an owner has; this would make 4. Remove someone or revoke an invitation, or upgrade this organization to Hosted.',
+      limit: 'free_people',
+      upgradeUrl: '/settings/billing',
+    },
+  }
+  const passthrough = { template: '<div><slot /></div>' }
+  const dialogStubs = {
+    RouterLink: RouterLinkStub,
+    Dialog: passthrough,
+    DialogContent: passthrough,
+    DialogDescription: passthrough,
+    DialogFooter: passthrough,
+    DialogHeader: passthrough,
+    DialogTitle: passthrough,
+  }
+
+  it('shows a refused invitation in the server’s words, with the way to Hosted', async () => {
+    stubFetch(() => peopleRefusal)
+    const wrapper = mount(InviteMembersDialog, {
+      props: { slug: 'acme', open: true },
+      global: { stubs: dialogStubs },
+    })
+
+    await wrapper.get('#invite-emails').setValue('dora@example.com')
+    await wrapper.get('form#invite-people').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('dora@example.com')
+    expect(wrapper.text()).toContain('The free plan allows 3 people')
+    const link = wrapper.getComponent(RouterLinkStub)
+    expect(link.props('to')).toBe('/o/acme/settings/billing')
+    expect(link.text()).toBe('Upgrade to Hosted')
+  })
+
+  it('offers no upgrade for a refusal Hosted would not lift', async () => {
+    stubFetch(() => ({
+      status: 422,
+      body: { status: 422, title: 'That address is already a member.' },
+    }))
+    const wrapper = mount(InviteMembersDialog, {
+      props: { slug: 'acme', open: true },
+      global: { stubs: dialogStubs },
+    })
+
+    await wrapper.get('#invite-emails').setValue('ana@example.com')
+    await wrapper.get('form#invite-people').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('That address is already a member.')
+    expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
+  })
+
+  it('keeps a refused runner registration in the dialog, with the way to Hosted', async () => {
+    const organization: Organization = {
+      id: 'org-1',
+      slug: 'acme',
+      name: 'Acme',
+      role: 'owner',
+      canOperateFactory: true,
+      plan: 'hosted_free',
+      timeZone: 'UTC',
+      weekStart: 'monday',
+      membersCanCreateProjects: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      version: 1,
+    }
+    const scope: OrgScope = {
+      slug: ref('acme'),
+      record: ref(organization),
+      loading: ref(false),
+      notFound: ref(false),
+      reload: async () => {},
+      set: () => {},
+    }
+    stubFetch((_url, init) =>
+      init?.method === 'POST'
+        ? {
+            status: 402,
+            body: {
+              status: 402,
+              title: 'Plan limit reached.',
+              type: PLAN_LIMIT,
+              detail:
+                'The free plan allows 2 registered runners per organization. Delete a runner, or upgrade to Hosted for unlimited runners.',
+              limit: 'runners',
+              upgradeUrl: '/settings/billing',
+            },
+          }
+        : { body: [] },
+    )
+    const wrapper = mount(FactoryRunnersView, {
+      global: { plugins: [createPinia()], provide: { [orgScopeKey]: scope }, stubs: dialogStubs },
+    })
+    await flushPromises()
+
+    await wrapper.get('#runner-name').setValue('vps-3')
+    await wrapper.get('form#register-runner').trigger('submit')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-testid="plan-limit"]')
+    expect(notice.text()).toContain('The free plan allows 2 registered runners per organization.')
+    expect(notice.getComponent(RouterLinkStub).props('to')).toBe('/o/acme/settings/billing')
   })
 })
 
@@ -486,9 +860,11 @@ describe('the Plan page', () => {
   }): Responder {
     return (url) => {
       if (url.endsWith('/billing')) return { body: options.summary ?? summary }
-      if (url.endsWith('/billing/subscription')) return { body: options.subscription ?? subscription() }
+      if (url.endsWith('/billing/subscription'))
+        return { body: options.subscription ?? subscription() }
       if (url.endsWith('/billing/checkout')) return options.checkout ?? { body: {} }
-      if (url.endsWith('/billing/portal')) return { body: { url: 'https://billing.stripe.test/p', changed: false } }
+      if (url.endsWith('/billing/portal'))
+        return { body: { url: 'https://billing.stripe.test/p', changed: false } }
       return { status: 404, body: {} }
     }
   }
@@ -497,7 +873,9 @@ describe('the Plan page', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const organizations = useOrganizationsStore()
-    organizations.organizations = [{ id: 'org-1', slug: 'acme', name: 'Acme', role, canOperateFactory: true }]
+    organizations.organizations = [
+      { id: 'org-1', slug: 'acme', name: 'Acme', role, canOperateFactory: true },
+    ]
     organizations.select('acme')
     const wrapper = mount(OrgBillingView, { global: { plugins: [pinia] } })
     await flushPromises()
@@ -521,11 +899,15 @@ describe('the Plan page', () => {
     expect(wrapper.find('[data-testid="plan-team"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-free"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-enterprise"]').exists()).toBe(false)
-    expect(button(wrapper, 'plan-hosted').text()).toBe('Upgrade to hosted')
+    expect(button(wrapper, 'plan-hosted').text()).toBe('Upgrade to Hosted')
   })
 
   it('sends the hosted checkout to the URL the API returns', async () => {
-    stubFetch(respond({ checkout: { body: { url: 'https://checkout.stripe.test/c/pay/1', changed: false } } }))
+    stubFetch(
+      respond({
+        checkout: { body: { url: 'https://checkout.stripe.test/c/pay/1', changed: false } },
+      }),
+    )
     const assign = vi.spyOn(navigation, 'assign').mockImplementation(() => {})
     const wrapper = await renderPage()
 
@@ -583,7 +965,14 @@ describe('the Plan page', () => {
               limits: { seatsHuman: null, seatsAgent: null, projects: null, storageBytes: null },
             },
           }
-        : { body: subscription({ mode: 'self_hosted', enabled: false, plans: [], hasBillingAccount: false }) },
+        : {
+            body: subscription({
+              mode: 'self_hosted',
+              enabled: false,
+              plans: [],
+              hasBillingAccount: false,
+            }),
+          },
     )
     const wrapper = await renderPage()
 
@@ -600,9 +989,9 @@ describe('the Plan page', () => {
     const wrapper = await renderPage()
 
     const card = wrapper.get('[data-testid="plan-hosted"]')
-    expect(card.text()).toContain('$49 per organization / month')
+    expect(card.text()).toContain('$79 per organization / month')
     expect(card.text()).not.toContain('per human')
-    expect(wrapper.get('[data-testid="current-price"]').text()).toBe('$49 per organization / month')
+    expect(wrapper.get('[data-testid="current-price"]').text()).toBe('$79 per organization / month')
   })
 
   it('states what the hosted plan includes', async () => {
@@ -623,7 +1012,9 @@ describe('the Plan page', () => {
     expect(wrapper.get('[data-testid="allowance-logs"]').text()).toContain('Finished-run raw logs')
     expect(wrapper.get('[data-testid="allowance-logs"]').text()).toContain('90 days')
     expect(wrapper.get('[data-testid="allowance-analytics"]').text()).toContain('365 days')
-    expect(wrapper.get('[data-testid="service-allowances"]').text()).toContain('cannot be brought back')
+    expect(wrapper.get('[data-testid="service-allowances"]').text()).toContain(
+      'cannot be brought back',
+    )
   })
 
   it('shows attachment usage against the allowance, and Unlimited where nothing is metered', async () => {
@@ -649,7 +1040,9 @@ describe('the Plan page', () => {
     const wrapper = await renderPage()
 
     const storage = wrapper.get('[data-testid="usage-storage"]')
-    expect(storage.text()).toContain('Delete attachments to free space - existing files stay readable')
+    expect(storage.text()).toContain(
+      'Delete attachments to free space - existing files stay readable',
+    )
     expect(storage.text()).toContain('There is no larger allowance to buy.')
     expect(storage.findAll('a')).toHaveLength(0)
   })
@@ -672,13 +1065,36 @@ describe('the Plan page', () => {
     expect(cta.attributes('disabled')).toBeUndefined()
   })
 
+  it('drops the evaluation once the organization has subscribed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-21T12:00:00Z') })
+    stubFetch(
+      respond({
+        summary: hostedSummary,
+        subscription: evaluating({
+          subscribedPlan: 'hosted',
+          status: 'active',
+          currentPeriodEnd: '2026-10-21T00:00:00Z',
+          hasBillingAccount: true,
+        }),
+      }),
+    )
+    const wrapper = await renderPage()
+
+    expect(wrapper.text()).toContain('Current plan')
+    expect(wrapper.find('[data-testid="evaluation-panel"]').exists()).toBe(false)
+  })
+
   it('warns when the evaluation has ended, with its date and the way out for owners', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-21T12:00:00Z') })
     stubFetch(
       respond({
         summary: hostedSummary,
         subscription: evaluating({
-          evaluation: { startedAt: '2026-08-01T00:00:00Z', endsAt: '2026-09-01T00:00:00Z', expired: true },
+          evaluation: {
+            startedAt: '2026-08-01T00:00:00Z',
+            endsAt: '2026-09-01T00:00:00Z',
+            expired: true,
+          },
           readOnly: true,
         }),
       }),
@@ -703,7 +1119,14 @@ describe('the Plan page', () => {
           plan: 'hosted',
           subscribedPlan: 'hosted',
           currentPeriodEnd: '2026-10-10T00:00:00Z',
-          founding: { price: 29, periods: 12, periodsBilled: 4, renewalPrice: 49, convertedAt: null, endsAt: '2027-06-10T00:00:00Z' },
+          founding: {
+            price: 29,
+            periods: 12,
+            periodsBilled: 4,
+            renewalPrice: 79,
+            convertedAt: null,
+            endsAt: '2027-06-10T00:00:00Z',
+          },
         }),
       }),
     )
@@ -712,12 +1135,16 @@ describe('the Plan page', () => {
     const offer = wrapper.get('[data-testid="founding-offer"]')
     expect(offer.text()).toContain('$29 per organization / month for 12 monthly billing periods')
     expect(offer.text()).toContain('4 of 12 billed')
-    expect(offer.text()).toContain(`$49 per organization / month from ${localDate('2027-06-10T00:00:00Z')}`)
+    expect(offer.text()).toContain(
+      `$79 per organization / month from ${localDate('2027-06-10T00:00:00Z')}`,
+    )
     expect(offer.text()).toContain('cannot be requested here')
     // While it runs, the header quotes what this organization is actually charged.
     expect(wrapper.get('[data-testid="current-price"]').text()).toBe('$29 per organization / month')
     // The card keeps the standard price: the discount is this subscription's, not the plan's.
-    expect(wrapper.get('[data-testid="plan-hosted"]').text()).toContain('$49 per organization / month')
+    expect(wrapper.get('[data-testid="plan-hosted"]').text()).toContain(
+      '$79 per organization / month',
+    )
   })
 
   it('says when the founding offer has completed and what the organization pays now', async () => {
@@ -727,7 +1154,14 @@ describe('the Plan page', () => {
         subscription: subscription({
           plan: 'hosted',
           subscribedPlan: 'hosted',
-          founding: { price: 29, periods: 12, periodsBilled: 12, renewalPrice: 49, convertedAt: '2027-10-01T00:00:00Z', endsAt: null },
+          founding: {
+            price: 29,
+            periods: 12,
+            periodsBilled: 12,
+            renewalPrice: 79,
+            convertedAt: '2027-10-01T00:00:00Z',
+            endsAt: null,
+          },
         }),
       }),
     )
@@ -735,8 +1169,8 @@ describe('the Plan page', () => {
 
     const offer = wrapper.get('[data-testid="founding-offer"]')
     expect(offer.text()).toContain(`Completed on ${localDate('2027-10-01T00:00:00Z')}`)
-    expect(offer.text()).toContain('now pays $49 per organization / month')
-    expect(wrapper.get('[data-testid="current-price"]').text()).toBe('$49 per organization / month')
+    expect(offer.text()).toContain('now pays $79 per organization / month')
+    expect(wrapper.get('[data-testid="current-price"]').text()).toBe('$79 per organization / month')
   })
 
   it('shows nothing about an evaluation or a founding offer where there is none', async () => {
@@ -745,5 +1179,113 @@ describe('the Plan page', () => {
 
     expect(wrapper.find('[data-testid="evaluation-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="founding-offer"]').exists()).toBe(false)
+  })
+
+  const freeSummary = {
+    ...hostedSummary,
+    plan: 'hosted_free',
+    limits: {
+      seatsHuman: null,
+      seatsAgent: null,
+      projects: null,
+      storageBytes: 200 * MIB,
+      runLogDays: 30,
+      analyticsDays: 365,
+    },
+    usage: { humans: 2, agents: 1, projects: 1, storageBytes: 10 * MIB },
+  }
+
+  it('shows the free plan with its per-owner usage and offers Hosted', async () => {
+    stubFetch(respond({ summary: freeSummary, subscription: onFree() }))
+    const wrapper = await renderPage()
+
+    expect(wrapper.get('[data-testid="current-plan"]').text()).toBe('Free')
+    const panel = wrapper.get('[data-testid="free-tier"]')
+    expect(panel.get('[data-testid="free-people"]').text()).toContain(
+      '2 of 3 across your free organizations (owner included)',
+    )
+    expect(panel.get('[data-testid="free-storage"]').text().replace(/\s+/g, ' ')).toContain(
+      '50 MiB of 200 MiB pooled across your free organizations',
+    )
+    expect(panel.get('[data-testid="free-runners"]').text()).toContain('Up to 2 registered')
+    expect(wrapper.get('[data-testid="allowance-logs"]').text()).toContain('30 days')
+    // Counted per owner in the panel, so not a second time against the organization alone.
+    expect(wrapper.find('[data-testid="usage-humans"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-storage"]').exists()).toBe(false)
+    // An evaluation that moved to Free is not a problem to report.
+    expect(wrapper.get('[data-testid="evaluation-panel"]').text()).toContain('on the free plan now')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    expect(wrapper.get('[data-testid="plan-hosted_free"]').text()).toContain(
+      '3 people across your free organizations',
+    )
+    expect(button(wrapper, 'plan-hosted_free').text()).toBe('Current plan')
+    expect(button(wrapper, 'plan-hosted_free').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'plan-hosted').text()).toBe('Upgrade to Hosted')
+    expect(wrapper.get('[data-testid="plan-hosted"]').text()).toContain(
+      '$79 per organization / month',
+    )
+    expect(wrapper.get('[data-testid="free-upgrade"]').text()).toContain('Upgrade to Hosted')
+  })
+
+  it('upgrades a free organization through checkout', async () => {
+    const fetchMock = stubFetch(
+      respond({
+        summary: freeSummary,
+        subscription: onFree(),
+        checkout: { body: { url: 'https://checkout.stripe.test/c/pay/2', changed: false } },
+      }),
+    )
+    const assign = vi.spyOn(navigation, 'assign').mockImplementation(() => {})
+    const wrapper = await renderPage()
+
+    await wrapper.get('[data-testid="free-upgrade"]').trigger('click')
+    await flushPromises()
+
+    const checkout = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith('/billing/checkout'),
+    )!
+    expect(JSON.parse(String(checkout[1]!.body))).toEqual({ plan: 'hosted' })
+    expect(assign).toHaveBeenCalledWith('https://checkout.stripe.test/c/pay/2')
+  })
+
+  it('says why a free organization over the people limit is read-only', async () => {
+    stubFetch(
+      respond({
+        summary: freeSummary,
+        subscription: onFree({
+          readOnly: true,
+          readOnlyReason: 'free_people',
+          freeTier: freeTier({ people: 4 }),
+        }),
+      }),
+    )
+    const wrapper = await renderPage()
+
+    expect(wrapper.get('[data-testid="free-people-alert"]').text()).toContain(
+      'the free plan allows 3 people across your free organizations',
+    )
+    expect(wrapper.get('[data-testid="free-people"]').text()).toContain('4 of 3')
+
+    const member = await renderPage('member')
+    expect(member.get('[data-testid="free-people-alert"]').text()).toContain('Ask an owner')
+    expect(member.find('[data-testid="free-upgrade"]').exists()).toBe(false)
+  })
+
+  it('tells an evaluating organization it moves to Free when the evaluation ends', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-21T12:00:00Z') })
+    stubFetch(
+      respond({
+        summary: hostedSummary,
+        subscription: evaluating({ freeTier: freeTier({ people: 0, storedBytes: 0 }) }),
+      }),
+    )
+    const wrapper = await renderPage()
+
+    const panel = wrapper.get('[data-testid="evaluation-panel"]')
+    expect(panel.text()).toContain('moves to the free plan')
+    expect(panel.text()).toContain('200 MiB')
+    expect(wrapper.find('[data-testid="free-tier"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-hosted_free"]').exists()).toBe(false)
   })
 })

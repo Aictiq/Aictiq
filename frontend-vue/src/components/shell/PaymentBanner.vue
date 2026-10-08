@@ -3,27 +3,23 @@ import { TriangleAlert } from '@lucide/vue'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import type { Subscription } from '@/api/billing'
-import { shellBanner } from '@/lib/billing'
+import { shellBanner, type BannerSubscription } from '@/lib/billing'
 import { orgSettingsPath } from '@/router/paths'
 import { cn } from '@/lib/utils'
 
 /**
- * "A payment failed" - or "your evaluation ends in five days" - across the
- * top of the app, for the organization it concerns. Every member sees it, not only the
- * Owner: they are the ones who will find their writes refused, and a 409 out of nowhere is
+ * "A payment failed" - or "your evaluation ends in five days", or "the free plan allows
+ * three people" - across the top of the app, for the organization it concerns. Every
+ * member sees it, not only the Owner: they are the ones who will find their writes refused, and a 409 out of nowhere is
  * worse than a warning a fortnight ahead. Owners get the way to fix it; everyone else is
  * told whom to ask.
  *
- * Both causes end in the same `readOnly`, so `shellBanner` names the one that actually
+ * Every cause ends in the same `readOnly`, so `shellBanner` names the one that actually
  * happened: an organization whose card was declined is never told its evaluation ran out.
  */
 const props = defineProps<{
   slug: string
-  subscription:
-    | Pick<Subscription, 'enabled' | 'readOnly' | 'graceEndsAt' | 'paymentFailedAt' | 'evaluation'>
-    | null
-    | undefined
+  subscription: BannerSubscription | null | undefined
   isOwner: boolean
 }>()
 

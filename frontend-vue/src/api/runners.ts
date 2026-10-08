@@ -13,6 +13,41 @@ export interface RunnerHarness {
   version: string | null
 }
 
+/** A harness the CLI knows that the runner does not offer, and why. */
+export interface RunnerMissingHarness {
+  name: string
+  /** `not-on-path`: no executable found; `version-failed`: found, but `--version` failed. */
+  reason: 'not-on-path' | 'version-failed'
+  /** The executable looked for, or the one found. */
+  command: string
+}
+
+/** The runner's last self-update that did not take; it keeps working on its current version. */
+export interface RunnerUpdateFailure {
+  version: string
+  error: string
+  at: string
+}
+
+/** One usage window of a harness account: how much of its allowance is used, and when it starts over. */
+export interface RunnerUsageWindow {
+  /** 0 to 100; a little more past the limit. */
+  usedPercent: number
+  resetsAt: string | null
+}
+
+/**
+ * The 5-hour and weekly allowance a harness account on the machine last reported in a run's
+ * output. Only harnesses that report one appear (Claude Code and Codex today).
+ */
+export interface RunnerUsageLimits {
+  harness: string
+  /** When a run last read it; the figures are only as current as this. */
+  observedAt: string
+  fiveHour: RunnerUsageWindow | null
+  weekly: RunnerUsageWindow | null
+}
+
 /** What the runner reported about itself on its last hello or heartbeat. */
 export interface RunnerCapabilities {
   v: number
@@ -29,6 +64,16 @@ export interface RunnerCapabilities {
   workspaces?: string[] | null
   /** This organization's repository roots on the machine. Absent from older runners. */
   repoRoots?: string[] | null
+  /** Known harnesses the runner does not offer, and why. Absent from older runners. */
+  missingHarnesses?: RunnerMissingHarness[] | null
+  /** The PATH the runner looked for harnesses on: a service's, not a login shell's. */
+  path?: string | null
+  /** Set while the runner's last self-update attempt failed. */
+  updateFailure?: RunnerUpdateFailure | null
+  /** Harness allowances seen in runs. Absent from older runners and until a run reports one. */
+  usageLimits?: RunnerUsageLimits[] | null
+  /** Claude usage is read from Anthropic between runs (`aictiq runner usage --claude-oauth on`). */
+  claudeUsagePoll?: boolean | null
 }
 
 export interface Runner {
@@ -88,9 +133,12 @@ export interface RunnerChoice {
   /** What the runner last reported; empty until it has said hello. */
   harnesses: string[]
   isOnline: boolean
+  /** Harness allowances the runner last reported. Absent from older servers and runners. */
+  usageLimits?: RunnerUsageLimits[] | null
 }
 
-export const listRunnerChoices = (slug: string) => apiFetch<RunnerChoice[]>(`/orgs/${slug}/runners/choices`)
+export const listRunnerChoices = (slug: string) =>
+  apiFetch<RunnerChoice[]>(`/orgs/${slug}/runners/choices`)
 
 export const listRunnerMachinesElsewhere = (slug: string) =>
   apiFetch<RunnerMachine[]>(`/orgs/${slug}/runners/elsewhere`)

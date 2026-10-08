@@ -1,4 +1,4 @@
-import type { Runner } from '@/api/runners'
+import type { Runner, RunnerCapabilities, RunnerUsageLimits } from '@/api/runners'
 
 /**
  * The rules the Runners tab shows, kept out of the component so they can be tested: what
@@ -116,4 +116,101 @@ export function runnerPlatformGuess(agent: string): RunnerPlatform {
   if (/windows|win32|win64/i.test(agent)) return 'windows'
   if (/mac|iphone|ipad/i.test(agent)) return 'macos'
   return 'linux'
+}
+
+// ── Harness usage limits ─────────────────────────────────────────────────────────
+
+export type UsageWindowKind = 'fiveHour' | 'weekly'
+
+const UsageWindowMs: Record<UsageWindowKind, number> = {
+  fiveHour: 5 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+}
+
+export const usageWindowLabel: Record<UsageWindowKind, string> = { fiveHour: '5h', weekly: 'wk' }
+
+/**
+ * A window read longer ago than it lasts, or one whose reset has passed, no longer says what is
+ * left: the allowance has started over at least once since. It shows as stale, not as current.
+ */
+export function usageWindowStale(
+  limits: RunnerUsageLimits,
+  kind: UsageWindowKind,
+  now: Date = new Date(),
+): boolean {
+  const window = limits[kind]
+  if (!window) return false
+  if (now.getTime() - new Date(limits.observedAt).getTime() > UsageWindowMs[kind]) return true
+  return window.resetsAt !== null && new Date(window.resetsAt).getTime() <= now.getTime()
+}
+
+/** The figure as people read it: whole percent. */
+export const usagePercent = (value: number) => `${Math.round(value)}%`
+
+/** `Mon`, or `Mon 14:00` with the time, in the viewer's own time zone. */
+export function usageResetLabel(iso: string, withTime = false): string {
+  const at = new Date(iso)
+  const day = at.toLocaleDateString(undefined, { weekday: 'short' })
+  return withTime
+    ? `${day} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+    : day
+}
+
+/** What the Claude usage poll is and what it sends where, in the public guide. */
+export const claudeUsagePollDocsUrl =
+  'https://aictiq.github.io/Aictiq/harness-usage-limits#live-claude-usage'
+
+export const claudeUsagePollCommand = 'aictiq runner usage --claude-oauth on'
+
+/**
+ * Whether to say that a runner's Claude usage only moves after runs, and how to make it live: it
+ * offers Claude and has not turned the opt-in poll on (runners before 0.9.1 report nothing).
+ */
+export function claudeUsagePollHint(
+  capabilities: Pick<RunnerCapabilities, 'harnesses' | 'claudeUsagePoll'> | null | undefined,
+): boolean {
+  if (!capabilities?.harnesses.some((harness) => harness.name === 'claude')) return false
+  return capabilities.claudeUsagePoll !== true
+}
+
+/** The limits a runner reported for one harness, or null when it has none. */
+export function usageLimitsFor(
+  limits: RunnerUsageLimits[] | null | undefined,
+  harness: string | null,
+): RunnerUsageLimits | null {
+  if (!harness) return null
+  return limits?.find((entry) => entry.harness === harness) ?? null
+}
+
+/**
+ * The limits Hand to agent shows: the chosen runner's, or with "any free runner" the most
+ * recently read among those that can take the harness. Each runner may sign in to a different
+ * account, so the tooltip names whose they are.
+ */
+export function usageLimitsForRun(
+  runners: { name: string; usageLimits?: RunnerUsageLimits[] | null }[],
+  harness: string | null,
+): { runner: string; limits: RunnerUsageLimits } | null {
+  let best: { runner: string; limits: RunnerUsageLimits } | null = null
+  for (const runner of runners) {
+    const limits = usageLimitsFor(runner.usageLimits, harness)
+    if (limits && (!best || Date.parse(limits.observedAt) > Date.parse(best.limits.observedAt))) {
+      best = { runner: runner.name, limits }
+    }
+  }
+  return best
+}
+
+/** `5h 40% · wk 72% · resets Mon`; a stale window says so instead of a figure. */
+export function usageSummary(limits: RunnerUsageLimits, now: Date = new Date()): string {
+  const parts = (['fiveHour', 'weekly'] as const).flatMap((kind) => {
+    const window = limits[kind]
+    if (!window) return []
+    const figure = usageWindowStale(limits, kind, now) ? 'stale' : usagePercent(window.usedPercent)
+    return [`${usageWindowLabel[kind]} ${figure}`]
+  })
+  const reset = limits.weekly?.resetsAt
+  if (reset && !usageWindowStale(limits, 'weekly', now))
+    parts.push(`resets ${usageResetLabel(reset)}`)
+  return parts.join(' · ')
 }

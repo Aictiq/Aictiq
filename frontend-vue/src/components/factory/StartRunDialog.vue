@@ -19,7 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useToast } from '@/composables/useToast'
+import { since } from '@/lib/claims'
+import {
+  usageLimitsForRun,
+  usagePercent,
+  usageResetLabel,
+  usageSummary,
+  usageWindowStale,
+} from '@/lib/runners'
 import { orgSettingsPath, projectSettingsPath } from '@/router/paths'
 import {
   defaultScheduleValue,
@@ -102,6 +111,30 @@ watch(scheduled, (on) => {
 })
 
 const chosenRunner = computed(() => runners.value.find((runner) => runner.id === runnerId.value) ?? null)
+
+/**
+ * What is left of the harness account the run will use: the chosen runner's, or the most
+ * recently read one among the runners that could take it. Null hides the line.
+ */
+const usage = computed(() =>
+  usageLimitsForRun(
+    chosenRunner.value ? [chosenRunner.value] : compatibleRunners.value,
+    playbookHarness.value,
+  ),
+)
+
+const usageWindows = computed(() => {
+  const limits = usage.value?.limits
+  if (!limits) return []
+  return (['fiveHour', 'weekly'] as const).flatMap((kind) => {
+    const window = limits[kind]
+    if (!window) return []
+    const stale = usageWindowStale(limits, kind)
+    const name = kind === 'fiveHour' ? '5-hour' : 'Weekly'
+    const reset = window.resetsAt ? `, resets ${usageResetLabel(window.resetsAt, true)}` : ''
+    return [`${name}: ${usagePercent(window.usedPercent)} used${stale ? ' (stale)' : reset}`]
+  })
+})
 
 // A playbook with another harness may rule the chosen runner out.
 watch(playbookHarness, (harness) => {
@@ -267,7 +300,27 @@ async function submit() {
           </select>
         </div>
         <div class="space-y-1.5">
-          <label for="start-run-agent" class="text-sm font-medium">Agent</label>
+          <div class="flex items-center justify-between gap-2">
+            <label for="start-run-agent" class="text-sm font-medium">Agent</label>
+            <TooltipProvider v-if="usage">
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <span
+                    tabindex="0"
+                    data-testid="start-run-usage"
+                    class="text-muted-foreground truncate font-mono text-[11px]"
+                  >
+                    {{ usageSummary(usage.limits) }}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent class="text-xs">
+                  <p class="font-medium">{{ playbookHarness }} usage on {{ usage.runner }}</p>
+                  <p v-for="line in usageWindows" :key="line">{{ line }}</p>
+                  <p>As of {{ since(usage.limits.observedAt) }}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <select
             id="start-run-agent"
             v-model="agentId"
@@ -302,18 +355,31 @@ async function submit() {
           </p>
         </div>
         <div class="space-y-1.5">
-          <label class="flex items-center gap-2 text-sm font-medium">
-            <input
-              v-model="scheduled"
-              type="checkbox"
+          <div class="flex items-center justify-end gap-2">
+            <label id="start-run-schedule-label" for="start-run-schedule" class="text-sm font-medium">
+              Start later
+            </label>
+            <button
+              id="start-run-schedule"
+              type="button"
+              role="switch"
+              :aria-checked="scheduled"
+              aria-labelledby="start-run-schedule-label"
               data-testid="start-run-schedule"
-              class="accent-primary size-4"
-            />
-            Start later
-          </label>
+              class="focus-visible:ring-ring inline-flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+              :class="scheduled ? 'bg-primary border-primary' : 'bg-muted border-border'"
+              @click="scheduled = !scheduled"
+            >
+              <span
+                aria-hidden="true"
+                class="bg-background inline-block size-4 rounded-full shadow transition-transform"
+                :class="scheduled ? 'translate-x-4' : 'translate-x-0'"
+              />
+            </button>
+          </div>
           <template v-if="scheduled">
             <label for="start-run-start-at" class="sr-only">Start at</label>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 id="start-run-start-at"
                 v-model="startAt"
@@ -327,12 +393,13 @@ async function submit() {
               </span>
             </div>
             <p class="text-muted-foreground text-xs">
-              The item is claimed now; no runner takes the run before this time.
+              When you schedule this run, the item is reserved for the agent so another run cannot start.
+              Work begins at or after the selected time, when a runner is available.
+            </p>
+            <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
+              {{ message }}
             </p>
           </template>
-          <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
-            {{ message }}
-          </p>
         </div>
         <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
       </form>

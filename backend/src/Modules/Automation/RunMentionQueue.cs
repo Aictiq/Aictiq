@@ -215,7 +215,7 @@ public sealed class RunMentionQueue(
             DispatchOutcome.ItemClaimed or DispatchOutcome.RunInProgress => (null, null, false),
             DispatchOutcome.ItemNotFound => (null, "The item is gone.", false),
             DispatchOutcome.ReadOnly => (null,
-                "This organization is read-only - the evaluation has ended or a payment is unresolved - so agent runs are paused.", true),
+                "This organization is read-only - the evaluation has ended, a payment is unresolved or the free plan's people limit is exceeded - so agent runs are paused.", true),
             DispatchOutcome.PlaybookNotFound => (null,
                 "This project has no playbook I can use, or its page cannot be read by the person who asked.", true),
             _ => (null, result.Message ?? "The run could not be dispatched.", true),

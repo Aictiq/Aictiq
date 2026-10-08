@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import VChart from 'vue-echarts'
 import {
   Activity,
   BarChart3,
@@ -11,11 +12,18 @@ import {
   Sparkles,
   UsersRound,
 } from '@lucide/vue'
+import type { BurndownDay, CumulativeFlowDay, CycleSummary, DashboardSprint, SprintHealth, TeamVelocity, ThroughputPoint } from '@/api/analytics'
+import { burndownOption, cfdOption, compactOption, throughputOption, velocityOption } from '@/lib/analytics'
 
 const props = defineProps<{ type: string; data: unknown; config: Record<string, unknown> }>()
 
-type CountRow = { stateId?: string | null; stateName?: string | null; assigneeId?: string | null; count?: number }
-type ActivityRow = { itemId?: string; at?: string; field?: string }
+type CountRow = { stateId?: string | null; stateName?: string | null; assigneeId?: string | null; displayName?: string | null; isAgent?: boolean; count?: number }
+type ActivityRow = { itemId?: string; itemKey?: string; itemTitle?: string; actor?: string | null; at?: string; field?: string }
+type VelocityData = { teamName: string | null; velocity: TeamVelocity | null }
+type BurndownData = { sprint: DashboardSprint | null; unit?: 'points' | 'hours'; days?: BurndownDay[] }
+type HealthData = { sprint: DashboardSprint | null; health?: SprintHealth }
+type FlowData = { days?: CumulativeFlowDay[] }
+type CycleData = { leadTime: CycleSummary; cycleTime: CycleSummary; completedCount: number; throughput: ThroughputPoint[] }
 
 const title = computed(() => ({
   velocity: 'Team velocity', burndown: 'Sprint burndown', cfd: 'Flow of work', 'cycle-time': 'Cycle time',
@@ -41,10 +49,32 @@ const note = computed(() => {
   return String(data?.markdown ?? props.config.markdown ?? '')
 })
 
-function label(row: CountRow, index: number) {
-  const value = props.type === 'items-by-state' ? row.stateName ?? row.stateId : row.assigneeId
-  if (!value) return props.type === 'items-by-assignee' ? 'Unassigned' : 'No state'
-  return props.type === 'items-by-assignee' ? `Member ${index + 1}` : String(value).replaceAll('-', ' ')
+function label(row: CountRow) {
+  if (props.type === 'items-by-assignee') return row.assigneeId ? row.displayName ?? 'Former member' : 'Unassigned'
+  return row.stateName ?? 'No state'
+}
+
+const record = <T,>() => (props.data && typeof props.data === 'object' && !Array.isArray(props.data) ? props.data as T : null)
+const velocity = computed(() => record<VelocityData>())
+// Velocity arrives newest first; a chart reads oldest to newest.
+const velocitySprints = computed(() => [...(velocity.value?.velocity?.sprints ?? [])].reverse())
+const burndown = computed(() => record<BurndownData>())
+const burndownDays = computed(() => burndown.value?.days ?? [])
+const burndownToday = computed(() => [...burndownDays.value].reverse().find(day => day.remaining !== null)?.remaining ?? null)
+const health = computed(() => record<HealthData>())
+const flowDays = computed(() => record<FlowData>()?.days ?? [])
+const flowHasData = computed(() => flowDays.value.some(day => Object.values(day.counts).some(count => count > 0)))
+const cycle = computed(() => record<CycleData>())
+const sprintDays = computed(() => {
+  const sprint = health.value?.sprint
+  return sprint ? Math.round((new Date(sprint.endsOn).getTime() - new Date(sprint.startsOn).getTime()) / 86_400_000) : 0
+})
+
+function figure(value: number | null | undefined) { return Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 }) }
+function shortDate(value: string) { return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) }
+function activityLabel(entry: ActivityRow) {
+  const field = (entry.field || 'updated').replaceAll('-', ' ')
+  return entry.itemKey ? `${entry.itemKey} ${field}` : field
 }
 
 const maxCount = computed(() => Math.max(...rows.value.map(row => Number(row.count) || 0), 1))
@@ -73,8 +103,8 @@ function relativeTime(value?: string) {
 
     <template v-if="type === 'items-by-state' || type === 'items-by-assignee'">
       <div v-if="rows.length" class="dashboard-widget__distribution">
-        <div v-for="(row, index) in rows.slice(0, 6)" :key="`${label(row, index)}-${index}`" class="dashboard-widget__bar-row">
-          <span :title="label(row, index)">{{ label(row, index) }}</span>
+        <div v-for="(row, index) in rows.slice(0, 6)" :key="`${label(row)}-${index}`" class="dashboard-widget__bar-row">
+          <span :title="label(row)">{{ label(row) }}</span>
           <div class="dashboard-widget__bar-track"><i :style="{ width: width(row.count) }" /></div>
           <b>{{ row.count ?? 0 }}</b>
         </div>
@@ -86,7 +116,7 @@ function relativeTime(value?: string) {
       <ol v-if="activity.length" class="dashboard-widget__activity">
         <li v-for="entry in activity.slice(0, 4)" :key="`${entry.itemId}-${entry.at}-${entry.field}`">
           <span class="dashboard-widget__activity-dot" />
-          <div><p>{{ entry.field || 'Updated work item' }}</p><span>{{ relativeTime(entry.at) }}</span></div>
+          <div><p :title="entry.itemTitle">{{ activityLabel(entry) }}</p><span>{{ entry.actor ? `${entry.actor} · ` : '' }}{{ relativeTime(entry.at) }}</span></div>
         </li>
       </ol>
       <p v-else class="dashboard-widget__empty">Activity will appear as your team works.</p>
@@ -100,6 +130,53 @@ function relativeTime(value?: string) {
     <template v-else-if="type === 'markdown'">
       <p v-if="note" class="dashboard-widget__note">{{ note }}</p>
       <p v-else class="dashboard-widget__empty">Add a note in edit mode to give this dashboard context.</p>
+    </template>
+
+    <template v-else-if="type === 'velocity'">
+      <template v-if="velocitySprints.length">
+        <p class="dashboard-widget__caption-inline"><b>{{ figure(velocity?.velocity?.averageVelocity) }}</b> points per sprint on average · {{ velocity?.teamName }}</p>
+        <div class="dashboard-widget__chart"><VChart :option="compactOption(velocityOption(velocitySprints))" autoresize /></div>
+      </template>
+      <p v-else class="dashboard-widget__empty">{{ velocity?.teamName ? 'Complete a sprint to see how much the team delivers.' : 'Add a team to this project to track velocity.' }}</p>
+    </template>
+
+    <template v-else-if="type === 'burndown'">
+      <template v-if="burndown?.sprint && burndownDays.length">
+        <p class="dashboard-widget__caption-inline">{{ burndown.sprint.name }} · <b>{{ figure(burndownToday) }}</b> {{ burndown.unit === 'hours' ? 'hours' : 'points' }} remaining</p>
+        <div class="dashboard-widget__chart"><VChart :option="compactOption(burndownOption(burndownDays))" autoresize /></div>
+      </template>
+      <p v-else class="dashboard-widget__empty">Start a sprint to see its burndown here.</p>
+    </template>
+
+    <template v-else-if="type === 'sprint-health'">
+      <template v-if="health?.sprint && health.health">
+        <div class="dashboard-widget__metric"><strong>{{ figure(health.health.percentDone) }}%</strong><span>of {{ health.sprint.name }} done · day {{ Math.min(health.health.daysElapsed, sprintDays) }} of {{ sprintDays }}</span></div>
+        <dl class="dashboard-widget__stats">
+          <div><dt>Blocked</dt><dd>{{ health.health.blockedCount }}</dd></div>
+          <div><dt>Unestimated</dt><dd>{{ health.health.unestimatedCount }}</dd></div>
+          <div><dt>Unassigned</dt><dd>{{ health.health.unassignedCount }}</dd></div>
+          <div><dt>Projected</dt><dd>{{ health.health.projectedCompletionOn ? shortDate(health.health.projectedCompletionOn) : '-' }}</dd></div>
+        </dl>
+      </template>
+      <p v-else class="dashboard-widget__empty">Start a sprint to see its delivery health here.</p>
+    </template>
+
+    <template v-else-if="type === 'cfd'">
+      <div v-if="flowHasData" class="dashboard-widget__chart"><VChart :option="compactOption(cfdOption(flowDays))" autoresize /></div>
+      <p v-else class="dashboard-widget__empty">Daily snapshots of work by state will build this chart.</p>
+    </template>
+
+    <template v-else-if="type === 'cycle-time'">
+      <template v-if="cycle?.completedCount">
+        <dl class="dashboard-widget__stats dashboard-widget__stats--wide">
+          <div><dt>Median cycle</dt><dd>{{ figure(cycle.cycleTime.p50) }}d</dd></div>
+          <div><dt>85% within</dt><dd>{{ figure(cycle.cycleTime.p85) }}d</dd></div>
+          <div><dt>Median lead</dt><dd>{{ figure(cycle.leadTime.p50) }}d</dd></div>
+        </dl>
+        <p class="dashboard-widget__caption-inline">{{ cycle.completedCount }} completed in the last 30 days</p>
+        <div v-if="cycle.throughput.length" class="dashboard-widget__chart"><VChart :option="compactOption(throughputOption(cycle.throughput))" autoresize /></div>
+      </template>
+      <p v-else class="dashboard-widget__empty">Nothing was completed in the last 30 days.</p>
     </template>
 
     <template v-else>
@@ -137,6 +214,13 @@ function relativeTime(value?: string) {
 .dashboard-widget__caption { border-top: 1px solid var(--border); padding-top: .6rem; }
 .dashboard-widget__note { color: var(--foreground); font-size: .8rem; line-height: 1.55; margin-top: .9rem; overflow: auto; white-space: pre-wrap; }
 .dashboard-widget__coming { align-items: center; display: flex; flex: 1; gap: .7rem; justify-content: center; text-align: left; }
+.dashboard-widget__chart { flex: 1; margin-top: .4rem; min-height: 0; }
+.dashboard-widget__caption-inline { color: var(--muted-foreground); font-size: .7rem; margin-top: .5rem; }
+.dashboard-widget__caption-inline b { color: var(--foreground); font-weight: 600; }
+.dashboard-widget__stats { display: grid; gap: .5rem; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: .6rem; }
+.dashboard-widget__stats--wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dashboard-widget__stats dt { color: var(--muted-foreground); font-size: .6rem; white-space: nowrap; }
+.dashboard-widget__stats dd { color: var(--foreground); font-size: .95rem; font-weight: 600; }
 .dashboard-widget__coming strong { display: block; font-size: .78rem; font-weight: 600; }.dashboard-widget__coming p { color: var(--muted-foreground); font-size: .7rem; line-height: 1.4; margin-top: .15rem; max-width: 18rem; }
 .dashboard-widget__pulse { background: color-mix(in oklab, var(--primary) 18%, transparent); border: 1px solid color-mix(in oklab, var(--primary) 60%, transparent); border-radius: 999px; box-shadow: 0 0 0 5px color-mix(in oklab, var(--primary) 8%, transparent); height: .55rem; min-width: .55rem; }
 </style>

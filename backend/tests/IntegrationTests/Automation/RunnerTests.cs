@@ -109,6 +109,69 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
         Assert.True(reported.Service);
         Assert.Empty(reported.Workspaces!);
+
+        // Why a harness is missing and a self-update that failed reach the runner page.
+        var troubled = setUp with
+        {
+            MissingHarnesses = [new RunnerMissingHarness("cursor", "not-on-path", "agent")],
+            Path = "/usr/local/bin:/usr/bin",
+            UpdateFailure = new RunnerUpdateFailure("0.8.1", "/usr/lib/node_modules/@aictiq is not writable by this user", DateTimeOffset.UtcNow),
+        };
+        await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(troubled), ApiTestContext.Json, Ct);
+        reported = (await ListAsync(_owner, Acme)).Single().Capabilities!;
+        Assert.Equal("not-on-path", Assert.Single(reported.MissingHarnesses!).Reason);
+        Assert.Equal("/usr/local/bin:/usr/bin", reported.Path);
+        Assert.Equal("0.8.1", reported.UpdateFailure!.Version);
+    }
+
+    [Fact]
+    public async Task harness_usage_limits_reach_the_roster_and_the_run_choices()
+    {
+        var issued = await RegisterAsync(_owner, Acme, "vps-1");
+        using var runner = RunnerClient(issued.Secret);
+
+        // A runner from before usage limits sends none, and nothing about it changes.
+        await runner.PostAsJsonAsync("/api/v1/runner/hello", new RunnerHelloRequest(Claude), ApiTestContext.Json, Ct);
+        Assert.Null((await ListAsync(_owner, Acme)).Single().Capabilities!.UsageLimits);
+
+        var observedAt = DateTimeOffset.UtcNow.AddMinutes(-3);
+        var resets = DateTimeOffset.UtcNow.AddDays(4);
+        var limited = Claude with
+        {
+            UsageLimits =
+            [
+                new RunnerUsageLimits("claude", observedAt, new RunnerUsageWindow(79, DateTimeOffset.UtcNow.AddHours(2)), new RunnerUsageWindow(14, resets)),
+                new RunnerUsageLimits("codex", observedAt, null, new RunnerUsageWindow(3.5, null)),
+            ],
+            ClaudeUsagePoll = true,
+        };
+        var beat = await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(limited), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.NoContent, beat.StatusCode);
+
+        var stored = (await ListAsync(_owner, Acme)).Single().Capabilities!.UsageLimits!;
+        Assert.Equal(["claude", "codex"], stored.Select(l => l.Harness));
+        Assert.Equal(79, stored[0].FiveHour!.UsedPercent);
+        Assert.Equal(resets.ToUnixTimeSeconds(), stored[0].Weekly!.ResetsAt!.Value.ToUnixTimeSeconds());
+        Assert.Null(stored[1].FiveHour);
+        Assert.True((await ListAsync(_owner, Acme)).Single().Capabilities!.ClaudeUsagePoll);
+
+        // Whoever hands an item to an agent sees them too, without the roster.
+        var choice = Assert.Single((await _owner.GetFromJsonAsync<List<RunnerChoiceView>>(
+            $"/api/v1/orgs/{Acme}/runners/choices", ApiTestContext.Json, Ct))!);
+        Assert.Equal(14, choice.UsageLimits!.Single(l => l.Harness == "claude").Weekly!.UsedPercent);
+
+        foreach (var bad in new[]
+        {
+            Claude with { UsageLimits = [new RunnerUsageLimits("Claude Code", observedAt, null, null)] },
+            Claude with { UsageLimits = [new RunnerUsageLimits("claude", observedAt, new RunnerUsageWindow(-1, null), null)] },
+            Claude with { UsageLimits = [new RunnerUsageLimits("claude", observedAt, null, new RunnerUsageWindow(1001, null))] },
+            Claude with { UsageLimits = [new RunnerUsageLimits("claude", observedAt, null, null), new RunnerUsageLimits("claude", observedAt, null, null)] },
+            Claude with { UsageLimits = [.. Enumerable.Range(0, 17).Select(i => new RunnerUsageLimits($"h{i}", observedAt, null, null))] },
+        })
+        {
+            var refused = await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(bad), ApiTestContext.Json, Ct);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
     }
 
     [Fact]
@@ -251,6 +314,9 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
             Claude with { MaxParallel = 0 },
             Claude with { Workspaces = [.. Enumerable.Range(0, 201).Select(i => $"P{i}")] },
             Claude with { RepoRoots = [new string('a', 1025)] },
+            Claude with { MissingHarnesses = [new RunnerMissingHarness("claude", "broken", "claude")] },
+            Claude with { Path = new string('a', 4097) },
+            Claude with { UpdateFailure = new RunnerUpdateFailure("0.8.1", "", DateTimeOffset.UtcNow) },
         })
         {
             var refused = await runner.PostAsJsonAsync("/api/v1/runner/hello", new RunnerHelloRequest(bad), ApiTestContext.Json, Ct);

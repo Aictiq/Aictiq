@@ -132,13 +132,20 @@ describe('detectInstallation', () => {
 })
 
 describe('SelfUpdater', () => {
-  const updater = (current: string, packageRoot: string, run: RunCommand, latest = '0.7.0') =>
+  const updater = (
+    current: string,
+    packageRoot: string,
+    run: RunCommand,
+    latest = '0.7.0',
+    writable?: (dir: string) => boolean,
+  ) =>
     new SelfUpdater({
       current,
       packageRoot,
       entry: '/usr/bin/aictiq',
       log: () => {},
       run,
+      ...(writable ? { writable } : {}),
       fetch: (async () => new Response(JSON.stringify({ latest }))) as unknown as typeof fetch,
     })
 
@@ -183,6 +190,15 @@ describe('SelfUpdater', () => {
     await expect(updater('0.6.0', packageRoot, npm.run).install('0.7.0')).rejects.toThrow(
       /npm install --global .* failed \(exit 243\): npm error code EACCES \/ permission denied/,
     )
+  })
+
+  it('refuses a global npm install this user cannot write before trying it', async () => {
+    const { root, packageRoot } = npmPrefix()
+    const npm = fakeNpm(root, { installed: '0.6.0' })
+    await expect(
+      updater('0.6.0', packageRoot, npm.run, '0.7.0', () => false).installation(),
+    ).rejects.toThrow(/is not writable by this user \(installed with sudo\?\)/)
+    expect(npm.calls.some(([, verb]) => verb === 'install')).toBe(false)
   })
 
   it('refuses a CLI that is not a global install', async () => {

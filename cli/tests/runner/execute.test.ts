@@ -249,6 +249,36 @@ describe('executeRun', () => {
     expect(report).toMatchObject({ costUsd: 0.5, inputTokens: 10, outputTokens: 4 })
   })
 
+  it('hands on the usage windows the harness reported, the latest of each', async () => {
+    const adapter = scriptAdapter(`console.log('LIMIT'); console.log('RESULT ok')`)
+    const window = (usedPercent: number) => ({ usedPercent, resetsAt: null })
+    options.adapters.fake = {
+      ...adapter,
+      parse: (line) =>
+        line === 'LIMIT'
+          ? { log: null, limits: { fiveHour: window(40), weekly: window(10) } }
+          : adapter.parse(line),
+      // Read once it exits, like Codex's session file; it only knows the weekly window.
+      limits: () => ({ weekly: window(12) }),
+    }
+    const seen: unknown[] = []
+    options.onLimits = (harness, limits) => seen.push({ harness, limits })
+
+    await executeRun(claimedRun(), options)
+
+    expect(seen).toEqual([
+      { harness: 'claude', limits: { fiveHour: window(40), weekly: window(12) } },
+    ])
+  })
+
+  it('reports no usage windows when the harness gave none', async () => {
+    options.adapters.fake = scriptAdapter(`console.log('RESULT ok')`)
+    const seen: unknown[] = []
+    options.onLimits = (...args) => seen.push(args)
+    await executeRun(claimedRun(), options)
+    expect(seen).toEqual([])
+  })
+
   it('strips terminal colours from log lines and the summary', async () => {
     options.adapters.fake = scriptAdapter(
       `console.error('\\x1b[91m\\x1b[1mError: \\x1b[0mFile not found'); process.exit(1)`,
