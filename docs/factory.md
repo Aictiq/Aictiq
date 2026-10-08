@@ -378,13 +378,15 @@ operator can start or cancel runs or read the prompt snapshot, log, and failure 
 
 ### Schedule a run for later
 
-To let the agent work later, for example overnight, select **Start later** in the Hand to
-agent dialog. The **Start at** field is prefilled with 6 hours from now. You enter the time in
-your browser's timezone, which is shown next to the field. Aictiq stores it in UTC and refuses a
+To let the agent work later, for example overnight, turn on the **Start later** toggle on the
+right below the runner selection (or Agent) in the Hand to agent dialog. The **Start at** field
+is prefilled with 6 hours from now. You enter the time in your browser's timezone, which is
+shown beside or below the field. Aictiq stores it in UTC and refuses a
 time in the past.
 
-A scheduled run is created as `queued` and claims the item straight away, so nobody can start a
-second run on it. No runner takes the run before its start time. After that time, the next free
+Submitting **Schedule run** creates a `queued` run and reserves the item for the agent, so
+nobody can start a second run on it. Turning on the toggle alone does not reserve the item.
+Work begins at or after the selected time, when a runner is available. The next free
 matching runner takes it, or the chosen runner if you picked one. While the run waits, the item
 and run pages show **Scheduled for** and the local start time. Cancel the run from the run
 page, as you would any queued run. The sweeper does not treat a waiting scheduled run as stuck.

@@ -355,18 +355,31 @@ async function submit() {
           </p>
         </div>
         <div class="space-y-1.5">
-          <label class="flex items-center gap-2 text-sm font-medium">
-            <input
-              v-model="scheduled"
-              type="checkbox"
+          <div class="flex items-center justify-end gap-2">
+            <label id="start-run-schedule-label" for="start-run-schedule" class="text-sm font-medium">
+              Start later
+            </label>
+            <button
+              id="start-run-schedule"
+              type="button"
+              role="switch"
+              :aria-checked="scheduled"
+              aria-labelledby="start-run-schedule-label"
               data-testid="start-run-schedule"
-              class="accent-primary size-4"
-            />
-            Start later
-          </label>
+              class="focus-visible:ring-ring inline-flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+              :class="scheduled ? 'bg-primary border-primary' : 'bg-muted border-border'"
+              @click="scheduled = !scheduled"
+            >
+              <span
+                aria-hidden="true"
+                class="bg-background inline-block size-4 rounded-full shadow transition-transform"
+                :class="scheduled ? 'translate-x-4' : 'translate-x-0'"
+              />
+            </button>
+          </div>
           <template v-if="scheduled">
             <label for="start-run-start-at" class="sr-only">Start at</label>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 id="start-run-start-at"
                 v-model="startAt"
@@ -380,12 +393,13 @@ async function submit() {
               </span>
             </div>
             <p class="text-muted-foreground text-xs">
-              The item is claimed now; no runner takes the run before this time.
+              When you schedule this run, the item is reserved for the agent so another run cannot start.
+              Work begins at or after the selected time, when a runner is available.
+            </p>
+            <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
+              {{ message }}
             </p>
           </template>
-          <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
-            {{ message }}
-          </p>
         </div>
         <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
       </form>
