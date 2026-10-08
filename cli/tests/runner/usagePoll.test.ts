@@ -288,7 +288,7 @@ describe('usage poller', () => {
       new Date(NowMs - 60_000),
       limitsPath,
     )
-    const fetch = vi.fn(async () => response(401, { error: 'invalid token' }))
+    const fetch = vi.fn(async (_url: string) => response(401, { error: 'invalid token' }))
     const { instance } = poller({ fetch })
     await instance.refresh()
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([ClaudeUsageUrl])
