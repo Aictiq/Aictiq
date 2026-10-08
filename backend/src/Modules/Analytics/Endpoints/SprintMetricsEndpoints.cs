@@ -19,7 +19,9 @@ namespace Aictiq.Modules.Analytics.Endpoints;
 public enum BurndownUnit { Points, Hours }
 
 public sealed record ScopeChangeAnnotation(Guid ItemId, bool Added, decimal Value, DateTimeOffset At);
-public sealed record BurndownDay(DateOnly Day, decimal Scope, decimal Remaining, decimal Completed,
+/// <param name="Remaining">Null for a day that has not happened yet, so a chart draws no line there
+/// rather than a drop to zero.</param>
+public sealed record BurndownDay(DateOnly Day, decimal Scope, decimal? Remaining, decimal? Completed,
     decimal IdealRemaining, IReadOnlyList<ScopeChangeAnnotation> ScopeChanges);
 public sealed record SprintBurndownView(Guid SprintId, BurndownUnit Unit, IReadOnlyList<BurndownDay> Days);
 public sealed record SprintVelocity(Guid SprintId, string SprintName, DateOnly StartsOn, DateOnly EndsOn,
@@ -52,7 +54,7 @@ public static class SprintMetricsEndpoints
 
     private static async Task<IResult> Burndown(Guid sprintId, string? unit, AnalyticsDbContext analytics,
         WorkItemsDbContext work, TenancyDbContext tenancy, IProjectAccess access, ICurrentUser user,
-        ICurrentTenant tenant, HybridCache cache, CancellationToken ct)
+        ICurrentTenant tenant, HybridCache cache, TimeProvider clock, CancellationToken ct)
     {
         if (!TryUnit(unit, out var selected))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["unit"] = ["Choose points or hours."] });
@@ -60,9 +62,9 @@ public static class SprintMetricsEndpoints
         if (visible is null) return Results.NotFound();
         var (sprint, team) = visible.Value;
         var key = $"analytics:burndown:{tenant.OrganizationId}:{sprintId}:{selected}";
-        var value = await cache.GetOrCreateAsync(key, (analytics, work, sprint, team, selected),
+        var value = await cache.GetOrCreateAsync(key, (analytics, work, sprint, team, selected, clock),
             static (state, token) => new ValueTask<SprintBurndownView>(BuildBurndownAsync(state.analytics, state.work,
-                state.sprint, state.team, state.selected, token)), CacheForOneMinute, tags: [SprintCacheTag(sprintId)], cancellationToken: ct);
+                state.sprint, state.team, state.selected, state.clock, token)), CacheForOneMinute, tags: [SprintCacheTag(sprintId)], cancellationToken: ct);
         return Results.Ok(value);
     }
 
@@ -71,6 +73,12 @@ public static class SprintMetricsEndpoints
     {
         var team = await tenancy.Teams.AsNoTracking().FirstOrDefaultAsync(x => x.Id == teamId, ct);
         if (team is null || await access.GetProjectRoleAsync(user.UserId!, team.ProjectId, ct) is null) return Results.NotFound();
+        return Results.Ok(await BuildVelocityAsync(analytics, work, teamId, last, ct));
+    }
+
+    internal static async Task<TeamVelocityView> BuildVelocityAsync(AnalyticsDbContext analytics, WorkItemsDbContext work,
+        Guid teamId, int last, CancellationToken ct)
+    {
         var sprints = await work.Sprints.AsNoTracking().Where(x => x.TeamId == teamId && x.State == SprintState.Completed)
             .OrderByDescending(x => x.CompletedAt).Take(Math.Clamp(last, 1, 24)).ToListAsync(ct);
         var sprintIds = sprints.Select(x => x.Id).ToArray();
@@ -101,7 +109,7 @@ public static class SprintMetricsEndpoints
             var scopePoints = await work.Items.AsNoTracking().Where(x => x.SprintId == next.Id).SumAsync(x => x.Points ?? 0, ct);
             forecast = new VelocityForecast(next.Id, next.Name, scopePoints, average, average - scopePoints);
         }
-        return Results.Ok(new TeamVelocityView(velocity, average, rolling.Count == 0 ? 0 : rolling.Average(x => x.CompletedPoints), forecast));
+        return new TeamVelocityView(velocity, average, rolling.Count == 0 ? 0 : rolling.Average(x => x.CompletedPoints), forecast);
     }
 
     private static async Task<IResult> Health(Guid sprintId, WorkItemsDbContext work, TenancyDbContext tenancy,
@@ -119,8 +127,8 @@ public static class SprintMetricsEndpoints
         return Results.Ok(value);
     }
 
-    private static async Task<SprintBurndownView> BuildBurndownAsync(AnalyticsDbContext analytics, WorkItemsDbContext work,
-        Sprint sprint, Team team, BurndownUnit unit, CancellationToken ct)
+    internal static async Task<SprintBurndownView> BuildBurndownAsync(AnalyticsDbContext analytics, WorkItemsDbContext work,
+        Sprint sprint, Team team, BurndownUnit unit, TimeProvider clock, CancellationToken ct)
     {
         var scope = await analytics.SprintScopeLog.AsNoTracking().Where(x => x.SprintId == sprint.Id).OrderBy(x => x.At).ToListAsync(ct);
         var snapshots = await analytics.ItemStateDaily.AsNoTracking().Where(x => x.SprintId == sprint.Id
@@ -130,7 +138,16 @@ public static class SprintMetricsEndpoints
         var workingDays = Enumerable.Range(0, sprint.EndsOn.DayNumber - sprint.StartsOn.DayNumber)
             .Count(offset => team.WorkingDays.Contains((int)sprint.StartsOn.AddDays(offset).DayOfWeek));
         var zone = ResolveTimeZone(team.TimeZone);
-        var initialScope = scope.Where(entry => LocalDay(entry.At, zone) <= sprint.StartsOn)
+        // The daily sample is taken just after midnight, so on its own it cannot show work
+        // finished today and says nothing about days still ahead. Today is therefore read
+        // from the items as they stand, and a future day without a sample has no value.
+        var today = LocalDay(clock.GetUtcNow(), zone);
+        var live = await work.Items.AsNoTracking().Where(x => x.SprintId == sprint.Id && x.RemovedAt == null)
+            .Select(x => new { x.StateId, x.Points, x.RemainingHours }).ToListAsync(ct);
+        // What the sprint committed to, as velocity counts it: the scope once it was started.
+        // A sprint started after its first day was usually planned that day, not before it.
+        var baseline = sprint.StartedAt is { } started && LocalDay(started, zone) > sprint.StartsOn ? LocalDay(started, zone) : sprint.StartsOn;
+        var initialScope = scope.Where(entry => LocalDay(entry.At, zone) <= baseline)
             .Sum(entry => entry.Added ? Value(entry, unit) : -Value(entry, unit));
         var days = new List<BurndownDay>();
         for (var day = sprint.StartsOn; day < sprint.EndsOn; day = day.AddDays(1))
@@ -140,18 +157,22 @@ public static class SprintMetricsEndpoints
                 .Select(entry => new ScopeChangeAnnotation(entry.ItemId, entry.Added, Value(entry, unit), entry.At)).ToList();
             var totalScope = dayScope.Sum(entry => entry.Added ? Value(entry, unit) : -Value(entry, unit));
             var state = snapshots.Where(snapshot => snapshot.Day == day).ToList();
-            var remaining = unit == BurndownUnit.Hours
-                ? state.Sum(snapshot => snapshot.RemainingHours ?? 0)
-                : state.Where(snapshot => !completedStates.Contains(snapshot.StateId)).Sum(snapshot => snapshot.Points ?? 0);
+            decimal? remaining = day == today ? unit == BurndownUnit.Hours
+                    ? live.Sum(item => item.RemainingHours ?? 0)
+                    : live.Where(item => !completedStates.Contains(item.StateId)).Sum(item => item.Points ?? 0)
+                : day > today && state.Count == 0 ? null
+                : unit == BurndownUnit.Hours
+                    ? state.Sum(snapshot => snapshot.RemainingHours ?? 0)
+                    : state.Where(snapshot => !completedStates.Contains(snapshot.StateId)).Sum(snapshot => snapshot.Points ?? 0);
             var elapsedWorkingDays = Enumerable.Range(0, day.DayNumber - sprint.StartsOn.DayNumber)
                 .Count(offset => team.WorkingDays.Contains((int)sprint.StartsOn.AddDays(offset).DayOfWeek));
             var ideal = workingDays == 0 ? initialScope : Math.Max(0, initialScope * (workingDays - elapsedWorkingDays) / workingDays);
-            days.Add(new BurndownDay(day, totalScope, remaining, Math.Max(0, totalScope - remaining), ideal, changes));
+            days.Add(new BurndownDay(day, totalScope, remaining, remaining is null ? null : Math.Max(0, totalScope - remaining.Value), ideal, changes));
         }
         return new SprintBurndownView(sprint.Id, unit, days);
     }
 
-    private static async Task<SprintHealthView> BuildHealthAsync(WorkItemsDbContext work, Sprint sprint, Team team,
+    internal static async Task<SprintHealthView> BuildHealthAsync(WorkItemsDbContext work, Sprint sprint, Team team,
         TimeProvider clock, IUserDirectory directory, CancellationToken ct)
     {
         var items = await work.Items.AsNoTracking().Where(x => x.SprintId == sprint.Id).Select(x => new

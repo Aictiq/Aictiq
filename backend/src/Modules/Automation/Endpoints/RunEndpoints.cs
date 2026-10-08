@@ -137,7 +137,7 @@ public static class RunEndpoints
             case DispatchOutcome.ReadOnly:
                 return Results.Problem(
                     title: "This organization is read-only.",
-                    detail: "The evaluation has ended or a payment problem is unresolved, so new agent runs are paused. Reading and exporting still work; choosing a paid plan resumes dispatch.",
+                    detail: "The evaluation has ended, a payment problem is unresolved or the free plan's people limit is exceeded, so new agent runs are paused. Reading and exporting still work; choosing a paid plan resumes dispatch.",
                     type: ProblemTypes.OrganizationReadOnly,
                     statusCode: StatusCodes.Status409Conflict);
             case DispatchOutcome.ItemClaimed:
@@ -369,7 +369,7 @@ public static class RunEndpoints
             case DispatchOutcome.ReadOnly:
                 return Results.Problem(
                     title: "This organization is read-only.",
-                    detail: "The evaluation has ended or a payment problem is unresolved, so new agent runs are paused. Reading and exporting still work; choosing a paid plan resumes dispatch.",
+                    detail: "The evaluation has ended, a payment problem is unresolved or the free plan's people limit is exceeded, so new agent runs are paused. Reading and exporting still work; choosing a paid plan resumes dispatch.",
                     type: ProblemTypes.OrganizationReadOnly,
                     statusCode: StatusCodes.Status409Conflict);
             case DispatchOutcome.ItemClaimed:

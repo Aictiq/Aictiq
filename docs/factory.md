@@ -235,7 +235,12 @@ systemctl --user status aictiq-runner
 ```
 
 Generate the unit from a shell whose `PATH` finds Node.js, `aictiq`, and every harness: that
-path is embedded in the unit. Use `journalctl --user -u aictiq-runner -f` for its local log.
+path is embedded in the unit. The runner also searches the usual per-user install
+directories (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.opencode/bin`, pnpm's home)
+on every heartbeat, so a harness installed there later is found without regenerating it. Run
+`aictiq runner status` as the service user to see the harnesses it did not find, why, and the
+`PATH` it searched. Factory → Runners lists only the harnesses a runner offers: a harness you do
+not use is not reported as missing. Use `journalctl --user -u aictiq-runner -f` for its local log.
 The service finishes runs in flight on its first stop signal; a second signal cancels them.
 
 ### macOS (launchd)
@@ -342,8 +347,13 @@ Open an unclaimed item and choose **Hand to agent**, then select the playbook an
 default, the first free runner that has the playbook's harness takes the run. When the
 organization has more than one runner, the dialog also offers **Runner**: pick one, and only
 that machine takes the run. If it is offline, the run waits in the queue until it comes back.
-If an Admin disables or deletes that runner while the run waits, any runner may take it. The
-equivalent CLI command is:
+If an Admin disables or deletes that runner while the run waits, any runner may take it. For
+Claude Code and Codex, the dialog also shows how much of the harness's 5-hour and weekly
+allowance is used. Codex usage is read on the runner every minute, including your own
+interactive Codex sessions. Claude usage is updated after runs, or every 5 minutes once you
+turn on the opt-in poll with `aictiq runner usage --claude-oauth on` on that machine.
+**Factory → Runners** has the detail per runner and a hint on each runner where the Claude
+poll is off. See [Harness usage limits](harness-usage-limits.md). The equivalent CLI command is:
 
 ```bash
 aictiq run start ACME-123 --playbook Implement --agent worker
@@ -368,13 +378,15 @@ operator can start or cancel runs or read the prompt snapshot, log, and failure 
 
 ### Schedule a run for later
 
-To let the agent work later, for example overnight, select **Start later** in the Hand to
-agent dialog. The **Start at** field is prefilled with 6 hours from now. You enter the time in
-your browser's timezone, which is shown next to the field. Aictiq stores it in UTC and refuses a
+To let the agent work later, for example overnight, turn on the **Start later** toggle on the
+right below the runner selection (or Agent) in the Hand to agent dialog. The **Start at** field
+is prefilled with 6 hours from now. You enter the time in your browser's timezone, which is
+shown beside or below the field. Aictiq stores it in UTC and refuses a
 time in the past.
 
-A scheduled run is created as `queued` and claims the item straight away, so nobody can start a
-second run on it. No runner takes the run before its start time. After that time, the next free
+Submitting **Schedule run** creates a `queued` run and reserves the item for the agent, so
+nobody can start a second run on it. Turning on the toggle alone does not reserve the item.
+Work begins at or after the selected time, when a runner is available. The next free
 matching runner takes it, or the chosen runner if you picked one. While the run waits, the item
 and run pages show **Scheduled for** and the local start time. Cancel the run from the run
 page, as you would any queued run. The sweeper does not treat a waiting scheduled run as stuck.
@@ -585,7 +597,9 @@ On a **self-hosted** instance the window is 30 days by default; configure
 change it. Nothing overrides an operator's choice there.
 
 On the **hosted** service the organization's plan supplies the window - 90 days on the
-Hosted offer and its evaluation. Automation asks `IPlanAllowances` per organization
+Hosted offer and its evaluation, 30 days on the free tier (`Billing:FreeTier:RunLogDays`).
+An organization that drops from its evaluation to Free has logs older than 30 days pruned
+on the next sweep. Automation asks `IPlanAllowances` per organization
 rather than reading a billing table, and a plan with no opinion falls back to the
 configured `Retention:RunLogDays`. **A pruned log cannot be recovered by purchasing a
 subscription later**: the chunks are deleted, and buying Hosted afterwards does not bring

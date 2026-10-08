@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
 import { Loader2, MoreHorizontal, Search } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -31,6 +32,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
+import { planLimitRefusal } from '@/lib/billing'
 import { orgSettingsPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
@@ -49,6 +51,7 @@ const organizations = useOrganizationsStore()
 const session = useSessionStore()
 const router = useRouter()
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const search = ref('')
 const page = ref(1)
@@ -126,7 +129,14 @@ async function changeRole(member: Member, role: OrgRole) {
     // The server's own title is the message - including the 409 the page cannot predict,
     // where the database refused to leave the organization without an owner. Whatever the
     // row now says is a guess, so it is re-read rather than left as the click drew it.
-    toast.error(error)
+    // Making someone an owner on the free plan brings their other free organizations'
+    // people into the count, and Hosted is what lifts that limit.
+    const refusal = planLimitRefusal(error)
+    if (refusal?.upgrade) {
+      toast.limited('Plan limit reached.', refusal.message, () => {
+        void router.push(orgSettingsPath(slug.value, 'billing'))
+      })
+    } else toast.error(error)
     await load()
   } finally {
     busyUserId.value = null
@@ -174,6 +184,9 @@ async function remove(member: Member) {
       return
     }
     toast.success(`${member.displayName} was removed.`)
+    // One fewer person may bring a free organization back under its people limit;
+    // the shell's read-only banner should say so without a reload.
+    void queryClient.invalidateQueries({ queryKey: ['billing-subscription', slug.value] })
     await load()
   } catch (error) {
     toast.error(error)
@@ -296,9 +309,7 @@ async function remove(member: Member) {
                   :checked="member.canOperateFactory"
                   :disabled="!mayChangeFactory(member) || busyUserId === member.userId"
                   :aria-label="`${member.displayName} may start AI work`"
-                  @change="
-                    toggleFactory(member, ($event.target as HTMLInputElement).checked)
-                  "
+                  @change="toggleFactory(member, ($event.target as HTMLInputElement).checked)"
                 />
                 {{ member.canOperateFactory ? 'Allowed' : 'Stakeholder' }}
               </label>

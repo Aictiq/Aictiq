@@ -15,7 +15,7 @@ public interface IWorkItemSnapshotSource
 
 /// <summary>Organization-local days are owned by Tenancy.  Workers use this small
 /// projection instead of reading tenancy tables from Analytics.</summary>
-public sealed record OrganizationTimeZone(Guid OrganizationId, string TimeZone);
+public sealed record OrganizationTimeZone(Guid OrganizationId, string? TimeZone);
 
 public interface IOrganizationTimeZoneSource
 {

@@ -392,12 +392,23 @@ describe('StartRunDialog', () => {
     })
 
     it('starts now by default and prefills now + 6 h, in local time, when turned on', async () => {
-      stubFetch(routes)
+      const fetchMock = stubFetch(routes)
       const wrapper = await mountDialog()
+      const toggle = wrapper.find('[data-testid="start-run-schedule"]')
+      expect(toggle.attributes('role')).toBe('switch')
+      expect(toggle.attributes('type')).toBe('button')
+      expect(toggle.attributes('aria-checked')).toBe('false')
+      expect(wrapper.get(`#${toggle.attributes('aria-labelledby')}`).text()).toBe('Start later')
       expect(wrapper.find('[data-testid="start-run-start-at"]').exists()).toBe(false)
+      expect(wrapper.get('button[form="start-run"]').text()).toBe('Hand to agent')
 
-      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
+      await wrapper.find('[data-testid="start-run-schedule"]').trigger('click')
 
+      expect(toggle.attributes('aria-checked')).toBe('true')
+      expect(wrapper.get('button[form="start-run"]').text()).toBe('Schedule run')
+      expect(wrapper.text()).toContain('When you schedule this run, the item is reserved for the agent so another run cannot start.')
+      expect(wrapper.text()).toContain('Work begins at or after the selected time, when a runner is available.')
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
       const input = wrapper.find('[data-testid="start-run-start-at"]')
       expect((input.element as HTMLInputElement).value).toBe('2026-10-02T20:30')
       expect(wrapper.find('[data-testid="start-run-timezone"]').text()).toBe(
@@ -405,13 +416,15 @@ describe('StartRunDialog', () => {
       )
     })
 
-    it('sends the chosen local time as UTC', async () => {
+    it('sends the chosen local time as UTC with the selected runner', async () => {
       const fetchMock = stubFetch({
         ...routes,
+        '/runners/choices': [runnerLike('rn1', 'laptop'), runnerLike('rn2', 'server')],
         '/items/PROJ-1/runs': { id: 'r-1', scheduledFor: '2026-10-02T20:00:00Z' },
       })
       const wrapper = await mountDialog()
-      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
+      await wrapper.find('[data-testid="start-run-schedule"]').trigger('click')
+      await wrapper.find('[data-testid="start-run-runner"]').setValue('rn2')
       await wrapper.find('[data-testid="start-run-start-at"]').setValue('2026-10-02T22:00')
       await wrapper.find('form#start-run').trigger('submit.prevent')
       await flushPromises()
@@ -422,25 +435,61 @@ describe('StartRunDialog', () => {
       expect(JSON.parse(String(init?.body))).toEqual({
         playbookId: 'p1',
         agentId: 'a2',
-        runnerId: null,
+        runnerId: 'rn2',
         scheduledFor: new Date(2026, 9, 2, 22, 0).toISOString(),
       })
       expect(wrapper.emitted('dispatched')).toHaveLength(1)
     })
 
-    it('refuses a time in the past without asking the server', async () => {
+    it.each([
+      ['missing', '', 'Choose a date and time.'],
+      ['invalid', 'not-a-date', 'Choose a date and time.'],
+      ['past', '2026-10-02T09:00', 'Choose a start time in the future.'],
+    ])('refuses a %s time without asking the server', async (_case, value, message) => {
       const fetchMock = stubFetch(routes)
       const wrapper = await mountDialog()
-      await wrapper.find('[data-testid="start-run-schedule"]').setValue(true)
-      await wrapper.find('[data-testid="start-run-start-at"]').setValue('2026-10-02T09:00')
+      await wrapper.find('[data-testid="start-run-schedule"]').trigger('click')
+      await wrapper.find('[data-testid="start-run-start-at"]').setValue(value)
       await wrapper.find('form#start-run').trigger('submit.prevent')
       await flushPromises()
 
-      expect(wrapper.text()).toContain('Choose a start time in the future.')
+      expect(wrapper.text()).toContain(message)
       expect(
         fetchMock.mock.calls.some(([input]) => String(input).endsWith('/items/PROJ-1/runs')),
       ).toBe(false)
       expect(wrapper.emitted('dispatched')).toBeUndefined()
+    })
+
+    it('turns scheduling off and dispatches without a scheduled time', async () => {
+      const fetchMock = stubFetch({ ...routes, '/items/PROJ-1/runs': { id: 'r-1' } })
+      const wrapper = await mountDialog()
+      const toggle = wrapper.get('[data-testid="start-run-schedule"]')
+      await toggle.trigger('click')
+      await toggle.trigger('click')
+
+      expect(toggle.attributes('aria-checked')).toBe('false')
+      expect(wrapper.find('[data-testid="start-run-start-at"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="start-run-timezone"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('When you schedule this run')
+      expect(wrapper.get('button[form="start-run"]').text()).toBe('Hand to agent')
+      await wrapper.get('form#start-run').trigger('submit.prevent')
+      await flushPromises()
+
+      const [, init] = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/items/PROJ-1/runs'))!
+      expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: null })
+    })
+
+    it('reopens with scheduling off', async () => {
+      stubFetch(routes)
+      const wrapper = await mountDialog()
+      await wrapper.get('[data-testid="start-run-schedule"]').trigger('click')
+      await wrapper.setProps({ open: false })
+      await wrapper.setProps({ open: true })
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="start-run-schedule"]').attributes('aria-checked')).toBe('false')
+      expect(wrapper.find('[data-testid="start-run-start-at"]').exists()).toBe(false)
+      expect(wrapper.get('button[form="start-run"]').text()).toBe('Hand to agent')
     })
   })
 })

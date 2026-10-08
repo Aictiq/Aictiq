@@ -29,6 +29,11 @@ public sealed class AmbientCurrentTenant : ICurrentTenant
     // the tenant, so the hash is a capability that RLS admits for exactly that row.
     public string? RunnerTokenHash { get; private set; }
 
+    // The hosted free tier counts people across every organization one person owns, and
+    // that person is not necessarily the caller. The user id is a capability RLS admits
+    // for exactly one thing: the Owner rows of that user's own memberships.
+    public string? OwnerLookupUserId { get; private set; }
+
     public void Set(Guid? organizationId) => OrganizationId = organizationId;
 
     /// <summary>
@@ -55,6 +60,18 @@ public sealed class AmbientCurrentTenant : ICurrentTenant
         var previous = RunnerTokenHash;
         RunnerTokenHash = tokenHash;
         return new RestoreRunnerTokenHash(this, previous);
+    }
+
+    public IDisposable UseOwnerLookup(string userId)
+    {
+        var previous = OwnerLookupUserId;
+        OwnerLookupUserId = userId;
+        return new RestoreOwnerLookup(this, previous);
+    }
+
+    private sealed class RestoreOwnerLookup(AmbientCurrentTenant tenant, string? previous) : IDisposable
+    {
+        public void Dispose() => tenant.OwnerLookupUserId = previous;
     }
 
     private sealed class RestoreRunnerTokenHash(AmbientCurrentTenant tenant, string? previous) : IDisposable

@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
-import { realpathSync } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { accessSync, constants, realpathSync } from 'node:fs'
+import { dirname, resolve, sep } from 'node:path'
 
 export const PackageName = '@aictiq/cli'
 
@@ -193,6 +193,8 @@ export interface SelfUpdaterOptions {
   env?: NodeJS.ProcessEnv
   fetch?: typeof fetch
   run?: RunCommand
+  /** Whether this process may replace files in `dir`. */
+  writable?: (dir: string) => boolean
 }
 
 /**
@@ -233,6 +235,14 @@ export class SelfUpdater {
     if (!installation) {
       throw new UpdateError(
         `this CLI (${realOrSelf(packageRoot)}) is not a global npm or pnpm install; update it by hand`,
+      )
+    }
+    // npm renames the package directory aside before it installs, so an install made with
+    // `sudo npm install -g` fails with EACCES for everyone else - on every check, forever.
+    const scope = dirname(realOrSelf(packageRoot))
+    if (installation.manager === 'npm' && !(this.options.writable ?? isWritable)(scope)) {
+      throw new UpdateError(
+        `${scope} is not writable by this user (installed with sudo?); update it by hand with \`sudo npm install -g ${PackageName}\`, or reinstall it under a user-owned npm prefix`,
       )
     }
     return installation
@@ -286,6 +296,15 @@ export function rerun(entry: string, args: string[]): Promise<number> {
 
 export function cliEntryPath(argv: string[] = process.argv): string {
   return resolve(argv[1] ?? 'aictiq')
+}
+
+function isWritable(dir: string): boolean {
+  try {
+    accessSync(dir, constants.W_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function realOrSelf(path: string): string {

@@ -1,3 +1,7 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { usageWindow } from '../limits.js'
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
 import { versionOf } from './claude.js'
 import { failedOutcome } from './failure.js'
@@ -89,6 +93,7 @@ export const codex: HarnessAdapter = {
       }
     }
 
+    const limits = limitsOf(event)
     const usage = usageOf(event)
     if (usage) {
       const input =
@@ -99,9 +104,33 @@ export const codex: HarnessAdapter = {
         log: null,
         inputTokens: input || undefined,
         outputTokens: numberOrUndefined(usage.output_tokens),
+        ...(limits ? { limits } : {}),
       }
     }
-    return { log: null }
+    return { log: null, ...(limits ? { limits } : {}) }
+  },
+
+  limits(sessionId) {
+    // `exec --json` leaves rate limits out of its output; the session's rollout file has them.
+    if (!sessionId) return null
+    const file = rolloutFile(sessionId)
+    if (!file) return null
+    let lines: string[]
+    try {
+      lines = readFileSync(file, 'utf8').split('\n')
+    } catch {
+      return null
+    }
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i]!.includes('"rate_limits"')) continue
+      try {
+        const limits = limitsOf(recordOf(JSON.parse(lines[i]!)) ?? {})
+        if (limits) return limits
+      } catch {
+        // A line cut short while Codex was writing it; an earlier one will do.
+      }
+    }
+    return null
   },
 
   outcome(exitCode, lastLines, lastResult, resuming) {
@@ -122,6 +151,77 @@ function usageOf(event: Record<string, unknown>): Record<string, unknown> | null
     return recordOf(payload.usage) ?? recordOf(recordOf(payload.info)?.total_token_usage)
   }
   return null
+}
+
+/** Day directories looked through for a session's rollout, newest first: a resume appends to the original. */
+const MaxRolloutDays = 60
+
+/** `$CODEX_HOME/sessions`, where Codex keeps a rollout file per session. */
+export function codexSessionsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')
+}
+
+/** `sessions/YYYY/MM/DD` directories, newest first, at most `max` of them. */
+export function rolloutDays(sessions: string, max: number): string[] {
+  const newestFirst = (dir: string) => {
+    try {
+      return readdirSync(dir).filter((name) => /^\d+$/.test(name)).sort().reverse()
+    } catch {
+      return []
+    }
+  }
+  const days: string[] = []
+  for (const year of newestFirst(sessions)) {
+    for (const month of newestFirst(join(sessions, year))) {
+      for (const day of newestFirst(join(sessions, year, month))) {
+        if (days.length >= max) return days
+        days.push(join(sessions, year, month, day))
+      }
+    }
+  }
+  return days
+}
+
+/** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl`. */
+function rolloutFile(sessionId: string): string | null {
+  for (const dir of rolloutDays(codexSessionsDir(), MaxRolloutDays)) {
+    try {
+      const name = readdirSync(dir).find((file) => file.endsWith(`-${sessionId}.jsonl`))
+      if (name) return join(dir, name)
+    } catch {
+      // Removed meanwhile.
+    }
+  }
+  return null
+}
+
+/**
+ * `rate_limits` on a `token_count` event: `primary` and `secondary` windows, told apart by their
+ * length (300 minutes, 10080 minutes) rather than their order.
+ */
+export function limitsOf(event: Record<string, unknown>): ParsedLine['limits'] | null {
+  const payload = recordOf(event.payload)
+  const rateLimits = recordOf(event.rate_limits) ?? recordOf(payload?.rate_limits)
+  if (!rateLimits) return null
+  const observed = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : Date.now()
+  const limits: NonNullable<ParsedLine['limits']> = {}
+  for (const [key, fallback] of [
+    ['primary', 'fiveHour'],
+    ['secondary', 'weekly'],
+  ] as const) {
+    const window = recordOf(rateLimits[key])
+    if (!window) continue
+    const minutes = numberOrUndefined(window.window_minutes)
+    const slot = minutes === 300 ? 'fiveHour' : minutes === 10080 ? 'weekly' : minutes ? null : fallback
+    if (!slot) continue
+    const resetsIn = numberOrUndefined(window.resets_in_seconds)
+    const resetsAt =
+      window.resets_at ??
+      (resetsIn !== undefined && Number.isFinite(observed) ? observed / 1000 + resetsIn : null)
+    const parsed = usageWindow(window.used_percent, resetsAt)
+    if (parsed) limits[slot] = parsed
+  }
+  return Object.keys(limits).length > 0 ? limits : null
 }
 
 function numberOf(value: unknown): number {

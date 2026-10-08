@@ -1,7 +1,10 @@
 using System.Text.Json;
 using Aictiq.Modules.Analytics.Domain;
+using Aictiq.Modules.Tenancy;
+using Aictiq.Modules.Tenancy.Domain;
 using Aictiq.Modules.WorkItems;
 using Aictiq.Modules.WorkItems.Domain;
+using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel;
@@ -18,6 +21,7 @@ public sealed record DashboardView(Guid Id, string Name, string? OwnerUserId, bo
 public sealed record DashboardRequest(string? Name, IReadOnlyList<DashboardWidget>? Layout, bool? Shared, uint? Version);
 public sealed record DashboardWidgetData(string Id, string Type, object? Data, string? Error);
 public sealed record DashboardDataView(Guid Id, IReadOnlyList<DashboardWidgetData> Widgets);
+public sealed record DashboardSprint(Guid Id, string Name, string TeamName, DateOnly StartsOn, DateOnly EndsOn);
 
 public static class DashboardEndpoints
 {
@@ -79,31 +83,125 @@ public static class DashboardEndpoints
         db.Dashboards.Remove(row); await db.SaveChangesAsync(ct); return Results.NoContent();
     }
 
-    private static async Task<IResult> Data(Guid dashboardId, HttpContext http, AnalyticsDbContext analytics, WorkItemsDbContext work, ICurrentUser user, CancellationToken ct)
+    private static async Task<IResult> Data(Guid dashboardId, HttpContext http, AnalyticsDbContext analytics, WorkItemsDbContext work, TenancyDbContext tenancy,
+        ICurrentUser user, ICurrentTenant tenant, IUserDirectory directory, Aictiq.SharedKernel.Contracts.IProjectAccess access, AnalyticsHistoryWindow history,
+        TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value; var row = await analytics.Dashboards.AsNoTracking().FirstOrDefaultAsync(x => x.Id == dashboardId && x.ProjectId == projectId && (x.OwnerUserId == null || x.OwnerUserId == user.UserId), ct);
         if (row is null) return Results.NotFound(); var layout = Parse(row.LayoutJson); var result = new List<DashboardWidgetData>();
-        foreach (var widget in layout) try { result.Add(new DashboardWidgetData(widget.Id, widget.Type, await WidgetDataAsync(widget, projectId, work, ct), null)); }
+        var context = new WidgetContext(projectId, tenant.OrganizationId!.Value, user.UserId!, analytics, work, tenancy, directory, access, history, clock);
+        foreach (var widget in layout) try { result.Add(new DashboardWidgetData(widget.Id, widget.Type, await WidgetDataAsync(widget, context, ct), null)); }
         catch (Exception) { result.Add(new DashboardWidgetData(widget.Id, widget.Type, null, "Widget data is unavailable.")); }
         return Results.Ok(new DashboardDataView(row.Id, result));
     }
 
-    private static async Task<object> WidgetDataAsync(DashboardWidget widget, Guid projectId, WorkItemsDbContext work, CancellationToken ct) => widget.Type switch
+    /// <summary>What one data request shares across its widgets. The focus team and sprint are
+    /// resolved once, on first use, so a dashboard without sprint widgets never looks them up.</summary>
+    private sealed class WidgetContext(Guid projectId, Guid organizationId, string userId, AnalyticsDbContext analytics, WorkItemsDbContext work,
+        TenancyDbContext tenancy, IUserDirectory directory, Aictiq.SharedKernel.Contracts.IProjectAccess access, AnalyticsHistoryWindow history, TimeProvider clock)
     {
-        "items-by-state" => await (
-            from item in work.Items.AsNoTracking()
-            join state in work.WorkflowStates.AsNoTracking() on item.StateId equals state.Id
-            where item.ProjectId == projectId
-            group item by new { state.Id, state.Name, state.Position } into grouped
-            orderby grouped.Key.Position
-            select new { stateId = grouped.Key.Id, stateName = grouped.Key.Name, count = grouped.Count() }
-        ).ToListAsync(ct),
-        "items-by-assignee" => await work.Items.AsNoTracking().Where(x => x.ProjectId == projectId).GroupBy(x => x.AssigneeId).Select(x => new { assigneeId = x.Key, count = x.Count() }).ToListAsync(ct),
-        "recent-activity" => await work.ItemHistory.AsNoTracking().Where(x => work.Items.Any(item => item.Id == x.ItemId && item.ProjectId == projectId)).OrderByDescending(x => x.At).Take(20).Select(x => new { x.ItemId, x.At, x.Field }).ToListAsync(ct),
-        "saved-view-count" => new { count = await work.SavedViews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct) },
-        "markdown" => new { markdown = widget.Config.TryGetProperty("markdown", out var markdown) ? markdown.GetString() ?? "" : "" },
-        _ => new { available = true },
-    };
+        private (Team? Team, Sprint? Sprint)? focus;
+        public Guid ProjectId => projectId; public Guid OrganizationId => organizationId; public AnalyticsDbContext Analytics => analytics;
+        public Task<bool> CanOperateFactoryAsync(CancellationToken ct) => access.CanOperateFactoryAsync(userId, organizationId, ct);
+        public WorkItemsDbContext Work => work; public IUserDirectory Directory => directory; public AnalyticsHistoryWindow History => history; public TimeProvider Clock => clock;
+
+        /// <summary>The team whose active sprint the project is running (the first by name when
+        /// several are), else the project's first team, which still has a velocity history.</summary>
+        public async Task<(Team? Team, Sprint? Sprint)> FocusAsync(CancellationToken ct)
+        {
+            if (focus is not null) return focus.Value;
+            var teams = await tenancy.Teams.AsNoTracking().Where(team => team.ProjectId == projectId).OrderBy(team => team.Name).ToListAsync(ct);
+            var teamIds = teams.Select(team => team.Id).ToArray();
+            var active = teamIds.Length == 0 ? [] : await work.Sprints.AsNoTracking().Where(sprint => teamIds.Contains(sprint.TeamId) && sprint.State == SprintState.Active).ToListAsync(ct);
+            var team = teams.FirstOrDefault(team => active.Any(sprint => sprint.TeamId == team.Id)) ?? teams.FirstOrDefault();
+            focus = (team, team is null ? null : active.Where(sprint => sprint.TeamId == team.Id).OrderBy(sprint => sprint.StartsOn).FirstOrDefault());
+            return focus.Value;
+        }
+    }
+
+    private static async Task<object> WidgetDataAsync(DashboardWidget widget, WidgetContext context, CancellationToken ct)
+    {
+        var (projectId, work) = (context.ProjectId, context.Work);
+        switch (widget.Type)
+        {
+            case "items-by-state":
+                return await (
+                    from item in work.Items.AsNoTracking()
+                    join state in work.WorkflowStates.AsNoTracking() on item.StateId equals state.Id
+                    where item.ProjectId == projectId && item.RemovedAt == null
+                    group item by new { state.Id, state.Name, state.Position } into grouped
+                    orderby grouped.Key.Position
+                    select new { stateId = grouped.Key.Id, stateName = grouped.Key.Name, count = grouped.Count() }
+                ).ToListAsync(ct);
+            case "items-by-assignee":
+            {
+                var rows = await work.Items.AsNoTracking().Where(x => x.ProjectId == projectId && x.RemovedAt == null).GroupBy(x => x.AssigneeId)
+                    .Select(x => new { AssigneeId = x.Key, Count = x.Count() }).ToListAsync(ct);
+                var people = await context.Directory.GetAsync([.. rows.Where(x => x.AssigneeId is not null).Select(x => x.AssigneeId!)], ct);
+                return rows.OrderByDescending(x => x.Count).ThenBy(x => x.AssigneeId is null).Select(x => new
+                {
+                    assigneeId = x.AssigneeId, displayName = x.AssigneeId is null ? null : people.GetValueOrDefault(x.AssigneeId)?.DisplayName,
+                    isAgent = x.AssigneeId is not null && people.GetValueOrDefault(x.AssigneeId)?.IsAgent == true, count = x.Count,
+                }).ToList();
+            }
+            case "recent-activity":
+            {
+                // The same rows the item's own history hides from someone who may not operate the factory.
+                var hide = !await context.CanOperateFactoryAsync(ct);
+                var rows = await work.ItemHistory.AsNoTracking().WithoutFactory(work, hide).Join(work.Items.AsNoTracking(), entry => entry.ItemId, item => item.Id,
+                        (entry, item) => new { entry.ItemId, entry.ActorId, entry.At, entry.Field, item.ProjectId, item.Key, item.Title })
+                    .Where(x => x.ProjectId == projectId).OrderByDescending(x => x.At).Take(20).ToListAsync(ct);
+                var actors = await context.Directory.GetAsync([.. rows.Select(x => x.ActorId).Distinct()], ct);
+                return rows.Select(x => new { itemId = x.ItemId, itemKey = x.Key, itemTitle = x.Title, at = x.At, field = x.Field, actor = actors.GetValueOrDefault(x.ActorId)?.DisplayName }).ToList();
+            }
+            case "saved-view-count":
+                return new { count = await work.SavedViews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct) };
+            case "markdown":
+                return new { markdown = widget.Config.TryGetProperty("markdown", out var markdown) ? markdown.GetString() ?? "" : "" };
+            case "velocity":
+            {
+                var (team, _) = await context.FocusAsync(ct);
+                return new { teamName = team?.Name, velocity = team is null ? null : await SprintMetricsEndpoints.BuildVelocityAsync(context.Analytics, work, team.Id, 6, ct) };
+            }
+            case "burndown":
+            {
+                var (team, sprint) = await context.FocusAsync(ct);
+                if (team is null || sprint is null) return new { sprint = (DashboardSprint?)null };
+                var unit = team.EstimationUnit == EstimationUnit.Points ? BurndownUnit.Points : BurndownUnit.Hours;
+                var burndown = await SprintMetricsEndpoints.BuildBurndownAsync(context.Analytics, work, sprint, team, unit, context.Clock, ct);
+                return new { sprint = Describe(sprint, team), burndown.Unit, burndown.Days };
+            }
+            case "sprint-health":
+            {
+                var (team, sprint) = await context.FocusAsync(ct);
+                if (team is null || sprint is null) return new { sprint = (DashboardSprint?)null };
+                return new { sprint = Describe(sprint, team), health = await SprintMetricsEndpoints.BuildHealthAsync(work, sprint, team, context.Clock, context.Directory, ct) };
+            }
+            case "cfd":
+            {
+                var (start, end) = await WindowAsync(context, ct);
+                return await FlowMetricsEndpoints.BuildFlowAsync(context.Analytics, work, projectId, start, end, null, null, start, ct);
+            }
+            case "cycle-time":
+            {
+                var (start, end) = await WindowAsync(context, ct);
+                var cycle = await FlowMetricsEndpoints.BuildCycleTimeAsync(context.Analytics, work, projectId, start, end, null, null, start, ct);
+                return new { cycle.LeadTime, cycle.CycleTime, completedCount = cycle.Items.Count, cycle.Throughput, from = start, to = end };
+            }
+            default:
+                return new { available = true };
+        }
+    }
+
+    /// <summary>The last thirty days, as on the Cycle insights page, moved forward to the history the plan allows.</summary>
+    private static async Task<(DateOnly Start, DateOnly End)> WindowAsync(WidgetContext context, CancellationToken ct)
+    {
+        var end = DateOnly.FromDateTime(context.Clock.GetUtcNow().UtcDateTime); var start = end.AddDays(-29);
+        var earliest = await context.History.EarliestAsync(context.OrganizationId, ct);
+        return (start < earliest ? earliest : start, end);
+    }
+
+    private static DashboardSprint Describe(Sprint sprint, Team team) => new(sprint.Id, sprint.Name, team.Name, sprint.StartsOn, sprint.EndsOn);
 
     private static async Task EnsureDefaultAsync(AnalyticsDbContext db, Guid organizationId, Guid projectId, TimeProvider clock, CancellationToken ct)
     {

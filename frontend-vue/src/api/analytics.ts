@@ -3,8 +3,9 @@ import { apiFetch } from '@/utils/api'
 export interface BurndownDay {
   day: string
   scope: number
-  remaining: number
-  completed: number
+  /** Null for a sprint day that has not happened yet. */
+  remaining: number | null
+  completed: number | null
   idealRemaining: number
   scopeChanges: { itemId: string; added: boolean; value: number; at: string }[]
 }
@@ -24,6 +25,9 @@ export interface CycleSummary { p50: number; p85: number; p95: number }
 export interface CyclePoint { itemKey: string; leadDays: number; cycleDays: number; assigneeId: string | null; type: string }
 export interface ThroughputPoint { weekOf: string; count: number; agentCount: number; humanCount: number }
 export interface CycleTime { leadTime: CycleSummary; cycleTime: CycleSummary; items: CyclePoint[]; throughput: ThroughputPoint[] }
+export interface SprintVelocity { sprintId: string; sprintName: string; startsOn: string; endsOn: string; committedPoints: number; completedPoints: number }
+export interface TeamVelocity { sprints: SprintVelocity[]; averageVelocity: number; rollingAverageVelocity: number; forecast: { sprintId: string; sprintName: string; scopePoints: number; velocity: number; differencePoints: number } | null }
+export interface DashboardSprint { id: string; name: string; teamName: string; startsOn: string; endsOn: string }
 export interface DashboardWidget { id: string; type: string; x: number; y: number; w: number; h: number; config: Record<string, unknown> }
 export interface Dashboard { id: string; name: string; ownerUserId: string | null; isDefault: boolean; layout: DashboardWidget[]; version: number }
 export interface DashboardData { id: string; widgets: { id: string; type: string; data: unknown; error: string | null }[] }

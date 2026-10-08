@@ -18,7 +18,7 @@ namespace Aictiq.Modules.Billing.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("billing")
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -99,7 +99,14 @@ namespace Aictiq.Modules.Billing.Migrations
                             Code = "hosted",
                             HumanSeatPrice = 0m,
                             Limits = "{\"SeatsHuman\":null,\"SeatsAgent\":null,\"Projects\":null,\"StorageBytes\":10737418240,\"Features\":[\"webhooks\",\"page_permissions\",\"audit_export\"],\"RunLogDays\":90,\"AnalyticsDays\":365}",
-                            OrganizationPrice = 49m
+                            OrganizationPrice = 79m
+                        },
+                        new
+                        {
+                            Code = "hosted_free",
+                            HumanSeatPrice = 0m,
+                            Limits = "{\"SeatsHuman\":null,\"SeatsAgent\":null,\"Projects\":null,\"StorageBytes\":209715200,\"Features\":[\"webhooks\",\"page_permissions\",\"audit_export\"],\"RunLogDays\":30,\"AnalyticsDays\":365}",
+                            OrganizationPrice = 0m
                         });
                 });
 

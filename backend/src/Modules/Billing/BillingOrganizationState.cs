@@ -14,9 +14,16 @@ namespace Aictiq.Modules.Billing;
 /// The answer is read-only in two situations: a payment failed and its grace
 /// period ran out, or a hosted organization's evaluation ended without a checkout. Reads,
 /// downloads and exports survive both; an explicit checkout ends the second.
+///
+/// With the hosted free tier on, the second becomes conditional: an evaluation that ends -
+/// or a subscription that is cancelled - drops the organization to <c>hosted_free</c>, and
+/// it is read-only only while one of its Owners has more people across their unpaid
+/// organizations than the free tier allows. That is computed on every ask, so removing
+/// people or paying makes it writable again with nothing to run.
 /// </summary>
 public sealed class BillingOrganizationState(
-    BillingDbContext db, AmbientCurrentTenant tenant, IOptions<BillingOptions> options, TimeProvider clock)
+    BillingDbContext db, AmbientCurrentTenant tenant, FreeTierLedger freeTier, IOptions<BillingOptions> options,
+    TimeProvider clock)
     : IOrganizationBillingState
 {
     public async Task<bool> IsReadOnlyAsync(Guid organizationId, CancellationToken cancellationToken = default)
@@ -35,7 +42,9 @@ public sealed class BillingOrganizationState(
             // answer. An organization that has ever paid is never sent back to its
             // evaluation: cancelling is a downgrade, not an expiry, and it must keep
             // behaving exactly as it did before evaluations existed.
-            return row.GraceEndsAt is { } ends && ends <= clock.GetUtcNow() && row.Status.IsBilling();
+            if (row.Status.IsBilling()) return row.GraceEndsAt is { } ends && ends <= clock.GetUtcNow();
+            return row.Status != SubscriptionStatus.None && options.Value.FreeTierEnabled
+                && await freeTier.IsOverPeopleLimitAsync(organizationId, cancellationToken);
         }
 
         // Never subscribed. An organization born with an evaluation keeps writing only
@@ -44,7 +53,9 @@ public sealed class BillingOrganizationState(
         var evaluationEndsAt = await db.Evaluations.AsNoTracking()
             .Select(x => (DateTimeOffset?)x.EndsAt)
             .SingleOrDefaultAsync(cancellationToken);
-        return evaluationEndsAt is { } expiry && expiry <= clock.GetUtcNow();
+        if (evaluationEndsAt is not { } expiry || expiry > clock.GetUtcNow()) return false;
+        return !options.Value.FreeTierEnabled
+            || await freeTier.IsOverPeopleLimitAsync(organizationId, cancellationToken);
     }
 
     public async Task<string?> GetEntitledPlanAsync(Guid organizationId, CancellationToken cancellationToken = default)
@@ -55,14 +66,21 @@ public sealed class BillingOrganizationState(
         var subscription = await db.Subscriptions.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (subscription is { Status: not SubscriptionStatus.None })
         {
-            return subscription.EntitledPlan;
+            // Cancelled back to Free lands on the hosted free tier when it is running.
+            return subscription.EntitledPlan == PlanCodes.Free && options.Value.FreeTierEnabled
+                ? PlanCodes.HostedFree
+                : subscription.EntitledPlan;
         }
 
-        // The evaluation grants Hosted for as long as the organization has never carried a
-        // real subscription - after expiry too. Expiry takes the writes away (above); it
-        // does not silently shrink the allowances a team planned around, and nobody was
-        // ever charged for the difference.
-        var evaluated = await db.Evaluations.AsNoTracking().AnyAsync(cancellationToken);
-        return evaluated ? PlanCodes.Hosted : subscription?.EntitledPlan;
+        // Without the free tier the evaluation grants Hosted for as long as the organization
+        // has never carried a real subscription - after expiry too. Expiry takes the writes
+        // away (above); it does not silently shrink the allowances a team planned around,
+        // and nobody was ever charged for the difference. With the free tier, expiry is
+        // the move to it.
+        var evaluationEndsAt = await db.Evaluations.AsNoTracking()
+            .Select(x => (DateTimeOffset?)x.EndsAt)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (evaluationEndsAt is not { } expiry) return subscription?.EntitledPlan;
+        return options.Value.FreeTierEnabled && expiry <= clock.GetUtcNow() ? PlanCodes.HostedFree : PlanCodes.Hosted;
     }
 }

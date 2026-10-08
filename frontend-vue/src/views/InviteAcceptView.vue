@@ -12,6 +12,7 @@ import AuthCard from '@/components/AuthCard.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
+import { planLimitMessage } from '@/lib/billing'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
@@ -39,6 +40,13 @@ const preview = ref<InvitationPreview | null>(null)
 const loading = ref(true)
 const accepting = ref(false)
 const problem = ref<string | null>(null)
+/**
+ * The organization's plan refused one more person - on the free plan, pending invitations
+ * already count, but accepting can still tip an owner's total over. Said here rather than
+ * in a toast, and without a link: the person accepting is not a member yet and cannot open
+ * the organization's billing, so the remedy is the inviter's.
+ */
+const refused = ref<string | null>(null)
 
 /**
  * A link stops matching the moment anyone clicks Resend: only the token's hash is stored,
@@ -84,6 +92,7 @@ const statusMessage = computed(() => {
 
 async function accept() {
   accepting.value = true
+  refused.value = null
   try {
     const accepted = await acceptInvitation(token.value)
     // Land them *inside* the organization they just joined, not on whichever one the
@@ -101,6 +110,8 @@ async function accept() {
       accepted.projectKey ? `/o/${accepted.organizationSlug}/p/${accepted.projectKey}/items` : '/',
     )
   } catch (error) {
+    refused.value = planLimitMessage(error)
+    if (refused.value) return
     // 409 means the link was revoked, expired or used while this page was open. Re-read
     // rather than guess: the preview then says which.
     toast.error(error)
@@ -150,6 +161,9 @@ async function accept() {
           <Loader2 v-if="accepting" class="animate-spin" aria-hidden="true" />
           Accept invitation
         </Button>
+        <p v-if="refused" role="alert" class="text-destructive text-center text-xs" data-testid="plan-limit">
+          {{ refused }} Let whoever invited you know - an owner of {{ preview.organizationName }} has to make room.
+        </p>
         <p class="text-muted-foreground text-center text-xs">
           You are signed in as {{ session.user?.email }}. Accepting joins this account.
         </p>

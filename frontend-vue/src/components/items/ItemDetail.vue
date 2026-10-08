@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
-import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
+import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
   attachmentAccept,
   attachmentUrl,
@@ -13,6 +13,7 @@ import {
 import { createComment, listComments, type WorkItemComment } from '@/api/comments'
 import { itemHistory } from '@/api/history'
 import {
+  createItem,
   deleteItem,
   duplicateItem,
   getItem,
@@ -30,6 +31,7 @@ import {
 import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
 import { avatarUrl } from '@/api/profile'
+import { addItemLabel, listLabels, removeItemLabel, type Label } from '@/api/labels'
 import { listItemRuns } from '@/api/runs'
 import { getProject, hasProjectRole, listProjectMembers } from '@/api/projects'
 import { createGitHubBranch, listGitHubBindings } from '@/api/github'
@@ -37,6 +39,8 @@ import { listLinks, listRelations } from '@/api/relations'
 import { listWorkflows } from '@/api/workflows'
 import ClaimBanner from '@/components/common/ClaimBanner.vue'
 import DeleteConfirmDialog from '@/components/common/DeleteConfirmDialog.vue'
+import LabelChip from '@/components/common/LabelChip.vue'
+import LabelPicker from '@/components/common/LabelPicker.vue'
 import Markdown from '@/components/common/Markdown.vue'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
@@ -187,6 +191,69 @@ const project = useQuery({
 const mayComment = computed(
   () => hasProjectRole(project.data.value?.role, 'guest') && !project.data.value?.isArchived,
 )
+const mayAddSubtask = computed(
+  () =>
+    hasProjectRole(project.data.value?.role, 'member') &&
+    !project.data.value?.isArchived &&
+    (currentItem.value?.type === 'story' || currentItem.value?.type === 'bug'),
+)
+const subtaskTitle = ref('')
+const subtaskOpen = ref(false)
+const creatingSubtask = ref(false)
+const subtaskInput = ref<HTMLInputElement | null>(null)
+watch(
+  () => [props.slug, props.itemKey],
+  () => {
+    subtaskOpen.value = false
+    subtaskTitle.value = ''
+  },
+)
+async function startSubtask() {
+  subtaskOpen.value = true
+  await nextTick()
+  subtaskInput.value?.focus()
+}
+function cancelSubtask() {
+  if (creatingSubtask.value) return
+  subtaskOpen.value = false
+  subtaskTitle.value = ''
+}
+async function createSubtask() {
+  const current = currentItem.value
+  const title = subtaskTitle.value.trim()
+  if (!current || !mayAddSubtask.value || !title || creatingSubtask.value) return
+  const slug = props.slug
+  const projectKey = props.projectKey
+  creatingSubtask.value = true
+  try {
+    const created = await createItem(slug, projectKey, {
+      type: 'task',
+      title,
+      parentId: current.id,
+      teamId: current.teamId,
+    })
+    client.setQueryData<WorkItem[]>([slug, current.key, 'children'], (items = []) =>
+      items.some((entry) => entry.id === created.id) ? items : [...items, created],
+    )
+    if (props.itemKey === current.key && props.slug === slug) subtaskTitle.value = ''
+    await Promise.all([
+      client.invalidateQueries({ queryKey: [slug, current.key] }),
+      client.invalidateQueries({ queryKey: [slug, projectKey, 'items'] }),
+      ...(current.teamId
+        ? [
+            client.invalidateQueries({ queryKey: ['board', slug, projectKey, current.teamId] }),
+            client.invalidateQueries({ queryKey: [slug, current.teamId, 'items', 'backlog'] }),
+          ]
+        : []),
+    ])
+  } catch (error) {
+    toast.error(error, 'The subtask could not be created.')
+  } finally {
+    creatingSubtask.value = false
+    await nextTick()
+    if (props.itemKey === current.key && props.slug === slug) subtaskInput.value?.focus()
+  }
+}
 const projectMembers = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'project-members']),
   queryFn: () => listProjectMembers(props.slug, props.projectKey),
@@ -246,6 +313,12 @@ const startRun = computed(() =>
     hasLiveRun: liveRun.value !== null,
   }),
 )
+const showAgentFeedback = computed(
+  () =>
+    startRun.value.visible &&
+    !session.user?.isAgent &&
+    itemRuns.value.some((entry) => entry.kind !== 'refine'),
+)
 const startRunOpen = ref(false)
 const claimRun = computed(() =>
   liveRun.value && liveRun.value.agentId === claimedBy.value ? liveRun.value : null,
@@ -289,6 +362,22 @@ const saving = ref(false)
 const conflict = ref(false)
 const changingAssignee = ref(false)
 const assigneeError = ref<string | null>(null)
+// ── Labels ──────────────────────────────────────────────────────────────────────────
+// Applied one at a time through the item-scoped endpoints, which leave the item's version
+// alone, so labelling never races a pending title or description edit into a 409.
+const mayLabel = computed(
+  () =>
+    hasProjectRole(project.data.value?.role ?? 'guest', 'member') &&
+    !project.data.value?.isArchived,
+)
+const projectLabels = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'labels']),
+  queryFn: () => listLabels(props.slug, props.projectKey),
+  enabled: mayLabel,
+})
+const itemLabelIds = computed(() => currentItem.value?.labels.map((label) => label.id) ?? [])
+const savingLabels = ref(false)
+const labelsError = ref<string | null>(null)
 const priorities: { value: WorkItemPriority; label: string }[] = [
   { value: 'none', label: 'No priority' },
   { value: 'low', label: 'Low' },
@@ -637,6 +726,59 @@ async function changeAssignee(event: Event) {
     changingAssignee.value = false
   }
 }
+function onLabelCreated(label: Label) {
+  client.setQueryData<Label[]>([props.slug, props.projectKey, 'labels'], (labels) =>
+    labels ? [...labels, label] : [label],
+  )
+}
+/**
+ * The picker stays open for several picks in a row, so the item is updated optimistically
+ * and the writes are chained: a quick add-then-remove of one label must reach the server
+ * in that order. Any failure drops the optimistic copy and refetches the real one.
+ */
+let labelWrites = Promise.resolve()
+function changeLabels(next: string[]) {
+  const current = item.data.value
+  if (!current) return
+  const before = current.labels.map((label) => label.id)
+  const added = next.filter((id) => !before.includes(id))
+  const removed = before.filter((id) => !next.includes(id))
+  if (!added.length && !removed.length) return
+  const known = new Map(
+    [...current.labels, ...(projectLabels.data.value ?? [])].map((label) => [label.id, label]),
+  )
+  client.setQueryData<WorkItem>([props.slug, props.itemKey], {
+    ...current,
+    labels: next.flatMap((id) => {
+      const label = known.get(id)
+      return label
+        ? [{ id: label.id, name: label.name, color: label.color, group: label.group }]
+        : []
+    }),
+  })
+  labelsError.value = null
+  savingLabels.value = true
+  const write = labelWrites.then(async () => {
+    try {
+      await Promise.all([
+        ...added.map((id) => addItemLabel(props.slug, current.key, id)),
+        ...removed.map((id) => removeItemLabel(props.slug, current.key, id)),
+      ])
+    } catch (error) {
+      labelsError.value = toApiError(error).title
+      await client.invalidateQueries({ queryKey: [props.slug, props.itemKey], exact: true })
+    }
+  })
+  labelWrites = write
+  void write.then(async () => {
+    if (labelWrites !== write) return
+    savingLabels.value = false
+    await Promise.all([
+      invalidateLists(current),
+      client.invalidateQueries({ queryKey: [props.slug, props.projectKey, 'labels'] }),
+    ])
+  })
+}
 const acceptedFiles = attachmentAccept
 // The item exists, so a description's file is committed to it straight away.
 async function uploadToDescription(file: File) {
@@ -930,7 +1072,11 @@ function logged(updated: TimeTrackingItem) {
       <p v-if="conflict" class="text-destructive mt-3 text-sm">
         Someone changed this item. Reload to compare before overwriting.
       </p>
-      <section v-if="currentItem.type !== 'epic'" class="border-border mt-8 rounded-md border p-3">
+      <section
+        v-if="currentItem.type !== 'epic'"
+        class="border-border mt-8 rounded-md border p-3"
+        data-testid="item-subtasks"
+      >
         <div class="flex items-center justify-between gap-3">
           <div>
             <p class="font-label">Subtasks</p>
@@ -938,9 +1084,21 @@ function logged(updated: TimeTrackingItem) {
               Tasks and other work directly under this item.
             </p>
           </div>
-          <span v-if="!children.isPending.value" class="text-muted-foreground text-xs">{{
-            childItems.length
-          }}</span>
+          <div class="flex items-center gap-2">
+            <span v-if="!children.isPending.value" class="text-muted-foreground text-xs">{{
+              childItems.length
+            }}</span>
+            <Button
+              v-if="mayAddSubtask && !subtaskOpen"
+              type="button"
+              variant="outline"
+              size="sm"
+              :aria-label="`Add subtask to ${currentItem.key}`"
+              @click="startSubtask"
+            >
+              <Plus class="size-3.5" /> Add subtask
+            </Button>
+          </div>
         </div>
         <p v-if="children.isPending.value" class="text-muted-foreground mt-3 text-sm">
           Loading subtasks…
@@ -974,6 +1132,37 @@ function logged(updated: TimeTrackingItem) {
             >
           </button>
         </div>
+        <form
+          v-if="mayAddSubtask && subtaskOpen"
+          class="mt-3 flex gap-2"
+          @submit.stop.prevent="createSubtask"
+        >
+          <label class="sr-only" for="subtask-title">Subtask title</label>
+          <input
+            id="subtask-title"
+            ref="subtaskInput"
+            v-model="subtaskTitle"
+            maxlength="500"
+            class="border-input bg-background min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm"
+            placeholder="Subtask title"
+            :disabled="creatingSubtask"
+            @keydown.stop
+            @keydown.esc.prevent="cancelSubtask"
+          />
+          <Button type="submit" size="sm" :disabled="creatingSubtask || !subtaskTitle.trim()">
+            {{ creatingSubtask ? 'Adding…' : 'Add' }}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label="Cancel subtask"
+            :disabled="creatingSubtask"
+            @click="cancelSubtask"
+          >
+            <X class="size-4" />
+          </Button>
+        </form>
       </section>
       <section class="border-border mt-8 rounded-md border p-3" data-testid="item-runs">
         <div class="flex flex-wrap items-start justify-between gap-3">
@@ -1097,6 +1286,18 @@ function logged(updated: TimeTrackingItem) {
       </nav>
       <section v-if="tab === 'comments'" class="mt-4 space-y-4">
         <form v-if="mayComment" class="space-y-2" @submit.prevent="addComment">
+          <p
+            v-if="showAgentFeedback"
+            class="border-border bg-muted/50 text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+            data-testid="agent-feedback-hint"
+          >
+            <Bot class="text-primary mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              <strong class="text-foreground font-medium">Want changes?</strong>
+              Tag the agent with <span class="text-foreground font-mono">@</span> in a comment and
+              describe what to improve to request a follow-up.
+            </span>
+          </p>
           <MarkdownEditor
             ref="commentEditor"
             v-model="comment"
@@ -1351,6 +1552,33 @@ function logged(updated: TimeTrackingItem) {
           Updating assignment…
         </p>
         <p v-else-if="assigneeError" class="text-destructive mt-1 text-xs">{{ assigneeError }}</p>
+      </div>
+      <div class="rounded-md border p-3">
+        <p class="font-label">Labels</p>
+        <LabelPicker
+          v-if="mayLabel"
+          class="mt-2"
+          :model-value="itemLabelIds"
+          :labels="projectLabels.data.value ?? []"
+          :slug="slug"
+          :project-key="projectKey"
+          can-create
+          :disabled="projectLabels.isPending.value"
+          @update:model-value="changeLabels"
+          @created="onLabelCreated"
+        />
+        <div v-else-if="currentItem.labels.length" class="mt-2 flex flex-wrap gap-1.5">
+          <LabelChip
+            v-for="label in currentItem.labels"
+            :key="label.id"
+            :name="label.name"
+            :color="label.color"
+            :group="label.group"
+          />
+        </div>
+        <p v-else class="text-muted-foreground mt-2 text-sm">None</p>
+        <p v-if="savingLabels" class="text-muted-foreground mt-1 text-xs">Saving labels…</p>
+        <p v-else-if="labelsError" class="text-destructive mt-1 text-xs">{{ labelsError }}</p>
       </div>
       <div
         v-if="

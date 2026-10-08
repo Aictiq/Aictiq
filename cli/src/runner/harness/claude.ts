@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { usageWindow } from '../limits.js'
 import type { HarnessAdapter, HarnessInfo, ParsedLine } from '../types.js'
 import { failedOutcome } from './failure.js'
 
@@ -104,6 +105,11 @@ export const claude: HarnessAdapter = {
       return { log: `← ${error}${limit(text.split(/\r?\n/)[0] ?? '', 200)}` }
     }
 
+    if (event.type === 'rate_limit_event') {
+      const limits = limitsOf(recordOf(event.rate_limit_info))
+      return { log: null, ...(limits ? { limits } : {}) }
+    }
+
     if (event.type === 'result') {
       const usage = recordOf(event.usage)
       const input =
@@ -137,6 +143,28 @@ export const claude: HarnessAdapter = {
       summary: limit(lastResult ?? lastLines.slice(-20).join('\n'), 4_000) || null,
     }
   },
+}
+
+/**
+ * A subscription's 5-hour and 7-day windows. `unifiedWindows` holds both, with utilization as a
+ * fraction; without it, the event describes only the window named by `rateLimitType`.
+ */
+function limitsOf(info: Record<string, unknown> | null): ParsedLine['limits'] | null {
+  if (!info) return null
+  const windowOf = (window: Record<string, unknown> | null) =>
+    window && typeof window.utilization === 'number'
+      ? (usageWindow(window.utilization * 100, window.resetsAt) ?? undefined)
+      : undefined
+  const unified = recordOf(info.unifiedWindows)
+  const limits: NonNullable<ParsedLine['limits']> = {}
+  if (unified) {
+    limits.fiveHour = windowOf(recordOf(unified.five_hour))
+    limits.weekly = windowOf(recordOf(unified.seven_day))
+  } else if (info.rateLimitType === 'five_hour') limits.fiveHour = windowOf(info)
+  else if (info.rateLimitType === 'seven_day') limits.weekly = windowOf(info)
+  if (limits.fiveHour === undefined) delete limits.fiveHour
+  if (limits.weekly === undefined) delete limits.weekly
+  return Object.keys(limits).length > 0 ? limits : null
 }
 
 function numberOf(value: unknown): number {

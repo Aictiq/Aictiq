@@ -19,6 +19,7 @@ import {
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
+import PlanLimitNotice from '@/components/common/PlanLimitNotice.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Badge } from '@/components/ui/badge'
@@ -40,13 +41,22 @@ import {
 import { Input } from '@/components/ui/input'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
+import { planLimitRefusal, type PlanLimitRefusal } from '@/lib/billing'
 import { since } from '@/lib/claims'
 import {
+  claudeUsagePollCommand,
+  claudeUsagePollDocsUrl,
+  claudeUsagePollHint,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
   runnerStatus,
   runnerStatusLabel,
+  usageLimitsFor,
+  usagePercent,
+  usageResetLabel,
+  usageWindowLabel,
+  usageWindowStale,
   type RunnerPlatform,
 } from '@/lib/runners'
 import { factorySetupPath } from '@/router/paths'
@@ -69,6 +79,34 @@ const slug = computed(() => org.slug.value)
 const mayManage = computed(() => hasOrgRole(org.record.value?.role, 'admin'))
 
 const runners = ref<Runner[]>([])
+
+const usageKinds = ['fiveHour', 'weekly'] as const
+const usageWindowName = { fiveHour: '5-hour', weekly: 'Weekly' } as const
+
+/**
+ * A row per offered harness whose account reported usage, and the rest named on one line, so a
+ * runner whose harnesses report nothing adds a single line rather than one per harness.
+ */
+function usageRows(runner: Runner) {
+  const rows = (runner.capabilities?.harnesses ?? []).map((harness) => ({
+    harness: harness.name,
+    limits: usageLimitsFor(runner.capabilities?.usageLimits, harness.name),
+  }))
+  return {
+    reported: rows.flatMap((row) =>
+      row.limits ? [{ harness: row.harness, limits: row.limits }] : [],
+    ),
+    unavailable: rows.filter((row) => !row.limits).map((row) => row.harness),
+  }
+}
+
+/** Amber close to the limit, red at it; a stale figure is greyed out whatever it says. */
+function usageBarClass(percent: number, stale: boolean): string {
+  if (stale) return 'bg-muted-foreground/40'
+  if (percent >= 95) return 'bg-red-500'
+  if (percent >= 80) return 'bg-amber-500'
+  return 'bg-primary'
+}
 const loading = ref(true)
 const busyId = ref<string | null>(null)
 
@@ -77,6 +115,8 @@ const registering = ref(route?.query.register === '1')
 const name = ref('')
 const submitting = ref(false)
 const fieldErrors = ref<Record<string, string[]>>({})
+/** A free organization may register only so many runners; the refusal stays in the dialog. */
+const refused = ref<PlanLimitRefusal | null>(null)
 
 /** "Use a runner I already have": the caller's machines in their other organizations. */
 const usingExisting = ref(false)
@@ -148,6 +188,11 @@ function showSecret(value: RunnerIssued, forExisting = false) {
   issuedOpen.value = true
 }
 
+// A refusal belongs to the attempt it answered: opening either dialog again starts clean.
+watch([registering, usingExisting], () => {
+  refused.value = null
+})
+
 watch(issuedOpen, (open) => {
   // The secret leaves memory with the dialog: there is no second look.
   if (!open) issued.value = null
@@ -166,6 +211,7 @@ function continueSetup() {
 async function submit() {
   submitting.value = true
   fieldErrors.value = {}
+  refused.value = null
   try {
     const created = await registerRunner(slug.value, name.value.trim())
     runners.value = [...runners.value, created.runner].sort((a, b) => a.name.localeCompare(b.name))
@@ -177,6 +223,8 @@ async function submit() {
       fieldErrors.value = error.fieldErrors
     } else if (error instanceof ApiError && error.status === 409) {
       fieldErrors.value = { name: ['Another runner in this organization already has that name.'] }
+    } else if (planLimitRefusal(error)) {
+      refused.value = planLimitRefusal(error)
     } else {
       toast.error(error)
     }
@@ -218,6 +266,7 @@ async function connect() {
   if (!machine) return
   connecting.value = true
   connectErrors.value = {}
+  refused.value = null
   try {
     const name = machineName.value.trim()
     const created = await registerRunnerOnMachine(
@@ -235,6 +284,8 @@ async function connect() {
       connectErrors.value = {
         name: ['Another runner in this organization already has that name. Pick another.'],
       }
+    } else if (planLimitRefusal(error)) {
+      refused.value = planLimitRefusal(error)
     } else {
       toast.error(error)
     }
@@ -417,6 +468,96 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 {{ harness.name }}
               </Badge>
             </div>
+            <ul
+              v-if="runner.capabilities && runner.capabilities.harnesses.length"
+              class="mt-1.5 space-y-1 text-[11px]"
+              :aria-label="`Harness usage on ${runner.name}`"
+            >
+              <li
+                v-for="{ harness, limits } in usageRows(runner).reported"
+                :key="harness"
+                class="flex flex-wrap items-center gap-x-3 gap-y-0.5"
+                :data-testid="`runner-usage-${harness}`"
+              >
+                <span class="text-muted-foreground w-14 flex-none font-mono">{{ harness }}</span>
+                <template v-for="kind in usageKinds" :key="kind">
+                  <span v-if="limits[kind]" class="flex items-center gap-1.5">
+                    <span class="text-muted-foreground">{{ usageWindowLabel[kind] }}</span>
+                    <span
+                      class="bg-muted h-1.5 w-16 overflow-hidden rounded-full"
+                      role="meter"
+                      :aria-label="`${usageWindowName[kind]} usage`"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      :aria-valuenow="Math.round(limits[kind]!.usedPercent)"
+                    >
+                      <span
+                        class="block h-full rounded-full"
+                        :class="
+                          usageBarClass(limits[kind]!.usedPercent, usageWindowStale(limits, kind))
+                        "
+                        :style="{ width: `${Math.min(100, limits[kind]!.usedPercent)}%` }"
+                      />
+                    </span>
+                    <span
+                      class="tabular-nums"
+                      :class="usageWindowStale(limits, kind) ? 'text-muted-foreground' : ''"
+                    >
+                      {{ usagePercent(limits[kind]!.usedPercent) }}
+                    </span>
+                    <span v-if="usageWindowStale(limits, kind)" class="text-muted-foreground italic"
+                      >stale</span
+                    >
+                  </span>
+                </template>
+                <span
+                  v-if="limits.weekly?.resetsAt && !usageWindowStale(limits, 'weekly')"
+                  class="text-muted-foreground"
+                >
+                  weekly resets {{ usageResetLabel(limits.weekly.resetsAt, true) }}
+                </span>
+                <span
+                  class="text-muted-foreground"
+                  :title="new Date(limits.observedAt).toLocaleString()"
+                >
+                  as of {{ since(limits.observedAt) }}
+                </span>
+              </li>
+              <li
+                v-if="usageRows(runner).unavailable.length"
+                class="text-muted-foreground/70"
+                data-testid="runner-usage-unavailable"
+              >
+                Usage not available<template v-if="usageRows(runner).reported.length"
+                  >: {{ usageRows(runner).unavailable.join(', ') }}</template
+                >
+              </li>
+              <li
+                v-if="claudeUsagePollHint(runner.capabilities)"
+                class="text-muted-foreground/70"
+                data-testid="runner-usage-claude-hint"
+              >
+                Claude usage is updated after runs only. Live usage: run
+                <code class="font-mono">{{ claudeUsagePollCommand }}</code> on this machine.
+                <a
+                  :href="claudeUsagePollDocsUrl"
+                  target="_blank"
+                  rel="noopener"
+                  class="underline underline-offset-2"
+                  title="The runner reads Claude Code's OAuth token on that machine and sends it only to api.anthropic.com. Only the percentages and reset times reach Aictiq."
+                  >What it sends</a
+                >
+              </li>
+            </ul>
+            <p
+              v-if="runner.capabilities?.updateFailure"
+              class="mt-1 line-clamp-2 text-[11px] text-amber-700 dark:text-amber-400"
+              :title="runner.capabilities.updateFailure.error"
+            >
+              Self-update to {{ runner.capabilities.updateFailure.version }} failed
+              {{ since(runner.capabilities.updateFailure.at) }}:
+              {{ runner.capabilities.updateFailure.error }}
+            </p>
           </div>
 
           <Loader2
@@ -431,7 +572,9 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" class="w-60">
-              <DropdownMenuItem @select="router.push(factorySetupPath(slug, { runner: runner.id }))">
+              <DropdownMenuItem
+                @select="router.push(factorySetupPath(slug, { runner: runner.id }))"
+              >
                 Setup guide
               </DropdownMenuItem>
               <DropdownMenuItem @select="rotate(runner)">New secret (re-register)</DropdownMenuItem>
@@ -497,6 +640,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               {{ message }}
             </p>
           </div>
+          <PlanLimitNotice v-if="refused" :slug="slug" :refusal="refused" />
         </form>
 
         <DialogFooter>
@@ -618,6 +762,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
             >
               {{ message }}
             </p>
+            <PlanLimitNotice v-if="refused" :slug="slug" :refusal="refused" />
           </form>
         </div>
 

@@ -19,7 +19,9 @@ import {
 } from '../runner/config.js'
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
-import { harnesses, probeHarnesses } from '../runner/harness/index.js'
+import { describeMissing, harnesses, probeAllHarnesses } from '../runner/harness/index.js'
+import { readUsageLimits, recordUsageLimits, usageLimitsPath } from '../runner/limits.js'
+import { extendProcessPath, harnessDirs, withHarnessDirs } from '../runner/path.js'
 import {
   serviceDefinition,
   servicePlatform,
@@ -29,7 +31,8 @@ import {
 } from '../runner/service.js'
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
-import type { RunnerCapabilities } from '../runner/types.js'
+import { UsagePoller } from '../runner/usagePoll.js'
+import type { RunnerCapabilities, UpdateFailure } from '../runner/types.js'
 import {
   cliEntryPath,
   PackageName,
@@ -279,13 +282,27 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
       )
       print('')
       print(
-        capabilities.harnesses.length === 0
-          ? 'No harness found on PATH (claude, codex, opencode, cursor agent, copilot).'
-          : renderTable(capabilities.harnesses, [
-              { header: 'HARNESS', value: (h) => h.name },
-              { header: 'VERSION', value: (h) => h.version ?? '' },
-            ]),
+        renderTable(
+          [
+            ...capabilities.harnesses.map((h) => ({ name: h.name, version: h.version ?? '', note: '' })),
+            ...(capabilities.missingHarnesses ?? []).map((m) => ({
+              name: m.name,
+              version: 'missing',
+              note: describeMissing(m),
+            })),
+          ],
+          [
+            { header: 'HARNESS', value: (h) => h.name },
+            { header: 'VERSION', value: (h) => h.version },
+            { header: 'WHY', value: (h) => h.note },
+          ],
+        ),
       )
+      // A service has its own PATH (its definition's, plus the same per-user directories), so
+      // a harness this shell finds can still be missing there: the Factory runner page shows
+      // what the service itself reported.
+      print('')
+      print(renderFields([['PATH', capabilities.path ?? '']]))
       for (const { profile, hello, text } of registrations) {
         const org = hello?.organizationSlug ?? profileLabel(profile)
         print('')
@@ -340,6 +357,25 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         const workspaceRoot = resolve(options.workspaceRoot ?? defaultWorkspaceRoot())
         // Workspaces failed runs kept for a continue expire while the runner is down too.
         if (options.keepWorkspaces !== true) await pruneKeptWorkspaces(workspaceRoot)
+        /**
+         * The last self-update that did not take, reported with every heartbeat so the Factory
+         * runner page shows it; otherwise it only reaches this process's log.
+         */
+        let updateFailure: UpdateFailure | null = null
+        const failUpdate = (target: string, error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          updateFailure = {
+            version: target,
+            error: message.length > MaxReportedUpdateError ? `${message.slice(0, MaxReportedUpdateError - 1)}…` : message,
+            at: new Date().toISOString(),
+          }
+          return message
+        }
+        // One for the machine, however many organizations it serves: harness-limits.json is its own.
+        const usage = new UsagePoller({
+          claudeEnabled: () => readRunnerConfig()?.claudeUsagePoll === true,
+          log,
+        })
         const createSupervisor = () =>
           new RunnerSupervisor({
             readConfig: () => readRunnerConfig(),
@@ -362,10 +398,15 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                 probe: async () => {
                   // Re-read, like each run does: a new mapping or root shows up in the web UI's
                   // setup guide on the next heartbeat. Only this profile's are reported.
-                  const own = readRunnerConfig()?.profiles.find((p) => p.token === profile.token) ?? profile
+                  const current = readRunnerConfig()
+                  const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
+                  await usage.refresh()
                   return {
                     ...(await probe(parallel, config.machineId, own)),
                     service: startedAsService(),
+                    ...(updateFailure ? { updateFailure } : {}),
+                    usageLimits: readUsageLimits(),
+                    claudeUsagePoll: current?.claudeUsagePoll === true,
                   }
                 },
                 local,
@@ -384,6 +425,9 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                     runnerToken: profile.token,
                     shutdown,
                     local,
+                    onLimits: (harness, limits, observedAt) => {
+                      recordUsageLimits(harness, limits, observedAt)
+                    },
                     workspace: {
                       root: workspaceRoot,
                       repositories: own.workspaces,
@@ -419,6 +463,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             return
           }
           if (result.status === 'current') {
+            updateFailure = null
             log(`Update check: ${version} is up to date (latest on npm: ${result.latest})`)
             return
           }
@@ -433,7 +478,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             await updater.installation()
           } catch (error) {
             log(
-              `Update check: ${PackageName} ${result.latest} is available (running ${version}), but ${error instanceof Error ? error.message : String(error)}`,
+              `Update check: ${PackageName} ${result.latest} is available (running ${version}), but ${failUpdate(result.latest, error)}`,
             )
             return
           }
@@ -478,9 +523,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                 upgraded = await updater.install(target)
               } catch (error) {
                 // Back to work on this version; the next check (hours away) tries again.
-                log(
-                  `Upgrade to ${target} failed (${error instanceof Error ? error.message : String(error)}); staying on ${version}`,
-                )
+                log(`Upgrade to ${target} failed (${failUpdate(target, error)}); staying on ${version}`)
                 target = null
                 supervisor = createSupervisor()
               }
@@ -510,6 +553,54 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         process.exitCode = await rerun(cliEntry(), process.argv.slice(2))
       },
     )
+
+  runner
+    .command('usage')
+    .description("Show the harness usage this machine last saw, or turn the Claude usage poll on or off")
+    .option(
+      '--claude-oauth <state>',
+      "on: read Claude Code's OAuth token and ask api.anthropic.com for 5-hour and weekly usage every 5 minutes; off: only after runs",
+    )
+    .action((options: { claudeOauth?: string }) => {
+      const config = requireConfig()
+      if (options.claudeOauth !== undefined) {
+        const state = options.claudeOauth.toLowerCase()
+        if (state !== 'on' && state !== 'off') {
+          throw new CliError('--claude-oauth is on or off.', ExitCode.Validation)
+        }
+        config.claudeUsagePoll = state === 'on'
+        writeRunnerConfig(config)
+      }
+      const enabled = config.claudeUsagePoll === true
+      const limits = readUsageLimits()
+      if (globals().json) {
+        printJson({ claudeUsagePoll: enabled, usageLimits: limits })
+        return
+      }
+      if (options.claudeOauth !== undefined && enabled) print(`${ClaudeOAuthNotice}\n`)
+      print(
+        renderFields([
+          ['Claude usage', enabled ? 'polled from Anthropic every 5 minutes' : 'updated after runs only'],
+          ['Codex usage', 'read from the newest local Codex session every minute'],
+          ['Stored in', usageLimitsPath()],
+        ]),
+      )
+      if (options.claudeOauth !== undefined) {
+        print('A running `aictiq runner start` picks this up at its next heartbeat.')
+      }
+      if (limits.length === 0) return
+      print('')
+      const percent = (window: { usedPercent: number } | null) => (window ? `${window.usedPercent}%` : '')
+      print(
+        renderTable(limits, [
+          { header: 'HARNESS', value: (l) => l.harness },
+          { header: '5H', value: (l) => percent(l.fiveHour) },
+          { header: 'WEEKLY', value: (l) => percent(l.weekly) },
+          { header: 'WEEKLY RESETS', value: (l) => l.weekly?.resetsAt ?? '' },
+          { header: 'AS OF', value: (l) => l.observedAt },
+        ]),
+      )
+    })
 
   runner
     .command('update')
@@ -568,7 +659,12 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           node: process.execPath,
           entry: cliEntry(),
           parallel: options.parallel,
-          path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          // `runner start` appends these again on every probe, so a harness installed later
+          // in one of them is found without regenerating the definition.
+          path:
+            platform === servicePlatform()
+              ? withHarnessDirs(process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', harnessDirs())
+              : (process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'),
           home: homedir(),
         }),
       )
@@ -582,9 +678,15 @@ async function probe(
   machineId: string,
   profile?: Pick<RunnerProfile, 'workspaces' | 'repoRoots'>,
 ): Promise<RunnerCapabilities> {
+  // A service's PATH was frozen when its definition was generated, and lacks every per-user
+  // directory a shell profile adds; the probe, each harness and git all use the extended one.
+  const path = extendProcessPath()
+  const { harnesses: found, missing } = await probeAllHarnesses()
   return {
     v: 1,
-    harnesses: await probeHarnesses(),
+    harnesses: found,
+    missingHarnesses: missing,
+    path: path.length > MaxReportedPath ? `${path.slice(0, MaxReportedPath - 1)}…` : path,
     os: platform(),
     arch: arch(),
     cliVersion: version,
@@ -643,6 +745,17 @@ function selectProfile(config: RunnerConfig, org: string | undefined): RunnerPro
     ExitCode.Validation,
   )
 }
+
+/** Printed when the Claude usage poll is turned on; docs/harness-usage-limits.md repeats it. */
+const ClaudeOAuthNotice =
+  "The runner will read Claude Code's OAuth access token on this machine and send it only to " +
+  'api.anthropic.com to read your 5-hour and weekly usage. The token never leaves this machine ' +
+  'for any other host, is not stored by Aictiq, and is not sent to the Aictiq server. Only the ' +
+  'percentages and reset times are.'
+
+/** What the instance accepts as `capabilities.path` and `capabilities.updateFailure.error`. */
+const MaxReportedPath = 4096
+const MaxReportedUpdateError = 1000
 
 /** The CLI that is running now, so the agent's MCP bridge is this exact version. */
 function cliEntry(): string {

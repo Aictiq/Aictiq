@@ -50,9 +50,17 @@ export const attachmentContentTypes = [
   'text/tab-separated-values',
 ]
 
-/** Extensions also let a file picker show documents whose MIME type the OS does not know. */
+/**
+ * Extensions also let a file picker show files whose MIME type the OS does not know or
+ * names differently, such as a ZIP that Windows calls `application/x-zip-compressed`.
+ */
 export const attachmentAccept = [
   ...attachmentContentTypes,
+  '.zip',
+  '.pdf',
+  '.txt',
+  '.md',
+  '.markdown',
   '.doc',
   '.docx',
   '.xls',

@@ -18,11 +18,15 @@ import {
   describeExceeded,
   evaluationNotice,
   exceededFrom,
+  FREE_PLAN,
   foundingNotice,
+  isFlatPlan,
   navigation,
   offeredPlans,
   planChange,
+  planName,
   planPriceLabel,
+  sizeLabel,
 } from '@/lib/billing'
 import { useOrganizationsStore } from '@/stores/organizations'
 
@@ -39,6 +43,11 @@ import { useOrganizationsStore } from '@/stores/organizations'
  * price. The legacy per-seat plans appear only for an organization already on one - they
  * are not for sale, so offering them to anyone else would be advertising a price we will
  * not honour. A self-hosted instance shows no quotas and nothing to buy.
+ *
+ * Where the hosted free tier runs, an organization whose evaluation ended without a
+ * subscription is on Free. Its limits belong to each Owner across all the unpaid
+ * organizations they own, so the page shows the people and attachments counted that way -
+ * the organization's own counts would understate them - and offers Hosted, which lifts them.
  */
 const route = useRoute()
 const toast = useToast()
@@ -66,6 +75,10 @@ async function load() {
 onMounted(load)
 
 const selfHosted = computed(() => subscription.value?.mode === 'self_hosted')
+/** On the hosted free tier right now, with its per-Owner counts to show. */
+const freeTier = computed(() =>
+  subscription.value?.plan === FREE_PLAN ? (subscription.value.freeTier ?? null) : null,
+)
 
 type UsageEntry = {
   key: string
@@ -74,17 +87,24 @@ type UsageEntry = {
   limit: number | null | undefined
   storage: boolean
 }
-/** Nothing at all on a self-hosted instance: there are no commercial quotas to report. */
+/**
+ * Nothing at all on a self-hosted instance: there are no commercial quotas to report. On
+ * the free tier, people and attachments are counted per Owner instead, in their own panel.
+ */
 const entries = (): UsageEntry[] =>
   billing.value && !selfHosted.value
     ? [
-        {
-          key: 'humans',
-          label: 'People',
-          used: billing.value.usage.humans,
-          limit: billing.value.limits.seatsHuman,
-          storage: false,
-        },
+        ...(freeTier.value
+          ? []
+          : [
+              {
+                key: 'humans',
+                label: 'People',
+                used: billing.value.usage.humans,
+                limit: billing.value.limits.seatsHuman,
+                storage: false,
+              },
+            ]),
         {
           key: 'agents',
           label: 'Agent identities',
@@ -99,23 +119,23 @@ const entries = (): UsageEntry[] =>
           limit: billing.value.limits.projects,
           storage: false,
         },
-        {
-          key: 'storage',
-          label: 'Attachments',
-          used: billing.value.usage.storageBytes,
-          limit: billing.value.limits.storageBytes,
-          storage: true,
-        },
+        ...(freeTier.value
+          ? []
+          : [
+              {
+                key: 'storage',
+                label: 'Attachments',
+                used: billing.value.usage.storageBytes,
+                limit: billing.value.limits.storageBytes,
+                storage: true,
+              },
+            ]),
       ]
     : []
 
 const GIB = 1_073_741_824
 const display = (value: number, storage: boolean) =>
   storage ? `${(value / GIB).toFixed(2)} GiB` : value.toLocaleString()
-const gib = (bytes: number) => {
-  const value = bytes / GIB
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
-}
 const days = (value: number) => `${value} day${value === 1 ? '' : 's'}`
 
 /**
@@ -145,31 +165,49 @@ const subscribed = computed(() => subscription.value?.subscribedPlan != null)
 /** A retired plan is shown only to the organization that is on it; nobody else is offered it. */
 const offered = computed(() => offeredPlans(plans.value, currentPlan.value))
 const isOwner = computed(() => organizations.current?.role === 'owner')
+/** Whose free organizations the counts span, said to the person reading. */
+const freeScope = computed(() =>
+  isOwner.value ? 'your free organizations' : "an owner's free organizations",
+)
+/** The plan that lifts the free tier's limits, when this instance sells it. */
+const upgradeTarget = computed(() =>
+  selling.value ? offered.value.find((plan) => plan.purchasable && isFlatPlan(plan)) : undefined,
+)
+const percent = (used: number, limit: number) =>
+  limit > 0 ? Math.min(100, (used / limit) * 100) : 100
 const evaluation = computed(() => evaluationNotice(subscription.value))
 const founding = computed(() => foundingNotice(subscription.value))
 /** What this organization actually pays each month - the founding price while one is running. */
 const currentPrice = computed(() => {
   const plan = plans.value.find((option) => option.code === currentPlan.value)
-  if (!plan) return null
+  // "Free · Free" says nothing twice; the free plan's name is its price.
+  if (!plan || plan.code === FREE_PLAN) return null
   const offer = founding.value
-  return offer && !offer.converted ? `$${offer.price} per organization / month` : planPriceLabel(plan)
+  return offer && !offer.converted
+    ? `$${offer.price} per organization / month`
+    : planPriceLabel(plan)
 })
 
 function scrollToPlans() {
   document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+/** The free plan is never bought: being on it is the whole of being subscribed to it. */
+const settled = (plan: PlanOption) => subscribed.value || plan.code === FREE_PLAN
+
 function changeLabel(plan: PlanOption) {
   const change = planChange(currentPlan.value, plan, plans.value)
-  if (change !== 'current') return change === 'upgrade' ? `Upgrade to ${plan.code}` : `Downgrade to ${plan.code}`
-  return subscribed.value ? 'Current plan' : 'Subscribe'
+  const name = planName(plan.code)
+  if (change !== 'current')
+    return change === 'upgrade' ? `Upgrade to ${name}` : `Downgrade to ${name}`
+  return settled(plan) ? 'Current plan' : 'Subscribe'
 }
 
 const changeDisabled = (plan: PlanOption) =>
   !selling.value ||
   !plan.purchasable ||
   busy.value !== null ||
-  (planChange(currentPlan.value, plan, plans.value) === 'current' && subscribed.value)
+  (planChange(currentPlan.value, plan, plans.value) === 'current' && settled(plan))
 
 const go = (url: string) => navigation.assign(url)
 
@@ -183,7 +221,7 @@ async function choose(plan: PlanOption) {
       return
     }
     toast.success(
-      `Moving to ${plan.code}.`,
+      `Moving to ${planName(plan.code)}.`,
       'Stripe confirms the change in a moment; refresh to see it.',
     )
     await load()
@@ -227,14 +265,25 @@ const foundingLine = computed(() => {
 const allowances = (plan: PlanOption): string[] => {
   const lines: string[] = []
   const { seatsHuman, seatsAgent, projects, storageBytes, runLogDays, analyticsDays } = plan.limits
+  const free = plan.code === FREE_PLAN ? subscription.value?.freeTier : null
+  if (free) {
+    // The plan row says "unlimited" because nothing is capped per organization; the caps
+    // are per Owner, across their free organizations.
+    lines.push(`${free.maxPeople} people across ${freeScope.value}, owner included`)
+    lines.push(`${sizeLabel(free.storageBytes)} attachments, pooled`)
+    lines.push(`${free.maxRunners} runners per organization`)
+    lines.push(`${days(free.runLogDays)} of run logs`)
+    return lines
+  }
   if (seatsHuman == null && seatsAgent == null && projects == null) {
     lines.push('Unlimited people, agents and projects')
   } else {
     lines.push(`${seatsHuman ?? 'Unlimited'} humans · ${seatsAgent ?? 'unlimited'} agents`)
     lines.push(`${projects ?? 'Unlimited'} projects`)
   }
-  if (plan.includedAgentsPerHuman) lines.push(`${plan.includedAgentsPerHuman} agents included per human`)
-  if (storageBytes != null) lines.push(`${gib(storageBytes)} GiB attachments`)
+  if (plan.includedAgentsPerHuman)
+    lines.push(`${plan.includedAgentsPerHuman} agents included per human`)
+  if (storageBytes != null) lines.push(`${sizeLabel(storageBytes)} attachments`)
   if (runLogDays != null) lines.push(`${days(runLogDays)} of run logs`)
   if (analyticsDays != null) lines.push(`${days(analyticsDays)} of analytics`)
   return lines
@@ -242,20 +291,31 @@ const allowances = (plan: PlanOption): string[] => {
 </script>
 
 <template>
-  <UiPageState v-if="error" state="error" title="Billing could not be loaded." :description="error" />
+  <UiPageState
+    v-if="error"
+    state="error"
+    title="Billing could not be loaded."
+    :description="error"
+  />
   <UiPageState v-else-if="!billing || !subscription" state="loading" />
   <section v-else class="max-w-3xl space-y-8">
     <div>
       <h1 class="text-xl font-semibold">Plan</h1>
       <p v-if="selfHosted" class="text-muted-foreground mt-1 text-sm">
-        This is a self-hosted instance: every organization has the full product, there are no quotas and there is
-        nothing to pay for.
+        This is a self-hosted instance: every organization has the full product, there are no quotas
+        and there is nothing to pay for.
       </p>
       <p v-else class="text-muted-foreground mt-1 text-sm">
-        Current plan: <strong class="text-foreground" data-testid="current-plan">{{ billing.plan }}</strong>
-        <template v-if="currentPrice"> · <span data-testid="current-price">{{ currentPrice }}</span></template>
+        Current plan:
+        <strong class="text-foreground" data-testid="current-plan">{{
+          planName(billing.plan)
+        }}</strong>
+        <template v-if="currentPrice">
+          · <span data-testid="current-price">{{ currentPrice }}</span></template
+        >
         <template v-if="subscription.currentPeriodEnd">
-          · {{ subscription.cancelAtPeriodEnd ? 'ends' : 'renews' }} {{ formatDate(subscription.currentPeriodEnd) }}
+          · {{ subscription.cancelAtPeriodEnd ? 'ends' : 'renews' }}
+          {{ formatDate(subscription.currentPeriodEnd) }}
         </template>
       </p>
     </div>
@@ -269,33 +329,59 @@ const allowances = (plan: PlanOption): string[] => {
             {{ formatDate(evaluation.endsAt) }}
           </span>
         </p>
-        <p class="text-muted-foreground mt-1 text-xs">
-          Nothing is charged when it ends. Subscribe before then to keep writing; reading and exporting keep working
-          either way.
+        <p v-if="subscription.freeTier" class="text-muted-foreground mt-1 text-xs">
+          Nothing is charged when it ends. The organization then moves to the free plan -
+          {{ subscription.freeTier.maxPeople }} people and
+          {{ sizeLabel(subscription.freeTier.storageBytes) }} of attachments across
+          {{ freeScope }} - unless it subscribes to Hosted first.
+        </p>
+        <p v-else class="text-muted-foreground mt-1 text-xs">
+          Nothing is charged when it ends. Subscribe before then to keep writing; reading and
+          exporting keep working either way.
         </p>
       </template>
-      <div v-else role="alert" class="border-warning/40 bg-warning/10 rounded-md border px-3 py-2 text-sm">
+      <p v-else-if="subscription.freeTier" class="text-muted-foreground text-sm">
+        Your evaluation ended on {{ formatDate(evaluation.endsAt) }} - this organization is on the
+        free plan now.
+      </p>
+      <div
+        v-else
+        role="alert"
+        class="border-warning/40 bg-warning/10 rounded-md border px-3 py-2 text-sm"
+      >
         <p>
-          Your evaluation ended on {{ formatDate(evaluation.endsAt) }} - reading, downloading and exporting still
-          work, but new changes and agent runs are paused. Subscribe to continue.
+          Your evaluation ended on {{ formatDate(evaluation.endsAt) }} - reading, downloading and
+          exporting still work, but new changes and agent runs are paused. Subscribe to continue.
         </p>
-        <Button v-if="isOwner" class="mt-2" size="sm" data-testid="evaluation-cta" @click="scrollToPlans">
+        <Button
+          v-if="isOwner"
+          class="mt-2"
+          size="sm"
+          data-testid="evaluation-cta"
+          @click="scrollToPlans"
+        >
           Choose a plan
         </Button>
         <p v-else class="text-muted-foreground mt-2 text-xs">Ask an owner to choose a plan.</p>
       </div>
     </div>
 
-    <div v-if="founding" class="border-border rounded-md border px-3 py-2 text-sm" data-testid="founding-offer">
+    <div
+      v-if="founding"
+      class="border-border rounded-md border px-3 py-2 text-sm"
+      data-testid="founding-offer"
+    >
       <p>
         <strong>Founding offer</strong>
         <span class="text-muted-foreground">
-          · ${{ founding.price }} per organization / month for {{ founding.periods }} monthly billing periods
+          · ${{ founding.price }} per organization / month for {{ founding.periods }} monthly
+          billing periods
         </span>
       </p>
       <p class="text-muted-foreground mt-1 text-xs">{{ foundingLine }}</p>
       <p class="text-muted-foreground mt-1 text-xs">
-        The offer is granted by Aictiq and cannot be requested here. It is the same hosted plan either way.
+        The offer is granted by Aictiq and cannot be requested here. It is the same hosted plan
+        either way.
       </p>
     </div>
 
@@ -304,7 +390,8 @@ const allowances = (plan: PlanOption): string[] => {
       role="status"
       class="border-primary/35 bg-primary/5 rounded-md border px-3 py-2 text-sm"
     >
-      Thanks - Stripe has your payment. The new plan applies as soon as Stripe confirms it, usually within seconds.
+      Thanks - Stripe has your payment. The new plan applies as soon as Stripe confirms it, usually
+      within seconds.
     </p>
     <p v-else-if="checkoutState === 'canceled'" role="status" class="text-muted-foreground text-sm">
       Checkout was cancelled; nothing changed.
@@ -322,22 +409,120 @@ const allowances = (plan: PlanOption): string[] => {
       ]"
     >
       <template v-if="subscription.readOnly">
-        A payment failed and the grace period ended on {{ formatDate(subscription.graceEndsAt) }}. The organization is
-        read-only until the payment method is updated.
+        A payment failed and the grace period ended on {{ formatDate(subscription.graceEndsAt) }}.
+        The organization is read-only until the payment method is updated.
       </template>
       <template v-else>
-        A payment failed. Update the payment method before {{ formatDate(subscription.graceEndsAt) }} or the
-        organization becomes read-only.
+        A payment failed. Update the payment method before
+        {{ formatDate(subscription.graceEndsAt) }} or the organization becomes read-only.
       </template>
     </p>
 
+    <div
+      v-if="freeTier"
+      class="border-border space-y-4 rounded-md border px-3 py-3"
+      data-testid="free-tier"
+    >
+      <div>
+        <p class="text-sm font-medium">Free plan</p>
+        <p class="text-muted-foreground mt-1 text-xs">
+          These limits belong to each owner and count every free organization they own. Hosted lifts
+          them for this organization.
+        </p>
+      </div>
+
+      <p
+        v-if="subscription.readOnly && subscription.readOnlyReason === 'free_people'"
+        role="alert"
+        class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm"
+        data-testid="free-people-alert"
+      >
+        This organization is read-only: the free plan allows {{ freeTier.maxPeople }} people across
+        {{ freeScope }}, owner included.
+        {{
+          isOwner
+            ? 'Remove someone or revoke an invitation, or upgrade to Hosted.'
+            : 'Ask an owner to remove someone or upgrade to Hosted.'
+        }}
+      </p>
+
+      <div class="space-y-2" data-testid="free-people">
+        <div class="flex justify-between gap-3 text-sm">
+          <span>People</span>
+          <span class="text-right">
+            {{ freeTier.people }} of {{ freeTier.maxPeople }} across {{ freeScope }} (owner
+            included)
+          </span>
+        </div>
+        <div class="bg-muted h-2 overflow-hidden rounded">
+          <div
+            class="bg-primary h-full"
+            :style="{ width: `${percent(freeTier.people, freeTier.maxPeople)}%` }"
+          />
+        </div>
+        <p class="text-muted-foreground text-xs">Pending invitations count; agents do not.</p>
+      </div>
+
+      <div class="space-y-2" data-testid="free-storage">
+        <div class="flex justify-between gap-3 text-sm">
+          <span>Attachments</span>
+          <span class="text-right">
+            {{ sizeLabel(freeTier.storedBytes) }} of {{ sizeLabel(freeTier.storageBytes) }} pooled
+            across
+            {{ freeScope }}
+          </span>
+        </div>
+        <div class="bg-muted h-2 overflow-hidden rounded">
+          <div
+            class="bg-primary h-full"
+            :style="{ width: `${percent(freeTier.storedBytes, freeTier.storageBytes)}%` }"
+          />
+        </div>
+        <p
+          v-if="freeTier.storedBytes >= freeTier.storageBytes"
+          class="text-muted-foreground text-xs"
+        >
+          New uploads are refused until attachments are deleted or this organization upgrades to
+          Hosted - existing files stay readable and downloadable.
+        </p>
+      </div>
+
+      <div class="flex justify-between text-sm" data-testid="free-runners">
+        <span>Runners</span>
+        <span>Up to {{ freeTier.maxRunners }} registered</span>
+      </div>
+
+      <template v-if="upgradeTarget">
+        <Button
+          v-if="isOwner"
+          size="sm"
+          :disabled="busy !== null"
+          data-testid="free-upgrade"
+          @click="choose(upgradeTarget)"
+        >
+          {{
+            busy === upgradeTarget.code ? 'Working…' : `Upgrade to ${planName(upgradeTarget.code)}`
+          }}
+          · {{ planPriceLabel(upgradeTarget) }}
+        </Button>
+        <p v-else class="text-muted-foreground text-xs">Ask an owner to upgrade to Hosted.</p>
+      </template>
+    </div>
+
     <div v-if="entries().length" class="space-y-4">
-      <div v-for="entry in entries()" :key="entry.key" class="space-y-2" :data-testid="`usage-${entry.key}`">
+      <div
+        v-for="entry in entries()"
+        :key="entry.key"
+        class="space-y-2"
+        :data-testid="`usage-${entry.key}`"
+      >
         <div class="flex justify-between text-sm">
           <span>{{ entry.label }}</span>
           <span>
             {{ display(entry.used, entry.storage) }}
-            <template v-if="entry.limit != null"> / {{ display(entry.limit, entry.storage) }}</template>
+            <template v-if="entry.limit != null">
+              / {{ display(entry.limit, entry.storage) }}</template
+            >
             <template v-else>· Unlimited</template>
           </span>
         </div>
@@ -353,8 +538,8 @@ const allowances = (plan: PlanOption): string[] => {
             class="text-muted-foreground text-xs"
             data-testid="storage-over"
           >
-            Delete attachments to free space - existing files stay readable and downloadable. There is no larger
-            allowance to buy.
+            Delete attachments to free space - existing files stay readable and downloadable. There
+            is no larger allowance to buy.
           </p>
         </template>
       </div>
@@ -370,14 +555,18 @@ const allowances = (plan: PlanOption): string[] => {
           <dd>{{ allowance.value }}</dd>
         </div>
         <p class="text-muted-foreground pt-1 text-xs">
-          Older raw logs are deleted and cannot be brought back by subscribing later. Run records, summaries, linked
-          pull requests and item history are kept regardless.
+          Older raw logs are deleted and cannot be brought back by subscribing later. Run records,
+          summaries, linked pull requests and item history are kept regardless.
         </p>
       </dl>
     </div>
 
     <template v-if="subscription.mode === 'saas'">
-      <p v-if="!subscription.enabled" class="text-muted-foreground text-sm" data-testid="billing-unavailable">
+      <p
+        v-if="!subscription.enabled"
+        class="text-muted-foreground text-sm"
+        data-testid="billing-unavailable"
+      >
         Plans cannot be changed here: billing is not configured on this instance.
       </p>
 
@@ -404,7 +593,9 @@ const allowances = (plan: PlanOption): string[] => {
         >
           <p class="font-medium">To move to {{ blocked.plan }}, first:</p>
           <ul class="mt-1 list-disc pl-5">
-            <li v-for="limit in blocked.exceeded" :key="limit.limit">{{ describeExceeded(limit) }}</li>
+            <li v-for="limit in blocked.exceeded" :key="limit.limit">
+              {{ describeExceeded(limit) }}
+            </li>
           </ul>
         </div>
 
@@ -416,7 +607,7 @@ const allowances = (plan: PlanOption): string[] => {
             :data-testid="`plan-${plan.code}`"
           >
             <div class="flex items-baseline justify-between">
-              <strong class="capitalize">{{ plan.code }}</strong>
+              <strong>{{ planName(plan.code) }}</strong>
               <span class="text-muted-foreground text-xs">{{ planPriceLabel(plan) }}</span>
             </div>
             <span v-if="!plan.purchasable" class="text-muted-foreground text-xs">

@@ -22,7 +22,8 @@ export default defineConfig({
       { text: 'Guide', link: '/getting-started', activeMatch: '/guide/' },
       { text: 'Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
-      { text: 'API', link: '/api' }
+      { text: 'API', link: '/api' },
+      { text: 'Discord', link: 'https://discord.gg/yFzzTPSXU' }
     ],
     sidebar: [
       {
@@ -53,7 +54,8 @@ export default defineConfig({
           { text: 'Operations', link: '/operations' },
           { text: 'Billing (SaaS)', link: '/billing' },
           { text: 'Performance', link: '/performance' },
-          { text: 'Usage telemetry', link: '/telemetry' }
+          { text: 'Usage telemetry', link: '/telemetry' },
+          { text: 'Harness usage limits', link: '/harness-usage-limits' }
         ]
       }
     ]

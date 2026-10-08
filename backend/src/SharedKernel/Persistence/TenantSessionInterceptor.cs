@@ -94,12 +94,14 @@ public sealed class TenantSessionInterceptor(AmbientCurrentTenant tenant, ICurre
             SELECT set_config('app.org_id', @organization_id, @is_local),
                    set_config('app.user_id', @user_id, @is_local),
                    set_config('app.invitation_token_hash', @invitation_token_hash, @is_local),
-                   set_config('app.runner_token_hash', @runner_token_hash, @is_local)
+                   set_config('app.runner_token_hash', @runner_token_hash, @is_local),
+                   set_config('app.owner_lookup', @owner_lookup, @is_local)
             """;
         AddParameter(command, "organization_id", tenant.OrganizationId?.ToString() ?? "");
         AddParameter(command, "user_id", currentUser.UserId ?? "");
         AddParameter(command, "invitation_token_hash", tenant.InvitationTokenHash ?? "");
         AddParameter(command, "runner_token_hash", tenant.RunnerTokenHash ?? "");
+        AddParameter(command, "owner_lookup", tenant.OwnerLookupUserId ?? "");
         AddParameter(command, "is_local", local);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
