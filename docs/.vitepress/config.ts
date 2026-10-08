@@ -22,7 +22,8 @@ export default defineConfig({
       { text: 'Guide', link: '/getting-started', activeMatch: '/guide/' },
       { text: 'Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
-      { text: 'API', link: '/api' }
+      { text: 'API', link: '/api' },
+      { text: 'Discord', link: 'https://discord.gg/yFzzTPSXU' }
     ],
     sidebar: [
       {
