@@ -237,9 +237,10 @@ systemctl --user status aictiq-runner
 Generate the unit from a shell whose `PATH` finds Node.js, `aictiq`, and every harness: that
 path is embedded in the unit. The runner also searches the usual per-user install
 directories (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.opencode/bin`, pnpm's home)
-on every heartbeat, so a harness installed there later is found without regenerating it. A
-runner card in Factory → Runners lists the harnesses it did not find, why, and the `PATH` it
-searched. Use `journalctl --user -u aictiq-runner -f` for its local log.
+on every heartbeat, so a harness installed there later is found without regenerating it. Run
+`aictiq runner status` as the service user to see the harnesses it did not find, why, and the
+`PATH` it searched. Factory → Runners lists only the harnesses a runner offers: a harness you do
+not use is not reported as missing. Use `journalctl --user -u aictiq-runner -f` for its local log.
 The service finishes runs in flight on its first stop signal; a second signal cancels them.
 
 ### macOS (launchd)
@@ -348,8 +349,11 @@ organization has more than one runner, the dialog also offers **Runner**: pick o
 that machine takes the run. If it is offline, the run waits in the queue until it comes back.
 If an Admin disables or deletes that runner while the run waits, any runner may take it. For
 Claude Code and Codex, the dialog also shows how much of the harness's 5-hour and weekly
-allowance the last run reported; **Factory → Runners** has the detail per runner. See
-[Harness usage limits](harness-usage-limits.md). The equivalent CLI command is:
+allowance is used. Codex usage is read on the runner every minute, including your own
+interactive Codex sessions. Claude usage is updated after runs, or every 5 minutes once you
+turn on the opt-in poll with `aictiq runner usage --claude-oauth on` on that machine.
+**Factory → Runners** has the detail per runner and a hint on each runner where the Claude
+poll is off. See [Harness usage limits](harness-usage-limits.md). The equivalent CLI command is:
 
 ```bash
 aictiq run start ACME-123 --playbook Implement --agent worker

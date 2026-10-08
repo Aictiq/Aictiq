@@ -75,6 +75,8 @@ export interface RunnerCapabilities {
   updateFailure?: UpdateFailure
   /** The last 5-hour and weekly usage each harness reported on this machine. */
   usageLimits?: HarnessUsageLimits[]
+  /** Whether this machine reads Claude usage from Anthropic between runs (`runner usage --claude-oauth`). */
+  claudeUsagePoll?: boolean
 }
 
 export interface RunnerHello {

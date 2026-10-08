@@ -135,6 +135,10 @@ public static class RunnerCredential
 /// output, per harness. Only harnesses that report one appear (Claude Code and Codex today).
 /// Display only, and possibly old: <see cref="RunnerUsageLimits.ObservedAt"/> says when it was read.
 /// </param>
+/// <param name="ClaudeUsagePoll">
+/// Whether the machine reads Claude usage from Anthropic between runs (<c>aictiq runner usage
+/// --claude-oauth on</c>). Without it, Claude usage is only updated after a run. Display only.
+/// </param>
 public sealed record RunnerCapabilities(
     int V,
     IReadOnlyList<RunnerHarness> Harnesses,
@@ -149,7 +153,8 @@ public sealed record RunnerCapabilities(
     IReadOnlyList<RunnerMissingHarness>? MissingHarnesses = null,
     string? Path = null,
     RunnerUpdateFailure? UpdateFailure = null,
-    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null);
+    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null,
+    bool? ClaudeUsagePoll = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>, <c>cursor</c>, <c>copilot</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);
@@ -163,7 +168,7 @@ public sealed record RunnerMissingHarness(string Name, string Reason, string Com
 public sealed record RunnerUpdateFailure(string Version, string Error, DateTimeOffset At);
 
 /// <param name="Harness">The harness whose account this is, named as in <see cref="RunnerHarness.Name"/>.</param>
-/// <param name="ObservedAt">When the harness reported it, which is when a run last used it.</param>
+/// <param name="ObservedAt">When the harness reported it: after a run, or when the runner last read it between runs.</param>
 /// <param name="FiveHour">The rolling 5-hour window, or null when the harness did not report one.</param>
 /// <param name="Weekly">The weekly window, or null when the harness did not report one.</param>
 public sealed record RunnerUsageLimits(

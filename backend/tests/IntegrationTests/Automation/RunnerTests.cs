@@ -143,6 +143,7 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
                 new RunnerUsageLimits("claude", observedAt, new RunnerUsageWindow(79, DateTimeOffset.UtcNow.AddHours(2)), new RunnerUsageWindow(14, resets)),
                 new RunnerUsageLimits("codex", observedAt, null, new RunnerUsageWindow(3.5, null)),
             ],
+            ClaudeUsagePoll = true,
         };
         var beat = await runner.PostAsJsonAsync("/api/v1/runner/heartbeat", new RunnerHeartbeatRequest(limited), ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.NoContent, beat.StatusCode);
@@ -152,6 +153,7 @@ public sealed class RunnerTests(PostgresFixture postgres, GarageFixture garage) 
         Assert.Equal(79, stored[0].FiveHour!.UsedPercent);
         Assert.Equal(resets.ToUnixTimeSeconds(), stored[0].Weekly!.ResetsAt!.Value.ToUnixTimeSeconds());
         Assert.Null(stored[1].FiveHour);
+        Assert.True((await ListAsync(_owner, Acme)).Single().Capabilities!.ClaudeUsagePoll);
 
         // Whoever hands an item to an agent sees them too, without the roster.
         var choice = Assert.Single((await _owner.GetFromJsonAsync<List<RunnerChoiceView>>(
