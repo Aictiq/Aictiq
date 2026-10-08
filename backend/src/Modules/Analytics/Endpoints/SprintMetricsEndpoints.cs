@@ -144,7 +144,10 @@ public static class SprintMetricsEndpoints
         var today = LocalDay(clock.GetUtcNow(), zone);
         var live = await work.Items.AsNoTracking().Where(x => x.SprintId == sprint.Id && x.RemovedAt == null)
             .Select(x => new { x.StateId, x.Points, x.RemainingHours }).ToListAsync(ct);
-        var initialScope = scope.Where(entry => LocalDay(entry.At, zone) <= sprint.StartsOn)
+        // What the sprint committed to, as velocity counts it: the scope once it was started.
+        // A sprint started after its first day was usually planned that day, not before it.
+        var baseline = sprint.StartedAt is { } started && LocalDay(started, zone) > sprint.StartsOn ? LocalDay(started, zone) : sprint.StartsOn;
+        var initialScope = scope.Where(entry => LocalDay(entry.At, zone) <= baseline)
             .Sum(entry => entry.Added ? Value(entry, unit) : -Value(entry, unit));
         var days = new List<BurndownDay>();
         for (var day = sprint.StartsOn; day < sprint.EndsOn; day = day.AddDays(1))

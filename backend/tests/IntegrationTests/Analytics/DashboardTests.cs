@@ -2,10 +2,13 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.IntegrationTests.WorkItems;
+using Aictiq.Modules.Analytics;
 using Aictiq.Modules.Analytics.Endpoints;
 using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
+using Aictiq.SharedKernel.Tenancy;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aictiq.IntegrationTests.Analytics;
 
@@ -23,6 +26,8 @@ public sealed class DashboardTests(PostgresFixture postgres, GarageFixture garag
         await AssignAsync(await CreateAsync(WorkItemType.Bug, "Also open", points: 2), team.Id, sprint.Id);
         var dropped = await CreateAsync(WorkItemType.Bug, "Dropped");
         (await Client.PostAsync($"/api/v1/orgs/work-items/sprints/{sprint.Id}/start", null, CancellationToken)).EnsureSuccessStatusCode();
+        // The scope the outbox would record as the sprint was planned, two days after its first day.
+        await SeedScopeAsync(sprint.Id, 10);
         var states = (await WorkflowsAsync()).Single().States;
         await TransitionAsync(done, states.Single(s => s.Category == WorkflowStateCategory.Completed).Id);
         await TransitionAsync(dropped, states.Single(s => s.Category == WorkflowStateCategory.Removed).Id);
@@ -48,6 +53,7 @@ public sealed class DashboardTests(PostgresFixture postgres, GarageFixture garag
         // No daily sample exists yet: today is read live, and the days still ahead stay empty.
         var days = Data("burndown").GetProperty("days").EnumerateArray().ToList();
         Assert.Equal(7, days.Count);
+        Assert.Equal(10m, days[0].GetProperty("idealRemaining").GetDecimal());
         Assert.Equal(5m, days.Single(day => day.GetProperty("day").GetString() == today.ToString("yyyy-MM-dd")).GetProperty("remaining").GetDecimal());
         Assert.All(days.Where(day => DateOnly.Parse(day.GetProperty("day").GetString()!) > today),
             day => Assert.Equal(JsonValueKind.Null, day.GetProperty("remaining").ValueKind));
@@ -55,6 +61,16 @@ public sealed class DashboardTests(PostgresFixture postgres, GarageFixture garag
         Assert.Equal(team.Name, Data("velocity").GetProperty("teamName").GetString());
         Assert.Equal(30, Data("cfd").GetProperty("days").GetArrayLength());
         Assert.True(Data("cycle-time").TryGetProperty("cycleTime", out _));
+    }
+
+    private async Task SeedScopeAsync(Guid sprintId, decimal points)
+    {
+        await using var scope = Context.Factory.Services.CreateAsyncScope();
+        using var tenant = scope.ServiceProvider.GetRequiredService<AmbientCurrentTenant>().Use(Organization.Id);
+        var analytics = scope.ServiceProvider.GetRequiredService<AnalyticsDbContext>();
+        analytics.SprintScopeLog.Add(new Aictiq.Modules.Analytics.Domain.SprintScopeLog { EventId = Guid.NewGuid(), OrganizationId = Organization.Id,
+            SprintId = sprintId, ItemId = Guid.NewGuid(), Added = true, Points = points, At = DateTimeOffset.UtcNow });
+        await analytics.SaveChangesAsync(CancellationToken);
     }
 
     private async Task<SprintView> CreateSprintAsync(Guid teamId, DateOnly startsOn, DateOnly endsOn)
