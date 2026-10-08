@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
-import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
+import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
   attachmentAccept,
   attachmentUrl,
@@ -13,6 +13,7 @@ import {
 import { createComment, listComments, type WorkItemComment } from '@/api/comments'
 import { itemHistory } from '@/api/history'
 import {
+  createItem,
   deleteItem,
   duplicateItem,
   getItem,
@@ -190,6 +191,69 @@ const project = useQuery({
 const mayComment = computed(
   () => hasProjectRole(project.data.value?.role, 'guest') && !project.data.value?.isArchived,
 )
+const mayAddSubtask = computed(
+  () =>
+    hasProjectRole(project.data.value?.role, 'member') &&
+    !project.data.value?.isArchived &&
+    (currentItem.value?.type === 'story' || currentItem.value?.type === 'bug'),
+)
+const subtaskTitle = ref('')
+const subtaskOpen = ref(false)
+const creatingSubtask = ref(false)
+const subtaskInput = ref<HTMLInputElement | null>(null)
+watch(
+  () => [props.slug, props.itemKey],
+  () => {
+    subtaskOpen.value = false
+    subtaskTitle.value = ''
+  },
+)
+async function startSubtask() {
+  subtaskOpen.value = true
+  await nextTick()
+  subtaskInput.value?.focus()
+}
+function cancelSubtask() {
+  if (creatingSubtask.value) return
+  subtaskOpen.value = false
+  subtaskTitle.value = ''
+}
+async function createSubtask() {
+  const current = currentItem.value
+  const title = subtaskTitle.value.trim()
+  if (!current || !mayAddSubtask.value || !title || creatingSubtask.value) return
+  const slug = props.slug
+  const projectKey = props.projectKey
+  creatingSubtask.value = true
+  try {
+    const created = await createItem(slug, projectKey, {
+      type: 'task',
+      title,
+      parentId: current.id,
+      teamId: current.teamId,
+    })
+    client.setQueryData<WorkItem[]>([slug, current.key, 'children'], (items = []) =>
+      items.some((entry) => entry.id === created.id) ? items : [...items, created],
+    )
+    if (props.itemKey === current.key && props.slug === slug) subtaskTitle.value = ''
+    await Promise.all([
+      client.invalidateQueries({ queryKey: [slug, current.key] }),
+      client.invalidateQueries({ queryKey: [slug, projectKey, 'items'] }),
+      ...(current.teamId
+        ? [
+            client.invalidateQueries({ queryKey: ['board', slug, projectKey, current.teamId] }),
+            client.invalidateQueries({ queryKey: [slug, current.teamId, 'items', 'backlog'] }),
+          ]
+        : []),
+    ])
+  } catch (error) {
+    toast.error(error, 'The subtask could not be created.')
+  } finally {
+    creatingSubtask.value = false
+    await nextTick()
+    if (props.itemKey === current.key && props.slug === slug) subtaskInput.value?.focus()
+  }
+}
 const projectMembers = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'project-members']),
   queryFn: () => listProjectMembers(props.slug, props.projectKey),
@@ -1008,7 +1072,11 @@ function logged(updated: TimeTrackingItem) {
       <p v-if="conflict" class="text-destructive mt-3 text-sm">
         Someone changed this item. Reload to compare before overwriting.
       </p>
-      <section v-if="currentItem.type !== 'epic'" class="border-border mt-8 rounded-md border p-3">
+      <section
+        v-if="currentItem.type !== 'epic'"
+        class="border-border mt-8 rounded-md border p-3"
+        data-testid="item-subtasks"
+      >
         <div class="flex items-center justify-between gap-3">
           <div>
             <p class="font-label">Subtasks</p>
@@ -1016,9 +1084,21 @@ function logged(updated: TimeTrackingItem) {
               Tasks and other work directly under this item.
             </p>
           </div>
-          <span v-if="!children.isPending.value" class="text-muted-foreground text-xs">{{
-            childItems.length
-          }}</span>
+          <div class="flex items-center gap-2">
+            <span v-if="!children.isPending.value" class="text-muted-foreground text-xs">{{
+              childItems.length
+            }}</span>
+            <Button
+              v-if="mayAddSubtask && !subtaskOpen"
+              type="button"
+              variant="outline"
+              size="sm"
+              :aria-label="`Add subtask to ${currentItem.key}`"
+              @click="startSubtask"
+            >
+              <Plus class="size-3.5" /> Add subtask
+            </Button>
+          </div>
         </div>
         <p v-if="children.isPending.value" class="text-muted-foreground mt-3 text-sm">
           Loading subtasks…
@@ -1052,6 +1132,37 @@ function logged(updated: TimeTrackingItem) {
             >
           </button>
         </div>
+        <form
+          v-if="mayAddSubtask && subtaskOpen"
+          class="mt-3 flex gap-2"
+          @submit.stop.prevent="createSubtask"
+        >
+          <label class="sr-only" for="subtask-title">Subtask title</label>
+          <input
+            id="subtask-title"
+            ref="subtaskInput"
+            v-model="subtaskTitle"
+            maxlength="500"
+            class="border-input bg-background min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm"
+            placeholder="Subtask title"
+            :disabled="creatingSubtask"
+            @keydown.stop
+            @keydown.esc.prevent="cancelSubtask"
+          />
+          <Button type="submit" size="sm" :disabled="creatingSubtask || !subtaskTitle.trim()">
+            {{ creatingSubtask ? 'Adding…' : 'Add' }}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label="Cancel subtask"
+            :disabled="creatingSubtask"
+            @click="cancelSubtask"
+          >
+            <X class="size-4" />
+          </Button>
+        </form>
       </section>
       <section class="border-border mt-8 rounded-md border p-3" data-testid="item-runs">
         <div class="flex flex-wrap items-start justify-between gap-3">
