@@ -52,6 +52,13 @@ An open item, wiki page or sprint returns to the corresponding list. Personal an
 organization pages stay open; project Settings opens Items if you are not an admin in
 the selected project.
 
+To break a story or bug into tasks, open its details and choose **Add subtask** in
+the **Subtasks** section. Type a title and press Enter or choose **Add**; the input
+stays open for the next task. Each task inherits the parent item's team. Open a
+created task to add details later. Escape or Cancel closes the input. This quick
+creation is available to project members in active projects, on both the item page
+and the item dialog, just as on the board.
+
 In descriptions, comments and wiki pages, type `#` or choose the `#` formatting button
 to reference a ticket from the current project. Search by key, number or title, then
 use arrow keys and Enter/Tab, or click a result. The saved Markdown contains plain
