@@ -1,16 +1,15 @@
 <script setup lang="ts" generic="TData extends RowData">
 import {
   FlexRender,
-  getCoreRowModel,
-  getSortedRowModel,
-  useVueTable,
+  useTable,
   type RowData,
   type SortingState,
+  type Updater,
 } from '@tanstack/vue-table'
 import { computed, ref, watch } from 'vue'
 
 import EmptyState from '@/components/common/EmptyState.vue'
-import type { AictiqColumnDef } from '@/lib/table'
+import { dataTableFeatures, type AictiqColumnDef } from '@/lib/table'
 import { cn } from '@/lib/utils'
 
 /**
@@ -53,7 +52,8 @@ const localSorting = ref<SortingState>([])
 const manualSorting = props.sorting !== undefined
 const sorting = computed(() => (manualSorting ? (props.sorting ?? []) : localSorting.value))
 
-const table = useVueTable({
+const table = useTable({
+  features: dataTableFeatures,
   get data() {
     return props.data
   },
@@ -65,14 +65,12 @@ const table = useVueTable({
       return sorting.value
     },
   },
-  onSortingChange: (updater: SortingState | ((old: SortingState) => SortingState)) => {
+  onSortingChange: (updater: Updater<SortingState>) => {
     const next = typeof updater === 'function' ? updater(sorting.value) : updater
     if (manualSorting) emit('update:sorting', next)
     else localSorting.value = next
   },
   manualSorting,
-  getCoreRowModel: getCoreRowModel(),
-  getSortedRowModel: getSortedRowModel(),
 })
 
 // A table is one stop in the tab order. Arrow keys then move its active row, which
@@ -146,7 +144,7 @@ function onKeydown(event: KeyboardEvent) {
                 class="hover:text-foreground inline-flex items-center gap-1"
                 @click="header.column.toggleSorting()"
               >
-                <FlexRender :render="header.column.columnDef.header" :props="header.getContext()" />
+                <FlexRender :header="header" />
                 <span aria-hidden="true">{{
                   header.column.getIsSorted() === 'asc'
                     ? '↑'
@@ -155,11 +153,7 @@ function onKeydown(event: KeyboardEvent) {
                       : ''
                 }}</span>
               </button>
-              <FlexRender
-                v-else
-                :render="header.column.columnDef.header"
-                :props="header.getContext()"
-              />
+              <FlexRender v-else :header="header" />
             </th>
           </tr>
         </thead>
@@ -176,12 +170,12 @@ function onKeydown(event: KeyboardEvent) {
             @click="emit('rowActivate', row.original)"
           >
             <td
-              v-for="cell in row.getVisibleCells()"
+              v-for="cell in row.getAllCells()"
               :key="cell.id"
               class="px-3"
               :style="{ paddingBlock: 'var(--row-padding-y)' }"
             >
-              <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+              <FlexRender :cell="cell" />
             </td>
           </tr>
         </tbody>
