@@ -124,4 +124,11 @@ public static class ProblemTypes
     /// about an address to someone who does not already hold the account's password.
     /// </summary>
     public const string EmailUnconfirmed = Base + "email-unconfirmed";
+
+    /// <summary>
+    /// 401 - the second step of a sign-in (an authenticator code, a passkey) arrived with
+    /// a ticket that has expired or was already used. Nothing about the code itself is
+    /// implied; the client goes back to the first step.
+    /// </summary>
+    public const string SignInExpired = Base + "sign-in-expired";
 }

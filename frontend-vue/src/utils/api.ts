@@ -97,7 +97,13 @@ export type ApiRequestOptions = Omit<FetchOptions<'json'>, 'baseURL' | 'credenti
  * Endpoints where a 401 is the answer, not a stale-token symptom. Refreshing after a
  * wrong password or a refusal to refresh would just loop.
  */
-const NO_REFRESH = ['/auth/refresh', '/auth/login', '/auth/register', '/auth/logout']
+const NO_REFRESH = [
+  '/auth/refresh',
+  '/auth/login',
+  '/auth/passkey/login',
+  '/auth/register',
+  '/auth/logout',
+]
 
 let refreshInFlight: Promise<boolean> | null = null
 

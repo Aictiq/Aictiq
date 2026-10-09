@@ -16,6 +16,9 @@ namespace Aictiq.Modules.Identity;
 
 public static class IdentityModule
 {
+    /// <summary>The Identity store schema: version 3 adds <c>AspNetUserPasskeys</c>.</summary>
+    public static readonly Version SchemaVersion = IdentitySchemaVersions.Version3;
+
     public static IServiceCollection AddIdentityModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddModuleDbContext<IdentityDbContext>("identity");
@@ -35,6 +38,11 @@ public static class IdentityModule
             options.Lockout.AllowedForNewUsers = true;
             options.Lockout.MaxFailedAccessAttempts = 5;
             options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+
+            // Version 3 is the schema with passkeys. IdentityDbContext builds its model from
+            // this same setting, and the design-time factory sets it too, so migrations
+            // and the running store agree.
+            options.Stores.SchemaVersion = SchemaVersion;
         })
         .AddRoles<IdentityRole>()
         .AddEntityFrameworkStores<IdentityDbContext>()
@@ -45,6 +53,18 @@ public static class IdentityModule
         // API configures schemes on top; Workers load this module without any, and would
         // otherwise fail DI validation at start-up. TryAdd-based, so the API is unaffected.
         services.AddAuthentication();
+
+        // WebAuthn's relying party is the host the browser is on. Unset, Identity uses the
+        // request's host, which is right for an instance served from one name; an operator
+        // behind a proxy that rewrites Host sets Passkeys:ServerDomain to the public name.
+        services.Configure<IdentityPasskeyOptions>(options =>
+        {
+            var domain = configuration["Passkeys:ServerDomain"];
+            if (!string.IsNullOrWhiteSpace(domain))
+            {
+                options.ServerDomain = domain;
+            }
+        });
 
         services.AddScoped<ITokenService, TokenService>();
         services.AddSingleton<EmailConfirmationPolicy>();
@@ -73,6 +93,8 @@ public static class IdentityModule
         api.MapOnboardingEndpoints();
         api.MapSessionEndpoints();
         api.MapTokenEndpoints();
+        api.MapTwoFactorEndpoints();
+        api.MapPasskeyEndpoints();
         api.MapUsersEndpoints();
         return api;
     }

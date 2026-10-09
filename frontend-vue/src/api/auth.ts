@@ -72,6 +72,9 @@ function query(options: { next?: string; invite?: string }): string {
 /** The `type` the API puts on a sign-in refused only because the address is unconfirmed. */
 export const EMAIL_UNCONFIRMED = 'https://aictiq.com/problems/email-unconfirmed'
 
+/** The second step of a sign-in came too late or twice: start again from the password. */
+export const SIGN_IN_EXPIRED = 'https://aictiq.com/problems/sign-in-expired'
+
 /**
  * Follows the link mailed at registration. Anonymous: it is usually opened on whatever
  * device the mail was read on. A second click on a link that already worked still

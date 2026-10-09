@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Aictiq.Modules.Identity.Domain;
@@ -20,11 +21,27 @@ public sealed class IdentityDbContext(
     public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();
     public DbSet<UserSecurityToken> UserSecurityTokens => Set<UserSecurityToken>();
     public DbSet<UserOnboarding> UserOnboarding => Set<UserOnboarding>();
+    public DbSet<AuthChallenge> AuthChallenges => Set<AuthChallenge>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
         builder.HasDefaultSchema("identity");
+
+        // Schema version 3 (for passkeys) also narrows a handful of columns that version 1
+        // left as text. Those tables already hold data, and nothing here needs them
+        // narrower, so they stay exactly as they were: the upgrade only adds.
+        builder.Entity<IdentityUserLogin<string>>(b =>
+        {
+            b.Property(l => l.LoginProvider).Metadata.SetMaxLength(null);
+            b.Property(l => l.ProviderKey).Metadata.SetMaxLength(null);
+        });
+        builder.Entity<IdentityUserToken<string>>(b =>
+        {
+            b.Property(t => t.LoginProvider).Metadata.SetMaxLength(null);
+            b.Property(t => t.Name).Metadata.SetMaxLength(null);
+        });
+        builder.Entity<ApplicationUser>().Property(u => u.PhoneNumber).Metadata.SetMaxLength(null);
         ModuleDbContextSupport.ConfigureSharedInfrastructure(builder, owns: true);
 
         builder.Entity<ApplicationUser>(b =>
@@ -123,6 +140,30 @@ public sealed class IdentityDbContext(
                 "(purpose = 1) = (new_email IS NOT NULL)"));
             b.ToTable(t => t.HasCheckConstraint("ck_user_security_tokens_new_email_lower",
                 "new_email IS NULL OR new_email = lower(new_email)"));
+
+            b.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<AuthChallenge>(b =>
+        {
+            b.ToTable("auth_challenges");
+            b.HasKey(t => t.Id);
+
+            b.Property(t => t.UserId).HasMaxLength(64);
+            b.Property(t => t.TicketHash).HasMaxLength(64);
+
+            b.HasIndex(t => t.TicketHash).IsUnique();
+            // What the retention sweep deletes by.
+            b.HasIndex(t => t.ExpiresAt);
+
+            // Only a passkey sign-in starts without knowing who it is for. A two-factor
+            // ticket with no user, or a registration with no owner, is a bug.
+            b.ToTable(t => t.HasCheckConstraint("ck_auth_challenges_user",
+                "purpose = 2 OR user_id IS NOT NULL"));
+            b.ToTable(t => t.HasCheckConstraint("ck_auth_challenges_purpose", "purpose IN (0, 1, 2)"));
 
             b.HasOne<ApplicationUser>()
                 .WithMany()

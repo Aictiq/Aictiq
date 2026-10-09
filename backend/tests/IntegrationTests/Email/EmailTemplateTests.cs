@@ -20,6 +20,7 @@ public sealed class EmailTemplateTests
     [InlineData("email-change")]
     [InlineData("email-confirmation")]
     [InlineData("transition")]
+    [InlineData("security-notice")]
     public void every_shipped_template_renders_a_subject_and_both_bodies(string template)
     {
         var rendered = _renderer.Render(template, new Dictionary<string, string>
@@ -40,7 +41,11 @@ public sealed class EmailTemplateTests
             ["confirmUrl"] = "https://aictiq.test/confirm-email/abc",
             ["newEmail"] = "augusta@example.com",
             ["currentEmail"] = "ada@example.com",
-            ["expiresOn"] = "3 September 2026 18:00 UTC"
+            ["expiresOn"] = "3 September 2026 18:00 UTC",
+            ["headline"] = "Passkey added",
+            ["summary"] = "A passkey called \"Laptop\" was added.",
+            ["occurredOn"] = "3 September 2026 18:00 UTC",
+            ["securityUrl"] = "https://aictiq.test/settings/security"
         });
 
         Assert.NotEmpty(rendered.Subject);

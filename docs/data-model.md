@@ -26,6 +26,8 @@ infrastructure tables every module uses.
 | `AspNetUsers` | people and agents - ASP.NET Identity's own table, extended with `is_agent`, `agent_owner_user_id` (an agent has an owner, a person does not), `avatar_key`, `time_zone`, `is_active` |
 | `AspNetUserLogins` | Google and GitHub sign-in, unique per (provider, provider key) |
 | `refresh_tokens` | SHA-256 hashes only; a rotation family is one session, and replaying a spent token revokes the family |
+| `AspNetUserPasskeys` | WebAuthn credentials (public key, signature counter, name), keyed by credential id |
+| `auth_challenges` | the state between the two requests of a sign-in step - "password OK, code pending" or a WebAuthn challenge - hashed, five minutes, single-use |
 | `user_security_tokens` | password-reset, email-change and account-confirmation links, hashed; one live token per person per purpose |
 | `personal_access_tokens` | hashed secret, 8-character prefix in the clear, scopes, expiry, revocation, optional organization binding |
 | `user_onboarding` | product-tour and getting-started progress |

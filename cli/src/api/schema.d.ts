@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/login/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/auth/login/two-factor
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postAuthLoginTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -218,6 +238,46 @@ export interface paths {
         get: operations["getAuthMe"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/auth/passkey/login
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postAuthPasskeyLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/auth/passkey/options
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postAuthPasskeyOptions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -628,6 +688,74 @@ export interface paths {
         patch: operations["patchMeOnboarding"];
         trace?: never;
     };
+    "/api/v1/me/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET api/v1/me/passkeys/
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        get: operations["getMePasskeys"];
+        put?: never;
+        /**
+         * POST api/v1/me/passkeys/
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMePasskeys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/passkeys/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/me/passkeys/options
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMePasskeysOptions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/passkeys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * DELETE api/v1/me/passkeys/{id}
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        delete: operations["deleteMePasskeysById"];
+        options?: never;
+        head?: never;
+        /**
+         * PATCH api/v1/me/passkeys/{id}
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        patch: operations["patchMePasskeysById"];
+        trace?: never;
+    };
     "/api/v1/me/password": {
         parameters: {
             query?: never;
@@ -731,6 +859,106 @@ export interface paths {
          * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
          */
         delete: operations["deleteMeTokensByTokenId:guid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/two-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET api/v1/me/two-factor/
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        get: operations["getMeTwoFactor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/two-factor/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/me/two-factor/disable
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMeTwoFactorDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/two-factor/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/me/two-factor/enable
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMeTwoFactorEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/two-factor/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/me/two-factor/recovery-codes
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMeTwoFactorRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/two-factor/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST api/v1/me/two-factor/setup
+         * @description Use the documented request and response shapes. Error responses use RFC 9457 problem details and include a traceId for support.
+         */
+        post: operations["postMeTwoFactorSetup"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3760,6 +3988,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddPasskeyRequest: {
+            credential: components["schemas"]["JsonElement"];
+            name: null | string;
+            ticket: null | string;
+        };
         AvatarCommitRequest: {
             key: null | string;
         };
@@ -4076,6 +4309,9 @@ export interface components {
         };
         /** @enum {unknown} */
         EmailNotificationMode: "off" | "immediate" | "digest";
+        EnableTwoFactorRequest: {
+            code: null | string;
+        };
         /** @enum {unknown} */
         EstimationUnit: "points" | "hours" | null;
         ForgotPasswordRequest: {
@@ -4161,6 +4397,10 @@ export interface components {
             /** Format: int32 */
             totalPages?: number | string;
         };
+        PasskeyLoginRequest: {
+            credential: components["schemas"]["JsonElement"];
+            ticket: null | string;
+        };
         /** @enum {unknown} */
         ProjectRole: "admin" | "member" | "guest" | null;
         /** @enum {unknown} */
@@ -4188,6 +4428,9 @@ export interface components {
         ReleaseMetadata: {
             updateCheck: components["schemas"]["UpdateCheckMetadata"];
             version: string;
+        };
+        RenamePasskeyRequest: {
+            name: null | string;
         };
         ReorderStatesRequest: {
             stateIds: null | string[];
@@ -4283,6 +4526,15 @@ export interface components {
             toStateId: string;
             /** Format: uint32 */
             version: number | string;
+        };
+        TwoFactorLoginRequest: {
+            code: null | string;
+            recoveryCode: null | string;
+            ticket: null | string;
+        };
+        TwoFactorProofRequest: {
+            code: null | string;
+            currentPassword: null | string;
         };
         UpdateAgentRequest: {
             displayName: null | string;
@@ -6022,6 +6274,175 @@ export interface operations {
             };
         };
     };
+    postAuthLoginTwoFactor: {
+        parameters: {
+            query?: {
+                /** @example example */
+                mode?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
     postAuthLogout: {
         parameters: {
             query?: {
@@ -6188,6 +6609,337 @@ export interface operations {
         };
     };
     getAuthMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postAuthPasskeyLogin: {
+        parameters: {
+            query?: {
+                /** @example example */
+                mode?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postAuthPasskeyOptions: {
         parameters: {
             query?: never;
             header?: never;
@@ -10466,6 +11218,830 @@ export interface operations {
             };
         };
     };
+    getMePasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMePasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMePasskeysOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    deleteMePasskeysById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example 11111111-1111-1111-1111-111111111111 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    patchMePasskeysById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example 11111111-1111-1111-1111-111111111111 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenamePasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
     postMePassword: {
         parameters: {
             query?: never;
@@ -11457,6 +13033,828 @@ export interface operations {
                 /** @example 11111111-1111-1111-1111-111111111111 */
                 tokenId: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    getMeTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMeTwoFactorDisable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorProofRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMeTwoFactorEnable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnableTwoFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMeTwoFactorRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorProofRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "title": "Invalid request",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/invalid-request"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description Authentication is required or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/unauthorized"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The credential lacks the required organization role or token scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/forbidden"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The requested resource does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "title": "Not found",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/not-found"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The resource changed since the supplied version, or a domain conflict exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "title": "Conflict",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/conflict"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+            /** @description The rate limit was exceeded; retry after the current one-minute window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 429,
+                     *       "title": "Too many requests",
+                     *       "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                     *       "type": "https://aictiq.com/problems/too-many-requests"
+                     *     }
+                     */
+                    "application/problem+json": {
+                        detail?: null | string;
+                        instance?: null | string;
+                        /** Format: int32 */
+                        status?: null | number | string;
+                        title?: null | string;
+                        type?: null | string;
+                    };
+                };
+            };
+        };
+    };
+    postMeTwoFactorSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
