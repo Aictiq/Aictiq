@@ -224,6 +224,8 @@ async function submitChild() {
   }
 }
 
+const childTypeNames = (item: WorkItem) => childTypes(item.type).map((type) => typeLabels[type].toLowerCase()).join(' / ')
+
 // A real link, so middle-click and copy-link still give the item's own page; a plain click opens
 // it over the backlog instead.
 const itemLink = (item: WorkItem) => `/o/${props.slug}/p/${props.projectKey}/items/${item.key}`
@@ -312,7 +314,7 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
                 <RouterLink :to="itemLink(row.item)" class="truncate font-medium hover:underline" @click.stop="openItem($event, row.item)">{{ row.item.title }}</RouterLink>
                 <button
                   v-if="childTypes(row.item.type).length" class="text-muted-foreground hover:text-foreground hover:bg-background ml-auto flex-none rounded p-1 opacity-60 group-hover:opacity-100"
-                  :title="`Add ${childTypes(row.item.type).map((type) => typeLabels[type].toLowerCase()).join(' / ')} to ${row.item.key}`"
+                  :title="`Add ${childTypeNames(row.item)} to ${row.item.key}`"
                   :aria-label="`Add child to ${row.item.key}`" @click.stop="startChild(row.item)"
                 ><Plus class="size-3.5" /></button>
               </div>
