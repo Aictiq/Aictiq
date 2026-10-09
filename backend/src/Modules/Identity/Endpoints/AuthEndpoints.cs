@@ -192,6 +192,8 @@ public static class AuthEndpoints
             ITokenService tokenService,
             IOptions<JwtOptions> jwtOptions,
             EmailConfirmationPolicy confirmation,
+            IdentityDbContext db,
+            TimeProvider timeProvider,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
@@ -235,6 +237,13 @@ public static class AuthEndpoints
                     detail: "Follow the link we sent when you registered, or ask for a new one.",
                     type: ProblemTypes.EmailUnconfirmed,
                     statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            // The password alone is not the whole sign-in for an account with a second
+            // factor: a ticket instead of tokens, redeemed at /auth/login/two-factor.
+            if (user.TwoFactorEnabled)
+            {
+                return await TwoFactorEndpoints.ChallengeAsync(db, user, timeProvider.GetUtcNow(), cancellationToken);
             }
 
             var tokens = await tokenService.IssueAsync(user, cancellationToken);

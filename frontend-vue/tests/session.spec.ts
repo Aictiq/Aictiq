@@ -90,6 +90,63 @@ describe('session store', () => {
     expect(session.user?.fullName).toBe('Alice Ng')
   })
 
+  it('waits for the second factor when the password alone is not the whole sign-in', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url.endsWith('/auth/login/two-factor')
+          ? jsonResponse(200, { accessToken: null, refreshToken: null, user: alice })
+          : jsonResponse(202, {
+              ticket: 't-1',
+              expiresAt: '2026-10-09T10:00:00Z',
+              twoFactorRequired: true,
+            }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const session = useSessionStore()
+    const outcome = await session.login({ email: alice.email, password: 'a-long-enough-password' })
+
+    expect(outcome).toEqual({ status: 'two-factor', ticket: 't-1' })
+    expect(session.isAuthenticated).toBe(false)
+
+    await session.completeTwoFactor('t-1', { code: '123456' })
+
+    expect(session.status).toBe('authenticated')
+    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ ticket: 't-1', code: '123456' })
+  })
+
+  it('signs in with a passkey in one go', async () => {
+    const credential = { id: 'cred', type: 'public-key', response: {} }
+    vi.stubGlobal(
+      'PublicKeyCredential',
+      Object.assign(function PublicKeyCredential() {}, {
+        parseRequestOptionsFromJSON: (options: unknown) => options,
+      }),
+    )
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      credentials: { get: vi.fn(() => Promise.resolve({ toJSON: () => credential })) },
+    })
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url.endsWith('/auth/passkey/options')
+          ? jsonResponse(200, { ticket: 'p-1', options: { challenge: 'abc' } })
+          : jsonResponse(200, { accessToken: null, refreshToken: null, user: alice }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const session = useSessionStore()
+    await session.loginWithPasskey()
+
+    expect(session.status).toBe('authenticated')
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(url).toMatch(/\/auth\/passkey\/login$/)
+    expect(JSON.parse(init.body as string)).toEqual({ ticket: 'p-1', credential })
+  })
+
   it('leaves the session untouched when sign-in fails', async () => {
     vi.stubGlobal(
       'fetch',

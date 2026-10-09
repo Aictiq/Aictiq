@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue'
+import { KeyRound, Loader2 } from '@lucide/vue'
 import { computed, ref, useTemplateRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-import { describeExternalError, EMAIL_UNCONFIRMED } from '@/api/auth'
+import { describeExternalError, EMAIL_UNCONFIRMED, SIGN_IN_EXPIRED } from '@/api/auth'
 import AuthCard from '@/components/AuthCard.vue'
 import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
 import ResendConfirmation from '@/components/ResendConfirmation.vue'
@@ -14,6 +14,7 @@ import { useToast } from '@/composables/useToast'
 import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
 import { turnstileReady } from '@/utils/turnstile'
+import { isCancelled, passkeysSupported } from '@/utils/webauthn'
 
 const session = useSessionStore()
 const router = useRouter()
@@ -41,6 +42,21 @@ const formError = ref<string | null>(describeExternalError(route.query.error))
 /** Where the provider round trip should return to. Absent, the callback lands on the app root. */
 const next = computed(() => (typeof route.query.next === 'string' ? route.query.next : undefined))
 
+/**
+ * Set once the password checked out on an account with two-factor on. The form then asks
+ * for the code instead; no session exists until it is accepted.
+ */
+const ticket = ref<string | null>(null)
+const code = ref('')
+const useRecoveryCode = ref(false)
+const passkeyBusy = ref(false)
+const canUsePasskey = passkeysSupported()
+
+/** `next` is where the guard bounced them from; default to the app root. */
+async function proceed() {
+  await router.replace(next.value ?? '/')
+}
+
 async function submit() {
   submitting.value = true
   fieldErrors.value = {}
@@ -48,10 +64,15 @@ async function submit() {
   unconfirmed.value = null
 
   try {
-    await session.login({ email: email.value.trim(), password: password.value }, captcha.value)
-    // `next` is where the guard bounced them from; default to the app root.
-    const next = typeof route.query.next === 'string' ? route.query.next : '/'
-    await router.replace(next)
+    const outcome = await session.login(
+      { email: email.value.trim(), password: password.value },
+      captcha.value,
+    )
+    if (outcome.status === 'two-factor') {
+      ticket.value = outcome.ticket
+      return
+    }
+    await proceed()
   } catch (error) {
     if (error instanceof ApiError && error.problem?.type === EMAIL_UNCONFIRMED) {
       unconfirmed.value = email.value.trim()
@@ -68,68 +89,209 @@ async function submit() {
     widget.value?.reset()
   }
 }
+
+async function submitCode() {
+  if (!ticket.value) return
+  submitting.value = true
+  fieldErrors.value = {}
+  formError.value = null
+
+  try {
+    const answer = code.value.trim()
+    await session.completeTwoFactor(
+      ticket.value,
+      useRecoveryCode.value ? { recoveryCode: answer } : { code: answer },
+    )
+    await proceed()
+  } catch (error) {
+    if (error instanceof ApiError && error.problem?.type === SIGN_IN_EXPIRED) {
+      // Too slow, or used already: the password step has to be done again.
+      backToPassword()
+      formError.value = 'That sign-in took too long. Enter your password again.'
+    } else if (error instanceof ApiError) {
+      fieldErrors.value = error.fieldErrors
+      formError.value = Object.keys(error.fieldErrors).length === 0 ? describe(error) : null
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** Title and, when the API gave one, the hint on what to do about it. */
+function describe(error: ApiError): string {
+  return error.problem?.detail ? `${error.title} ${error.problem.detail}` : error.title
+}
+
+function toggleRecoveryCode() {
+  useRecoveryCode.value = !useRecoveryCode.value
+  code.value = ''
+}
+
+function backToPassword() {
+  ticket.value = null
+  code.value = ''
+  useRecoveryCode.value = false
+  password.value = ''
+}
+
+async function signInWithPasskey() {
+  passkeyBusy.value = true
+  formError.value = null
+  unconfirmed.value = null
+
+  try {
+    await session.loginWithPasskey()
+    await proceed()
+  } catch (error) {
+    if (isCancelled(error)) return
+    if (error instanceof ApiError) {
+      formError.value = describe(error)
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    passkeyBusy.value = false
+  }
+}
 </script>
 
 <template>
-  <AuthCard title="Sign in" description="Welcome back to Aictiq.">
-    <form class="space-y-4" novalidate @submit.prevent="submit">
+  <AuthCard
+    title="Sign in"
+    :description="ticket ? 'One more step to confirm it is you.' : 'Welcome back to Aictiq.'"
+  >
+    <form v-if="ticket" class="space-y-4" novalidate @submit.prevent="submitCode">
       <div class="space-y-1.5">
-        <label for="email" class="text-sm font-medium">Email</label>
+        <label for="code" class="text-sm font-medium">
+          {{ useRecoveryCode ? 'Recovery code' : 'Authentication code' }}
+        </label>
         <Input
-          id="email"
-          v-model="email"
-          type="email"
-          autocomplete="email"
+          id="code"
+          v-model="code"
+          :inputmode="useRecoveryCode ? 'text' : 'numeric'"
+          autocomplete="one-time-code"
+          autofocus
           required
-          :aria-invalid="Boolean(fieldErrors.email)"
+          :placeholder="useRecoveryCode ? 'XXXXX-XXXXX' : '123456'"
+          :aria-invalid="Boolean(fieldErrors.code)"
         />
-        <p v-for="message in fieldErrors.email" :key="message" class="text-destructive text-xs">
+        <p class="text-muted-foreground text-xs">
+          {{
+            useRecoveryCode
+              ? 'One of the codes you saved when you turned on two-factor authentication. Each works once.'
+              : 'Open your authenticator app and enter the 6-digit code for Aictiq.'
+          }}
+        </p>
+        <p v-for="message in fieldErrors.code" :key="message" class="text-destructive text-xs">
           {{ message }}
         </p>
       </div>
-
-      <div class="space-y-1.5">
-        <div class="flex items-center justify-between">
-          <label for="password" class="text-sm font-medium">Password</label>
-          <RouterLink
-            to="/forgot-password"
-            class="text-muted-foreground hover:text-foreground text-xs"
-          >
-            Forgot password?
-          </RouterLink>
-        </div>
-        <PasswordInput
-          id="password"
-          v-model="password"
-          autocomplete="current-password"
-          required
-          :aria-invalid="Boolean(fieldErrors.password)"
-        />
-        <p v-for="message in fieldErrors.password" :key="message" class="text-destructive text-xs">
-          {{ message }}
-        </p>
-      </div>
-
-      <TurnstileWidget ref="widget" v-model:token="captcha" action="login" />
 
       <p v-if="formError" role="alert" class="text-destructive text-sm">{{ formError }}</p>
 
-      <div v-if="unconfirmed" role="alert" class="bg-muted space-y-3 rounded-md p-3">
-        <p class="text-sm">
-          Confirm your email address first. Follow the link we sent to
-          <span class="font-medium">{{ unconfirmed }}</span> when you registered, then sign in.
-        </p>
-        <ResendConfirmation :key="unconfirmed" :email="unconfirmed" />
-      </div>
-
-      <Button type="submit" class="w-full" :disabled="submitting || !turnstileReady(captcha)">
+      <Button type="submit" class="w-full" :disabled="submitting || code.trim().length === 0">
         <Loader2 v-if="submitting" class="size-4 animate-spin" />
-        Sign in
+        Verify
       </Button>
+
+      <div class="flex items-center justify-between text-xs">
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground"
+          @click="toggleRecoveryCode"
+        >
+          {{ useRecoveryCode ? 'Use your authenticator app' : 'Use a recovery code' }}
+        </button>
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground"
+          @click="backToPassword"
+        >
+          Back
+        </button>
+      </div>
     </form>
 
-    <!-- Renders nothing when the instance has no provider credentials. -->
-    <ExternalProviderButtons :next="next" />
+    <template v-else>
+      <form class="space-y-4" novalidate @submit.prevent="submit">
+        <div class="space-y-1.5">
+          <label for="email" class="text-sm font-medium">Email</label>
+          <Input
+            id="email"
+            v-model="email"
+            type="email"
+            autocomplete="email"
+            required
+            :aria-invalid="Boolean(fieldErrors.email)"
+          />
+          <p v-for="message in fieldErrors.email" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <label for="password" class="text-sm font-medium">Password</label>
+            <RouterLink
+              to="/forgot-password"
+              class="text-muted-foreground hover:text-foreground text-xs"
+            >
+              Forgot password?
+            </RouterLink>
+          </div>
+          <PasswordInput
+            id="password"
+            v-model="password"
+            autocomplete="current-password"
+            required
+            :aria-invalid="Boolean(fieldErrors.password)"
+          />
+          <p
+            v-for="message in fieldErrors.password"
+            :key="message"
+            class="text-destructive text-xs"
+          >
+            {{ message }}
+          </p>
+        </div>
+
+        <TurnstileWidget ref="widget" v-model:token="captcha" action="login" />
+
+        <p v-if="formError" role="alert" class="text-destructive text-sm">{{ formError }}</p>
+
+        <div v-if="unconfirmed" role="alert" class="bg-muted space-y-3 rounded-md p-3">
+          <p class="text-sm">
+            Confirm your email address first. Follow the link we sent to
+            <span class="font-medium">{{ unconfirmed }}</span> when you registered, then sign in.
+          </p>
+          <ResendConfirmation :key="unconfirmed" :email="unconfirmed" />
+        </div>
+
+        <Button type="submit" class="w-full" :disabled="submitting || !turnstileReady(captcha)">
+          <Loader2 v-if="submitting" class="size-4 animate-spin" />
+          Sign in
+        </Button>
+      </form>
+
+      <!-- Hidden where the browser has no WebAuthn at all; a passkey is then no option. -->
+      <Button
+        v-if="canUsePasskey"
+        type="button"
+        variant="outline"
+        class="mt-3 w-full"
+        :disabled="passkeyBusy"
+        @click="signInWithPasskey"
+      >
+        <Loader2 v-if="passkeyBusy" class="size-4 animate-spin" />
+        <KeyRound v-else class="size-4" aria-hidden="true" />
+        Sign in with a passkey
+      </Button>
+
+      <!-- Renders nothing when the instance has no provider credentials. -->
+      <ExternalProviderButtons :next="next" />
+    </template>
 
     <template #footer>
       No account?

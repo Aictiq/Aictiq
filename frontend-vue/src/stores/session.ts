@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { passkeySignInCredential } from '@/api/security'
 import { apiFetch } from '@/utils/api'
 import { turnstileHeaders } from '@/utils/turnstile'
 
@@ -52,6 +53,13 @@ export type RegistrationOutcome =
   | { status: 'signed-in' }
   | { status: 'confirmation-sent'; email: string }
 
+/**
+ * What a password sign-in did. `two-factor` when the account has an authenticator app:
+ * the password was right, there is no session yet, and the ticket goes to
+ * `completeTwoFactor` with a code.
+ */
+export type LoginOutcome = { status: 'signed-in' } | { status: 'two-factor'; ticket: string }
+
 export const useSessionStore = defineStore('session', () => {
   const user = ref<SessionUser | null>(null)
   const status = ref<SessionStatus>('unknown')
@@ -100,12 +108,42 @@ export const useSessionStore = defineStore('session', () => {
     await load()
   }
 
-  async function login(credentials: Credentials, turnstileToken?: string | null): Promise<void> {
-    // The API replies with Set-Cookie and a user; no token reaches this code.
-    const { user: signedIn } = await apiFetch<{ user: SessionUser }>('/auth/login', {
+  async function login(
+    credentials: Credentials,
+    turnstileToken?: string | null,
+  ): Promise<LoginOutcome> {
+    // The API replies with Set-Cookie and a user; no token reaches this code. With
+    // two-factor on, it replies 202 with a ticket instead, and no cookies yet.
+    const response = await apiFetch<{ user?: SessionUser; ticket?: string }>('/auth/login', {
       method: 'POST',
       body: credentials,
       headers: turnstileHeaders(turnstileToken),
+    })
+    if (response.user) {
+      set(response.user)
+      return { status: 'signed-in' }
+    }
+    return { status: 'two-factor', ticket: response.ticket! }
+  }
+
+  /** The second half of a password sign-in: an authenticator code, or a recovery code. */
+  async function completeTwoFactor(
+    ticket: string,
+    answer: { code: string } | { recoveryCode: string },
+  ): Promise<void> {
+    const { user: signedIn } = await apiFetch<{ user: SessionUser }>('/auth/login/two-factor', {
+      method: 'POST',
+      body: { ticket, ...answer },
+    })
+    set(signedIn)
+  }
+
+  /** A whole sign-in from a passkey: no password, and no second step. */
+  async function loginWithPasskey(): Promise<void> {
+    const { ticket, credential } = await passkeySignInCredential()
+    const { user: signedIn } = await apiFetch<{ user: SessionUser }>('/auth/passkey/login', {
+      method: 'POST',
+      body: { ticket, credential },
     })
     set(signedIn)
   }
@@ -144,6 +182,8 @@ export const useSessionStore = defineStore('session', () => {
     load,
     reload,
     login,
+    completeTwoFactor,
+    loginWithPasskey,
     register,
     logout,
     set,

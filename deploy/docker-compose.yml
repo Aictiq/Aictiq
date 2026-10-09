@@ -177,6 +177,10 @@ services:
       Turnstile__SecretKey: ${TURNSTILE_SECRET_KEY:-}
       Turnstile__AllowedHostnames__0: ${TURNSTILE_ALLOWED_HOSTNAME:-}
 
+      # Passkeys belong to the host name people sign in on. Empty uses the request's
+      # host, which is right unless a proxy in front rewrites Host.
+      Passkeys__ServerDomain: ${PASSKEYS_SERVER_DOMAIN:-}
+
       Seed__AdminEmail: ${SEED_ADMIN_EMAIL:?set SEED_ADMIN_EMAIL in .env}
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
       Seed__OrganizationName: ${SEED_ORG_NAME:-}

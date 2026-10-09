@@ -7,8 +7,8 @@ namespace Aictiq.Modules.Identity.Workers;
 
 /// <summary>
 /// Prunes the tables Identity owns that grow without bound (identity.refresh_tokens,
-/// identity.personal_access_tokens, audit.audit_log, shared.outbox_messages). Refresh
-/// tokens grow fastest, since every rotation adds a row.
+/// identity.personal_access_tokens, identity.auth_challenges, audit.audit_log,
+/// shared.outbox_messages). Refresh tokens grow fastest, since every rotation adds a row.
 /// </summary>
 /// <remarks>
 /// Runs in the Workers process only: it is a single-writer background job, and putting it
@@ -97,6 +97,19 @@ public sealed class RetentionCleanupService(
             purged AS (
                 DELETE FROM identity.personal_access_tokens t USING doomed d
                 WHERE t.id = d.id RETURNING 1)
+            SELECT count(*) FROM purged
+            """, cancellationToken);
+
+        // Sign-in tickets live five minutes and are worth nothing once spent or expired.
+        // A day of slack keeps a row around long enough to explain a confused sign-in.
+        await PurgeAsync(connection, "identity.auth_challenges", 1,
+            """
+            WITH doomed AS (
+                SELECT id FROM identity.auth_challenges
+                WHERE expires_at < @cutoff
+                LIMIT @batch),
+            purged AS (
+                DELETE FROM identity.auth_challenges c USING doomed d WHERE c.id = d.id RETURNING 1)
             SELECT count(*) FROM purged
             """, cancellationToken);
 

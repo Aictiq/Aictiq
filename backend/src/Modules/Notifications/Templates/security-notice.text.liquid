@@ -1,0 +1,10 @@
+Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},
+
+{{ summary }}{% if occurredOn != blank %} This happened on {{ occurredOn }}.{% endif %}
+{%- if securityUrl != blank %}
+
+Review your security settings: {{ securityUrl }}
+{%- endif %}
+
+If this was you, there is nothing to do. If it was not, change your password and sign out
+your other sessions straight away.

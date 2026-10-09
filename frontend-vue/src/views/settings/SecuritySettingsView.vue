@@ -3,7 +3,9 @@ import { Loader2, Monitor } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 
 import ExternalProviderButtons from '@/components/ExternalProviderButtons.vue'
+import PasskeysSection from '@/components/settings/PasskeysSection.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
+import TwoFactorSection from '@/components/settings/TwoFactorSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import { Input, PasswordInput } from '@/components/ui/input'
@@ -25,9 +27,9 @@ import { useSessionStore } from '@/stores/session'
 import { ApiError } from '@/utils/api'
 
 /**
- * Everything that decides how someone proves who they are: their password, the address
- * recovery mail goes to, the providers they can sign in with, and where they are signed
- * in right now.
+ * Everything that decides how someone proves who they are: their password, a second
+ * factor, their passkeys, the address recovery mail goes to, the providers they can sign
+ * in with, and where they are signed in right now.
  *
  * They sit on one page because they are one decision - "is my account still mine" - and
  * the answer usually needs two of them at once: sign the stolen session out, then change
@@ -241,6 +243,10 @@ const formatted = (value: string) => new Date(value).toLocaleString()
         </div>
       </form>
     </SettingsSection>
+
+    <TwoFactorSection :has-password="hasPassword" />
+
+    <PasskeysSection />
 
     <SettingsSection
       title="Email address"

@@ -280,6 +280,43 @@ people you already trust, mark them confirmed directly:
 UPDATE identity."AspNetUsers" SET email_confirmed = true WHERE email_confirmed = false;
 ```
 
+## Two-factor authentication and passkeys
+
+Both are opt-in for each person, from **Settings → Security**, and neither is ever asked
+for at registration or forced by an organization.
+
+- **Two-factor authentication** uses any authenticator app (TOTP). Turning it on shows a
+  QR code, asks for one code to prove the app has the key, and hands out ten one-time
+  recovery codes. From then on a password sign-in answers `202` with a short-lived ticket
+  instead of a session, and only `POST /api/v1/auth/login/two-factor` with a code issues
+  tokens. Wrong codes count towards the same lockout as wrong passwords (five, then
+  fifteen minutes).
+- **Passkeys** (WebAuthn) are a complete sign-in on their own, so they do not also ask
+  for an authenticator code. People add, rename and remove them in Security settings and
+  use **Sign in with a passkey** on the login page.
+- Signing in with Google or GitHub does not ask for the second factor - the provider
+  does its own. Personal access tokens (the CLI, MCP and agents) are not affected either.
+- Turning two-factor on or off, generating new recovery codes, using a recovery code,
+  and adding or removing a passkey each send the person a security email when email is
+  configured.
+
+Nothing needs configuring for either. A passkey belongs to the host name it was created
+on, which Aictiq takes from the request; if a proxy in front of the API rewrites `Host`,
+set the public name explicitly:
+
+| Setting | Environment variable (compose) | Default | Meaning |
+| --- | --- | --- | --- |
+| `Passkeys:ServerDomain` | `PASSKEYS_SERVER_DOMAIN` | the request's host | The WebAuthn relying-party id, e.g. `aictiq.example.com`. Changing it later makes every existing passkey stop working. |
+
+Browsers only offer passkeys on a secure origin (HTTPS, or `localhost`).
+
+If someone loses both their authenticator and their recovery codes, an operator can turn
+two-factor off for them directly; they can set it up again after signing in:
+
+```sql
+UPDATE identity."AspNetUsers" SET two_factor_enabled = false WHERE email = 'person@example.com';
+```
+
 ## Bot protection (Cloudflare Turnstile)
 
 An instance reachable from the internet should put its anonymous forms behind

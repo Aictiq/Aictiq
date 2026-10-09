@@ -27,6 +27,14 @@ No. Anonymous telemetry is disabled by default and has no installation identifie
 operator explicitly enables it, it contains only Aictiq's version and aggregate counts;
 read [usage telemetry](/telemetry) before enabling it.
 
+## How do I turn on two-factor authentication or add a passkey?
+
+Open **Settings → Security**. **Set up authenticator app** shows a QR code to scan; enter
+the code your app shows to finish, then save the ten recovery codes somewhere safe - each
+one signs you in once if you lose your phone. **Add a passkey** lets your device or a
+security key sign you in without a password. Neither is required, and access tokens for
+the CLI and agents keep working either way.
+
 ## Where do I report a security issue?
 
 Use GitHub's private Security advisory/reporting flow. Do not put an unpatched

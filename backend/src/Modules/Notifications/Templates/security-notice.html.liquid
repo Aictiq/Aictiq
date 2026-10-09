@@ -1,0 +1,13 @@
+<p style="margin:0 0 12px 0;">Hi{% if recipientName != blank %} {{ recipientName }}{% endif %},</p>
+<p style="margin:0 0 16px 0;">
+  {{ summary }}{% if occurredOn != blank %} This happened on {{ occurredOn }}.{% endif %}
+</p>
+{%- if securityUrl != blank %}
+<p style="margin:0 0 24px 0;">
+  <a href="{{ securityUrl }}" style="display:inline-block; background:#1c1917; color:#ffffff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:500;">Review your security settings</a>
+</p>
+{%- endif %}
+<p style="margin:0; color:#78716c; font-size:12px;">
+  If this was you, there is nothing to do. If it was not, change your password and sign out
+  your other sessions straight away.
+</p>
