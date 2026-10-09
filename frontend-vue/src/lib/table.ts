@@ -1,11 +1,37 @@
-import type { ColumnDef, RowData } from '@tanstack/vue-table'
+import {
+  createSortedRowModel,
+  rowSortingFeature,
+  sortFn_alphanumeric,
+  sortFn_basic,
+  sortFn_datetime,
+  sortFn_text,
+  tableFeatures,
+  type ColumnDef,
+  type RowData,
+} from '@tanstack/vue-table'
 
 /**
- * The column type to use with `DataTable`.
+ * The TanStack Table features every `DataTable` gets.
  *
- * Pinned to TanStack Table **v8**, not v9: v9 moved row models into feature slots and
- * reshaped its generics, and nothing here needs what it added. v8 is the line the Vue
- * adapter and shadcn-vue's own table docs are written against, so it is the version a
- * future contributor will be able to look up.
+ * v9 only exposes the APIs of features registered here, so this is the whole surface the
+ * app relies on: header-click sorting, client-side or server-driven. The sort functions are
+ * the ones v8 bundled and picked from automatically by column value (text, alphanumeric
+ * keys like `ACME-12`, dates); without them every column would fall back to `basic`.
  */
-export type AictiqColumnDef<TData extends RowData> = ColumnDef<TData, unknown>
+export const dataTableFeatures = tableFeatures({
+  rowSortingFeature,
+  sortedRowModel: createSortedRowModel(),
+  sortFns: {
+    alphanumeric: sortFn_alphanumeric,
+    basic: sortFn_basic,
+    datetime: sortFn_datetime,
+    text: sortFn_text,
+  },
+})
+
+/** The column type to use with `DataTable`. */
+export type AictiqColumnDef<TData extends RowData> = ColumnDef<
+  typeof dataTableFeatures,
+  TData,
+  unknown
+>
