@@ -90,26 +90,28 @@ describe('Factory onboarding', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
-        async (_input: RequestInfo | URL, init?: RequestInit) =>
+        async (input: RequestInfo | URL, init?: RequestInit) =>
           new Response(
             JSON.stringify(
-              init?.method === 'POST'
-                ? {
-                    runner: {
-                      id: 'r1',
-                      name: 'vps-1',
-                      tokenDisplay: 'jrn_ab…',
-                      registeredBy: 'u1',
-                      registeredByName: 'Alice',
-                      capabilities: null,
-                      lastSeenAt: null,
-                      isOnline: false,
-                      isDisabled: false,
-                      createdAt: '2026-01-01T00:00:00Z',
-                    },
-                    secret: 'jrn_secret',
-                  }
-                : [],
+              String(input).endsWith('/runners/load')
+                ? { runners: [], unassignedQueued: 0, unassignedScheduled: 0 }
+                : init?.method === 'POST'
+                  ? {
+                      runner: {
+                        id: 'r1',
+                        name: 'vps-1',
+                        tokenDisplay: 'jrn_ab…',
+                        registeredBy: 'u1',
+                        registeredByName: 'Alice',
+                        capabilities: null,
+                        lastSeenAt: null,
+                        isOnline: false,
+                        isDisabled: false,
+                        createdAt: '2026-01-01T00:00:00Z',
+                      },
+                      secret: 'jrn_secret',
+                    }
+                  : [],
             ),
             { status: 200, headers: { 'content-type': 'application/json' } },
           ),

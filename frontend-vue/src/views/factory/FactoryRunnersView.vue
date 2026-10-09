@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { hasOrgRole } from '@/api/organizations'
 import {
   deleteRunner,
+  getRunnerLoad,
   listRunnerMachinesElsewhere,
   listRunners,
   registerRunner,
@@ -14,10 +15,12 @@ import {
   updateRunner,
   type Runner,
   type RunnerIssued,
+  type RunnerLoad as RunnerLoadData,
   type RunnerMachine,
 } from '@/api/runners'
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
+import RunnerLoad from '@/components/factory/RunnerLoad.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import PlanLimitNotice from '@/components/common/PlanLimitNotice.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
@@ -47,6 +50,7 @@ import {
   claudeUsagePollCommand,
   claudeUsagePollDocsUrl,
   claudeUsagePollHint,
+  loadFor,
   runnerPlatformGuess,
   runnerRegisterCommand,
   runnerServiceSteps,
@@ -57,6 +61,7 @@ import {
   usageResetLabel,
   usageWindowLabel,
   usageWindowStale,
+  waitingSummary,
   type RunnerPlatform,
 } from '@/lib/runners'
 import { factorySetupPath } from '@/router/paths'
@@ -79,6 +84,20 @@ const slug = computed(() => org.slug.value)
 const mayManage = computed(() => hasOrgRole(org.record.value?.role, 'admin'))
 
 const runners = ref<Runner[]>([])
+/** What the runners hold and what waits for them; null until read, or when it could not be. */
+const runnerLoad = ref<RunnerLoadData | null>(null)
+
+/** Runs for any runner, once for the organization rather than on every runner. */
+const orgQueue = computed(() => {
+  if (!runnerLoad.value) return null
+  const { unassignedQueued, unassignedScheduled, nextUnassignedScheduledFor } = runnerLoad.value
+  return (
+    waitingSummary(unassignedQueued, unassignedScheduled, nextUnassignedScheduledFor).replace(
+      /(\d+) queued/,
+      '$1 waiting',
+    ) || 'nothing waiting'
+  )
+})
 
 const usageKinds = ['fiveHour', 'weekly'] as const
 const usageWindowName = { fiveHour: '5-hour', weekly: 'Weekly' } as const
@@ -159,7 +178,13 @@ async function load(quiet = false) {
   }
   if (!quiet) loading.value = true
   try {
-    runners.value = await listRunners(slug.value)
+    // The load is a nicety on top of the roster: if it cannot be read, the roster still shows.
+    const [roster, loaded] = await Promise.all([
+      listRunners(slug.value),
+      getRunnerLoad(slug.value).catch(() => null),
+    ])
+    runners.value = roster
+    runnerLoad.value = loaded
   } catch (error) {
     if (!quiet) toast.error(error)
   } finally {
@@ -170,7 +195,7 @@ async function load(quiet = false) {
 watch([slug, mayManage], () => load(), { immediate: true })
 
 // "Online" is a judgement about time, so the roster refreshes itself quietly: a machine that
-// stops heartbeating should turn grey without anyone reloading the page.
+// stops heartbeating should turn grey without anyone reloading the page. The load comes with it.
 let refresh: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   refresh = setInterval(() => void load(true), 30_000)
@@ -404,6 +429,15 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
       </div>
     </header>
 
+    <p
+      v-if="orgQueue && !loading && runners.length"
+      class="text-muted-foreground pb-2 text-[11px]"
+      data-testid="runner-org-queue"
+    >
+      <span class="text-foreground font-medium">Org queue</span> (runs for any runner):
+      {{ orgQueue }}
+    </p>
+
     <EmptyState
       v-if="!mayManage"
       title="Runners are managed by Admins"
@@ -468,9 +502,17 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 {{ harness.name }}
               </Badge>
             </div>
+            <RunnerLoad
+              class="mt-1.5"
+              :slug="slug"
+              :runner-name="runner.name"
+              :slots="runner.capabilities?.maxParallel ?? 1"
+              :entry="loadFor(runnerLoad, runner.id)"
+              :muted="runnerStatus(runner) !== 'online'"
+            />
             <ul
               v-if="runner.capabilities && runner.capabilities.harnesses.length"
-              class="mt-1.5 space-y-1 text-[11px]"
+              class="mt-1 space-y-1 text-[11px]"
               :aria-label="`Harness usage on ${runner.name}`"
             >
               <li

@@ -118,6 +118,17 @@ machine. It resolves `~/`, `..` and symlinks before that check, and refuses a hi
 whose enclosing git repository is outside the root. The runner reads `runner.json` again for
 each run, so new roots and mappings apply without a restart.
 
+Each runner in **Factory → Runners** shows its load above its harness usage. The **load** bar
+counts the runs it holds out of its `--parallel` slots (`2 / 4 running`, or `idle`), and
+turns amber when every slot is taken. The item keys next to it open those runs; with more
+than three, **+N more** opens **Runs** filtered to that runner. After the bar comes what waits
+for the runner: runs sent to it that are due (`1 queued`) and runs scheduled for later, with
+the time until the next one starts (`3 scheduled · next in 2h`). A scheduled run counts as
+queued once its time passes. An offline, disabled or never-seen runner shows a grey bar but
+still lists what waits for it. Runs for any runner are not counted on every runner. The
+**Org queue** line above the list counts them once. The counts include runs in every
+project you can see and refresh with the list every 30 seconds.
+
 ### One machine, several organizations
 
 A developer who works for several clients can run all of them from one machine. Each

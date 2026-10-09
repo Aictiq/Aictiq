@@ -31,6 +31,27 @@ public sealed record RunnerChoiceView(
     Guid Id, string Name, IReadOnlyList<string> Harnesses, bool IsOnline,
     IReadOnlyList<RunnerUsageLimits>? UsageLimits = null);
 
+/// <summary>
+/// How busy the organization's runners are, from the live runs the caller can see: what each
+/// runner is doing, what waits for it, and what waits for any runner.
+/// </summary>
+/// <param name="Runners">One entry per runner with live runs; a runner with none is left out.</param>
+/// <param name="UnassignedQueued">Due runs that any runner may take.</param>
+/// <param name="UnassignedScheduled">Runs for any runner scheduled for later.</param>
+public sealed record RunnerLoadView(
+    IReadOnlyList<RunnerLoadEntry> Runners, int UnassignedQueued, int UnassignedScheduled,
+    DateTimeOffset? NextUnassignedScheduledFor);
+
+/// <param name="Running">Runs the runner holds (assigned or running), out of its <c>maxParallel</c> slots.</param>
+/// <param name="Queued">Due runs that requested this runner and wait for it.</param>
+/// <param name="Scheduled">Runs that requested this runner, scheduled for later.</param>
+/// <param name="Active">The runs it holds, oldest first.</param>
+public sealed record RunnerLoadEntry(
+    Guid RunnerId, int Running, int Queued, int Scheduled, DateTimeOffset? NextScheduledFor,
+    IReadOnlyList<RunnerActiveRun> Active);
+
+public sealed record RunnerActiveRun(Guid Id, string ItemKey, string? PlaybookName, RunStatus Status, DateTimeOffset? StartedAt);
+
 /// <param name="Secret">Returned exactly once. Aictiq keeps only its hash.</param>
 public sealed record RunnerIssuedView(RunnerView Runner, string Secret);
 
@@ -89,6 +110,7 @@ public static partial class RunnerEndpoints
             .RequireAuthorization();
 
         roster.MapGet("/", ListAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
+        roster.MapGet("/load", LoadAsync).RequireOrgRole(OrgRole.Admin).RequireScope(Scopes.Read);
         // Whoever may start a run may choose the runner for it, so this narrow list is open to
         // factory operators, not only to the Admins who manage the roster.
         roster.MapGet("/choices", ChoicesAsync).RequireOrgRole(OrgRole.Member).RequireFactoryOperator().RequireScope(Scopes.Read);
@@ -124,6 +146,72 @@ public static partial class RunnerEndpoints
         var people = await directory.GetAsync([.. runners.Select(r => r.RegisteredBy).Distinct()], cancellationToken);
         var now = clock.GetUtcNow();
         return Results.Ok(runners.Select(r => ToView(r, people, options.Value, now)).ToList());
+    }
+
+    /// <summary>
+    /// The roster's load: two grouped reads over the live runs in projects the caller can see,
+    /// however many runners there are. A run waiting for a runner that was since deleted will
+    /// go to any runner, so it counts as unassigned.
+    /// </summary>
+    private static async Task<IResult> LoadAsync(
+        AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user, IProjectAccess access,
+        TimeProvider clock, CancellationToken cancellationToken)
+    {
+        var visible = (await access.ListVisibleProjectIdsAsync(user.UserId!, tenant.OrganizationId!.Value, cancellationToken)).ToList();
+        if (visible.Count == 0)
+        {
+            return Results.Ok(new RunnerLoadView([], 0, 0, null));
+        }
+
+        var now = clock.GetUtcNow();
+        var live = db.Runs.AsNoTracking().Where(run => visible.Contains(run.ProjectId) && run.Status < RunStatus.Succeeded);
+        var waiting = await live
+            .Where(run => run.Status == RunStatus.Queued)
+            .GroupBy(run => new { run.RequestedRunnerId, Later = run.ScheduledFor != null && run.ScheduledFor > now })
+            .Select(group => new
+            {
+                group.Key.RequestedRunnerId, group.Key.Later,
+                Count = group.Count(), Next = group.Min(run => run.ScheduledFor),
+            })
+            .ToListAsync(cancellationToken);
+        var active = await live
+            .Where(run => run.Status != RunStatus.Queued && run.RunnerId != null)
+            .OrderBy(run => run.AssignedAt)
+            .Select(run => new { RunnerId = run.RunnerId!.Value, run.Id, run.ItemKey, run.PlaybookId, run.Status, run.StartedAt })
+            .ToListAsync(cancellationToken);
+
+        var runnerIds = (await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null).Select(r => r.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        var playbookIds = active.Select(run => run.PlaybookId).Distinct().ToList();
+        var playbooks = playbookIds.Count == 0
+            ? []
+            : await db.Playbooks.AsNoTracking().Where(playbook => playbookIds.Contains(playbook.Id))
+                .ToDictionaryAsync(playbook => playbook.Id, playbook => playbook.Name, cancellationToken);
+
+        var assigned = waiting.Where(group => group.RequestedRunnerId is { } id && runnerIds.Contains(id)).ToList();
+        var unassigned = waiting.Except(assigned).ToList();
+        var entries = assigned.Select(group => group.RequestedRunnerId!.Value)
+            .Concat(active.Select(run => run.RunnerId))
+            .Distinct()
+            .Select(runnerId =>
+            {
+                var mine = assigned.Where(group => group.RequestedRunnerId == runnerId).ToList();
+                var held = active.Where(run => run.RunnerId == runnerId)
+                    .Select(run => new RunnerActiveRun(run.Id, run.ItemKey, playbooks.GetValueOrDefault(run.PlaybookId), run.Status, run.StartedAt))
+                    .ToList();
+                return new RunnerLoadEntry(
+                    runnerId, held.Count,
+                    mine.Where(group => !group.Later).Sum(group => group.Count),
+                    mine.Where(group => group.Later).Sum(group => group.Count),
+                    mine.Where(group => group.Later).Min(group => group.Next),
+                    held);
+            })
+            .ToList();
+        return Results.Ok(new RunnerLoadView(
+            entries,
+            unassigned.Where(group => !group.Later).Sum(group => group.Count),
+            unassigned.Where(group => group.Later).Sum(group => group.Count),
+            unassigned.Where(group => group.Later).Min(group => group.Next)));
     }
 
     private static async Task<IResult> ChoicesAsync(
