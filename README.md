@@ -23,6 +23,8 @@ hands a ticket to an agent running on a machine you control and gets a pull requ
 
 Self-hosted, AGPL-3.0, one `docker compose up`.
 
+![Aictiq demo](docs/assets/aictiq-demo.gif)
+
 ## Quick start
 
 Install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin
