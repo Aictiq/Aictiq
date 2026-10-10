@@ -299,20 +299,23 @@ async function remove(member: Member) {
               />
             </td>
             <td class="px-3 py-2 text-xs">
-              <label
+              <!-- A dropdown rather than a checkbox: a box labelled "Stakeholder" read as
+                 "tick to make them one", and its label flipped with its own state. Both
+                 answers are spelled out, so the current one is never a guess. -->
+              <select
                 v-if="factoryFlagIsChoosable(member.role)"
-                class="inline-flex items-center gap-1.5"
-                :class="mayChangeFactory(member) ? 'cursor-pointer' : 'text-muted-foreground'"
+                :value="member.canOperateFactory ? 'allowed' : 'stakeholder'"
+                :disabled="!mayChangeFactory(member) || busyUserId === member.userId"
+                :aria-label="`AI work for ${member.displayName}`"
+                data-testid="member-ai-work"
+                class="border-border bg-background focus-visible:ring-ring h-7 rounded-lg border px-2 text-xs focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                @change="
+                  toggleFactory(member, ($event.target as HTMLSelectElement).value === 'allowed')
+                "
               >
-                <input
-                  type="checkbox"
-                  :checked="member.canOperateFactory"
-                  :disabled="!mayChangeFactory(member) || busyUserId === member.userId"
-                  :aria-label="`${member.displayName} may start AI work`"
-                  @change="toggleFactory(member, ($event.target as HTMLInputElement).checked)"
-                />
-                {{ member.canOperateFactory ? 'Allowed' : 'Stakeholder' }}
-              </label>
+                <option value="allowed">Can start AI work</option>
+                <option value="stakeholder">Stakeholder, no AI work</option>
+              </select>
               <span
                 v-else
                 class="text-muted-foreground"
@@ -322,7 +325,7 @@ async function remove(member: Member) {
                     : 'Owners and admins always may.'
                 "
               >
-                {{ member.canOperateFactory ? 'Always' : 'Never' }}
+                {{ member.canOperateFactory ? 'Always' : 'Never' }} ({{ member.role }})
               </span>
             </td>
             <td class="text-muted-foreground px-3 py-2 text-xs">
