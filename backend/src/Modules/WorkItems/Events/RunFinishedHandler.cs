@@ -25,6 +25,10 @@ public sealed class RunFinishedHandler(
     WorkItemsDbContext db, ICurrentTenant currentTenant, TimeProvider clock, ILogger<RunFinishedHandler> logger)
     : IDomainEventHandler<RunFinished>
 {
+    /// <summary>Ends every chat run's reply, so whoever asked knows how to get the work done.</summary>
+    public const string ChatRunNote =
+        "This was a chat Q&A session: nothing on the item was changed. To have the agent work on it, use Hand to agent.";
+
     public async Task HandleAsync(RunFinished @event, CancellationToken cancellationToken)
     {
         using var tenant = currentTenant is AmbientCurrentTenant ambient ? ambient.Use(@event.OrganizationId) : null;
@@ -34,12 +38,14 @@ public sealed class RunFinishedHandler(
         var now = clock.GetUtcNow();
         var actorId = @event.AgentId;
 
-        var requestedTarget = @event.Refinement ? null : @event.Outcome switch
+        // A refine or chat run worked on the ticket or a question, not the work: it moves nothing.
+        var movesItem = !@event.Refinement && !@event.Chat;
+        var requestedTarget = !movesItem ? null : @event.Outcome switch
         {
             RunOutcomes.Succeeded => @event.OnSuccessStateId,
             _ => @event.OnFailureStateId,
         };
-        if (@event.Outcome == RunOutcomes.Succeeded && requestedTarget is null && !@event.Refinement)
+        if (@event.Outcome == RunOutcomes.Succeeded && requestedTarget is null && movesItem)
         {
             // No playbook success state named: fall back to the workflow's
             // lowest-position Resolved state, as PullRequestReferencedItemHandler does.
@@ -106,7 +112,7 @@ public sealed class RunFinishedHandler(
             }
         }
 
-        var noun = @event.Refinement ? "Refinement run" : "Run";
+        var noun = @event.Refinement ? "Refinement run" : @event.Chat ? "Chat run" : "Run";
         var markdown = @event.Outcome switch
         {
             RunOutcomes.Succeeded => string.IsNullOrWhiteSpace(@event.Summary)
@@ -128,6 +134,10 @@ public sealed class RunFinishedHandler(
         if (thread is not null && !string.IsNullOrEmpty(@event.PullRequestUrl))
         {
             markdown += $" · [Pull request]({@event.PullRequestUrl})";
+        }
+        if (@event.Chat)
+        {
+            markdown += $"\n\n_{ChatRunNote}_";
         }
         var comment = new Comment
         {

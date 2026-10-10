@@ -127,7 +127,9 @@ public sealed class RunDispatcher(
     /// Set when a comment asked for the run by mentioning the agent. When the agent has an
     /// earlier implement run on the item the run is a follow-up of it: the same playbook and
     /// branch, pinned to the runner that holds its session, which the runner resumes. Otherwise
-    /// it is an ordinary implement run with the comment's request added to its prompt.
+    /// it is a chat run: it answers the comment, claims the item where it stands like a refine
+    /// run, and works in an isolated clone of the default branch with
+    /// <see cref="ChatPromptComposer"/>'s prompt.
     /// </param>
     /// <param name="harness">
     /// The harness for this run only, in place of the playbook's; null for the playbook's own.
@@ -163,7 +165,8 @@ public sealed class RunDispatcher(
         var settings = await db.ProjectSettings.AsNoTracking()
             .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
 
-        // A refine run is never followed up: a mention after one starts the first implement run.
+        // Refine and chat runs are never followed up: until an implement run exists, every
+        // mention starts another chat run.
         var mentionedAgent = agentId ?? settings?.DefaultAgentId;
         var previous = mention is null || mentionedAgent is null ? null : await db.Runs.AsNoTracking()
             .Where(run => run.ItemId == item.Id && run.AgentUserId == mentionedAgent
@@ -183,6 +186,8 @@ public sealed class RunDispatcher(
                 ? previous.RunnerId
                 : null;
         }
+
+        var chat = mention is not null && previous is null && refine is null;
 
         var playbook = await FindPlaybookAsync(playbookId, project.Id, ct);
         if (playbook is null)
@@ -227,7 +232,7 @@ public sealed class RunDispatcher(
             return DispatchResult.PlaybookNotFound();
         }
 
-        var claim = refine is null
+        var claim = refine is null && !chat
             ? await claims.ClaimForAsync(item.Id, agentUserId, ct)
             : await claims.ClaimInPlaceAsync(item.Id, agentUserId, ct);
         switch (claim.Outcome)
@@ -239,20 +244,25 @@ public sealed class RunDispatcher(
         }
 
         // A follow-up delivers where the earlier run did, so its pull request is the one it updates.
-        var onDefaultBranch = refine is not null || (previous?.WorkOnDefaultBranch ?? playbook.WorkOnDefaultBranch);
+        var onDefaultBranch = refine is not null || chat || (previous?.WorkOnDefaultBranch ?? playbook.WorkOnDefaultBranch);
         var branch = onDefaultBranch
             ? settings?.DefaultBranch ?? "main"
             : previous?.BranchName ?? BranchNames.For(item.Key, item.Title);
         var mentionPrompt = mention is null
             ? null
             : new MentionPrompt(mention.RequesterName, mention.CommentId, mention.Instruction, previous?.Id, previous?.PullRequestUrl);
-        var prompt = refine is null
-            ? RunPromptComposer.Compose(
+        var prompt = refine is not null
+            ? RefinePromptComposer.Compose(
                 agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt)
-            : RefinePromptComposer.Compose(
-                agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                playbook.Name, content.Markdown, refine);
+                playbook.Name, content.Markdown, refine)
+            : chat
+                ? ChatPromptComposer.Compose(
+                    agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
+                    playbook.Name, content.Markdown, mentionPrompt!)
+                : RunPromptComposer.Compose(
+                    agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
+                    branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt);
+        var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -262,7 +272,7 @@ public sealed class RunDispatcher(
             ItemId = item.Id,
             ItemKey = item.Key,
             PlaybookId = playbook.Id,
-            Kind = refine is null ? RunKind.Implement : RunKind.Refine,
+            Kind = kind,
             AgentUserId = agentUserId,
             RequestedRunnerId = runnerId,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
@@ -294,7 +304,7 @@ public sealed class RunDispatcher(
         await realtime.PublishAsync(project.Id, "run.changed", new
         {
             runId = run.Id, itemId = item.Id, itemKey = item.Key, status = "queued", agentId = agentUserId,
-            kind = refine is null ? "implement" : "refine", scheduledFor = run.ScheduledFor,
+            kind = KindName(kind), scheduledFor = run.ScheduledFor,
             followsUpRunId = run.FollowsUpRunId, triggerCommentId = run.TriggerCommentId,
         }, ct);
         AutomationMetrics.Started.Add(1);
@@ -343,7 +353,7 @@ public sealed class RunDispatcher(
             }
         }
 
-        var claim = previous.Kind == RunKind.Refine
+        var claim = previous.Kind is RunKind.Refine or RunKind.Chat
             ? await claims.ClaimInPlaceAsync(previous.ItemId, previous.AgentUserId, ct)
             : await claims.ClaimForAsync(previous.ItemId, previous.AgentUserId, ct);
         switch (claim.Outcome)
@@ -406,7 +416,7 @@ public sealed class RunDispatcher(
         await realtime.PublishAsync(previous.ProjectId, "run.changed", new
         {
             runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", agentId = run.AgentUserId,
-            kind = run.Kind == RunKind.Refine ? "refine" : "implement", continuesRunId = previous.Id,
+            kind = KindName(run.Kind), continuesRunId = previous.Id,
         }, ct);
         AutomationMetrics.Started.Add(1);
 
@@ -460,6 +470,13 @@ public sealed class RunDispatcher(
         }
         return null;
     }
+
+    private static string KindName(RunKind kind) => kind switch
+    {
+        RunKind.Refine => "refine",
+        RunKind.Chat => "chat",
+        _ => "implement",
+    };
 
     private async Task<Playbook?> FindPlaybookAsync(Guid? playbookId, Guid projectId, CancellationToken ct)
     {

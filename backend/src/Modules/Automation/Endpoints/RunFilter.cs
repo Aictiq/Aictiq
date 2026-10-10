@@ -15,7 +15,7 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="Agent">Agent user id.</param>
 /// <param name="Status">A <see cref="RunStatus"/> name, case-insensitive.</param>
 /// <param name="Item">Item key, e.g. <c>PROJ-12</c>.</param>
-/// <param name="Kind">A <see cref="RunKind"/> name: <c>implement</c> or <c>refine</c>.</param>
+/// <param name="Kind">A <see cref="RunKind"/> name: <c>implement</c>, <c>refine</c> or <c>chat</c>.</param>
 /// <param name="Playbook">Playbook id.</param>
 /// <param name="Runner">The runner that took the run.</param>
 /// <param name="From">Runs queued at or after this instant.</param>

@@ -101,6 +101,7 @@ public sealed class RunStatsTests(PostgresFixture postgres, GarageFixture garage
         Assert.Equal([shipped.Id], (await ListAsync(Owner, byRunnerFilter)).Items.Select(run => run.Id));
         Assert.Equal(3, (await ListAsync(Owner, $"?playbook={PlaybookId}&kind=implement")).TotalCount);
         Assert.Equal(0, (await ListAsync(Owner, "?kind=refine")).TotalCount);
+        Assert.Equal(0, (await ListAsync(Owner, "?kind=chat")).TotalCount);
 
         // The range bounds runs by when they were queued; the two finished runs were moved an hour back.
         var since = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddMinutes(-30).ToString("O"));

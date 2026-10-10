@@ -152,7 +152,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_runs_status", "status BETWEEN 0 AND 6");
-                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1)");
+                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2)");
                 t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
                 t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
                 t.HasCheckConstraint("ck_runs_auto_continues", "auto_continues BETWEEN 0 AND 2");

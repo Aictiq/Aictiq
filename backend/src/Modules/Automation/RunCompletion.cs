@@ -13,9 +13,10 @@ namespace Aictiq.Modules.Automation;
 /// playbook deleted mid-run sends nulls, which the WorkItems handler reads as "leave the
 /// item where it is".
 ///
-/// A refine run sends no states at all and settles its item's refinement here too: one that
-/// ends without having submitted an answer leaves it <see cref="RefinementStatus.Failed"/>, so
-/// the person waiting on it can ask again instead of watching "Refining" forever.
+/// A refine or chat run sends no states at all, so its item stays where it is. A refine run
+/// also settles its item's refinement here: one that ends without having submitted an answer
+/// leaves it <see cref="RefinementStatus.Failed"/>, so the person waiting on it can ask again
+/// instead of watching "Refining" forever.
 /// </summary>
 internal static class RunCompletion
 {
@@ -23,7 +24,8 @@ internal static class RunCompletion
         string? summary, string? pullRequestUrl, string? failureReason, CancellationToken cancellationToken)
     {
         var refine = run.Kind == RunKind.Refine;
-        var playbook = refine ? null : await db.Playbooks.AsNoTracking()
+        var chat = run.Kind == RunKind.Chat;
+        var playbook = refine || chat ? null : await db.Playbooks.AsNoTracking()
             .SingleOrDefaultAsync(playbook => playbook.Id == run.PlaybookId, cancellationToken);
         var refinement = refine ? await db.Refinements.SingleOrDefaultAsync(
             row => row.ItemId == run.ItemId && row.LastRunId == run.Id, cancellationToken) : null;
@@ -32,7 +34,7 @@ internal static class RunCompletion
             outcome, playbook?.OnSuccessStateId, playbook?.OnFailureStateId,
             summary, pullRequestUrl, failureReason)
         {
-            Refinement = refine, TriggerCommentId = run.TriggerCommentId, RequestedBy = run.RequestedBy,
+            Refinement = refine, Chat = chat, TriggerCommentId = run.TriggerCommentId, RequestedBy = run.RequestedBy,
             NeedsInput = refinement is { Status: RefinementStatus.NeedsInput }
         }));
 
