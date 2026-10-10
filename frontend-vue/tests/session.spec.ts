@@ -191,4 +191,40 @@ describe('session store', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(session.status).toBe('authenticated')
   })
+
+  it('stays resolved while it re-reads, so the app is not swapped for the splash', async () => {
+    let answer: (response: Response) => void = () => {}
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, alice))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const session = useSessionStore()
+    await session.load()
+    const reloading = session.reload()
+
+    expect(session.isResolved).toBe(true)
+    expect(session.isAuthenticated).toBe(true)
+    answer(jsonResponse(200, { ...alice, unreadCount: 3 }))
+    await reloading
+    expect(session.user?.unreadCount).toBe(3)
+  })
+
+  it('keeps the session through a failed re-read and signs out only on a 401', async () => {
+    const session = useSessionStore()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse(200, alice)))
+    await session.load()
+
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    await session.reload()
+    expect(session.status).toBe('authenticated')
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(401, { status: 401, title: 'Unauthorized' }))),
+    )
+    await session.reload()
+    expect(session.status).toBe('anonymous')
+  })
 })
