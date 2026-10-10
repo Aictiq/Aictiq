@@ -107,6 +107,7 @@ public sealed class NotificationsDbContext(
         modelBuilder.Entity<ChatOutboxMessage>(b =>
         {
             b.ToTable("chat_outbox"); b.Property(x => x.Status).HasMaxLength(16); b.Property(x => x.LastError).HasMaxLength(500);
+            b.Property(x => x.Kind).HasConversion<short?>();
             b.HasIndex(x => x.SendAfter).HasFilter("status = 'pending'").HasDatabaseName("ix_chat_outbox_pending");
             b.HasIndex(x => x.ChannelId);
             b.ToTable(t => t.HasCheckConstraint("ck_chat_outbox_status", "status IN ('pending','sent','failed','skipped')"));
@@ -118,6 +119,7 @@ public sealed class NotificationsDbContext(
         modelBuilder.Entity<ChatDigestEntry>(b =>
         {
             b.ToTable("chat_digest_entries"); b.Property(x => x.Line).HasMaxLength(1000); b.HasIndex(x => new { x.ChannelId, x.CreatedAt });
+            b.Property(x => x.Kind).HasConversion<short?>();
         });
         modelBuilder.Entity<NotificationDigest>(b =>
         {

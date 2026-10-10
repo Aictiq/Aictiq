@@ -43,8 +43,10 @@ public sealed class NotificationsOrganizationDeletedHandler(NotificationsDbConte
             await db.OrgDefaults.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         }
         await db.ConnectCodes.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
-        await db.ChatDigestEntries.Where(x => x.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
-        await db.ChatOutbox.Where(x => x.OrganizationId == @event.OrganizationId && x.Status == "pending").ExecuteDeleteAsync(cancellationToken);
+        await db.ChatDigestEntries.Where(x => x.OrganizationId == @event.OrganizationId
+            || x.SourceOrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.ChatOutbox.Where(x => (x.OrganizationId == @event.OrganizationId
+            || x.SourceOrganizationId == @event.OrganizationId) && x.Status == "pending").ExecuteDeleteAsync(cancellationToken);
 
         var agents = @event.AgentIds.ToArray();
         if (agents.Length == 0) return;

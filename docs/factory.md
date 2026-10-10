@@ -526,10 +526,13 @@ results, notifications, the MCP tools and the agent activity feed too. Use the *
 should operate the factory; only a Member's **Can start AI work** flag is optional-Owners and
 Admins always can, and Guests never can.
 
-Factory run emails require permission to operate the factory in the run's organization.
-Stakeholders receive no run success, failure, or input-request emails, and their daily
-digests exclude those entries, even if email preferences enable them. Ordinary work-item
-updates still follow their notification preferences.
+Personal Factory run notifications require permission to operate the factory in the run's
+organization. Stakeholders receive no run success, failure, or input-request notifications
+in their inbox, email, Slack, Discord, or Telegram, and their daily digests exclude those
+entries, even if notification preferences enable them. Removing Factory access also hides
+stored run notifications and excludes queued run entries from personal chat digests.
+Ordinary work-item updates still follow their notification preferences. Shared organization
+channels continue to receive the events an operator configured for them.
 
 ## 8. Refine tickets
 

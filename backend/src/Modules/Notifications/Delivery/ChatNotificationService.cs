@@ -42,6 +42,9 @@ public sealed class ChatNotificationService(
         foreach (var notification in notifications)
         {
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent) continue;
+            if (IsRunKind(notification.Kind)
+                && !await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, cancellationToken))
+                continue;
             ChatMessage? message = null;
             foreach (var channel in channels[notification.UserId])
             {
@@ -55,7 +58,8 @@ public sealed class ChatNotificationService(
                     if (isActive) continue;
                 }
                 message ??= await MessageAsync(notification, details, cancellationToken);
-                Add(outbox, digest, channel.Id, null, channel.Type, mode, DeriveId(notification.Id, channel.Id), message, now);
+                Add(outbox, digest, channel.Id, null, channel.Type, mode, DeriveId(notification.Id, channel.Id), message, now,
+                    notification.OrganizationId, notification.Kind);
             }
         }
         await SaveAsync(outbox, digest, cancellationToken);
@@ -124,16 +128,22 @@ public sealed class ChatNotificationService(
         kind is NotificationKind.RunSucceeded or NotificationKind.RunFailed or NotificationKind.RunNeedsInput;
 
     private static void Add(List<ChatOutboxMessage> outbox, List<ChatDigestEntry> digest, Guid channelId, Guid? organizationId,
-        ChatChannelType type, EmailNotificationMode mode, Guid id, ChatMessage message, DateTimeOffset now)
+        ChatChannelType type, EmailNotificationMode mode, Guid id, ChatMessage message, DateTimeOffset now,
+        Guid? sourceOrganizationId = null, NotificationKind? kind = null)
     {
         if (mode == EmailNotificationMode.Immediate)
             outbox.Add(new ChatOutboxMessage
             {
                 Id = id, ChannelId = channelId, OrganizationId = organizationId, Text = ChatFormatter.Format(type, message),
+                SourceOrganizationId = sourceOrganizationId, Kind = kind,
                 SendAfter = now, CreatedAt = now
             });
         else
-            digest.Add(new ChatDigestEntry { Id = id, ChannelId = channelId, OrganizationId = organizationId, Line = ChatFormatter.Line(type, message), CreatedAt = now });
+            digest.Add(new ChatDigestEntry
+            {
+                Id = id, ChannelId = channelId, OrganizationId = organizationId, SourceOrganizationId = sourceOrganizationId,
+                Kind = kind, Line = ChatFormatter.Line(type, message), CreatedAt = now
+            });
     }
 
     private async Task SaveAsync(List<ChatOutboxMessage> outbox, List<ChatDigestEntry> digest, CancellationToken cancellationToken)

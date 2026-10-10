@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Aictiq.Modules.Notifications.Domain;
+using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -100,6 +101,17 @@ public sealed class ChatDeliveryService(
         {
             message.Status = EmailStatus.Skipped;
             message.LastError = channel is null ? "The channel was disconnected." : "The channel is not working.";
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        if (channel is UserChatChannel personal && message.Kind is { } kind && ChatNotificationService.IsRunKind(kind)
+            && (message.SourceOrganizationId is not { } sourceOrganizationId
+                || !await services.GetRequiredService<IProjectAccess>()
+                    .CanOperateFactoryAsync(personal.UserId, sourceOrganizationId, cancellationToken)))
+        {
+            message.Status = EmailStatus.Skipped;
+            message.LastError = "Factory access is no longer permitted.";
             await db.SaveChangesAsync(cancellationToken);
             return;
         }

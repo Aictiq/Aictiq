@@ -125,6 +125,7 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
         if (waiting.Count == 0) return;
         var now = clock.GetUtcNow();
         var tenant = services.GetRequiredService<AmbientCurrentTenant>();
+        var access = services.GetRequiredService<IProjectAccess>();
 
         var personal = waiting.Where(w => w.OrganizationId is null).Select(w => w.ChannelId).ToArray();
         var userChannels = await db.UserChannels.Where(c => personal.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
@@ -140,8 +141,8 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
             var localNow = TimeZoneInfo.ConvertTime(now, Zone(person.TimeZone));
             var localDay = DateOnly.FromDateTime(localNow.DateTime);
             if (localNow.Hour != 8 || channel.LastDigestLocalDate == localDay) continue;
-            await PostDigestAsync(db, channel, null, "Your Aictiq daily digest", localDay, now, ct);
-            channel.LastDigestLocalDate = localDay;
+            if (await PostDigestAsync(db, access, channel, null, "Your Aictiq daily digest", localDay, now, ct))
+                channel.LastDigestLocalDate = localDay;
             await db.SaveChangesAsync(ct);
         }
 
@@ -156,27 +157,49 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
                 continue;
             }
             if (now.UtcDateTime.Hour != 8 || channel.LastDigestDate == today) continue;
-            await PostDigestAsync(db, channel, channel.OrganizationId, $"Aictiq daily digest · {channel.Name}", today, now, ct);
-            channel.LastDigestDate = today;
+            if (await PostDigestAsync(db, access, channel, channel.OrganizationId, $"Aictiq daily digest · {channel.Name}", today, now, ct))
+                channel.LastDigestDate = today;
             await db.SaveChangesAsync(ct);
         }
     }
 
-    private static async Task PostDigestAsync(NotificationsDbContext db, IChatChannel channel, Guid? organizationId,
+    private static async Task<bool> PostDigestAsync(NotificationsDbContext db, IProjectAccess access, IChatChannel channel, Guid? organizationId,
         string heading, DateOnly day, DateTimeOffset now, CancellationToken ct)
     {
         var entries = await db.ChatDigestEntries.Where(e => e.ChannelId == channel.Id && e.CreatedAt <= now)
             .OrderBy(e => e.CreatedAt).ToListAsync(ct);
         db.ChatDigestEntries.RemoveRange(entries);
         // A channel that stopped working loses its lines with the digest it cannot receive.
-        if (channel.Status != ChatChannelStatus.Active || entries.Count == 0) return;
+        if (channel.Status != ChatChannelStatus.Active || entries.Count == 0) return false;
+        if (channel is UserChatChannel personal)
+        {
+            var factoryAccess = new Dictionary<Guid, bool>();
+            var allowed = new List<ChatDigestEntry>();
+            foreach (var entry in entries)
+            {
+                if (entry.Kind is { } kind && ChatNotificationService.IsRunKind(kind))
+                {
+                    if (entry.SourceOrganizationId is not { } sourceOrganizationId) continue;
+                    if (!factoryAccess.TryGetValue(sourceOrganizationId, out var canOperate))
+                    {
+                        canOperate = await access.CanOperateFactoryAsync(personal.UserId, sourceOrganizationId, ct);
+                        factoryAccess[sourceOrganizationId] = canOperate;
+                    }
+                    if (!canOperate) continue;
+                }
+                allowed.Add(entry);
+            }
+            entries = allowed;
+            if (entries.Count == 0) return false;
+        }
         var id = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"chat-digest:{channel.Id}:{day:yyyy-MM-dd}"))[..16]);
-        if (await db.ChatOutbox.AnyAsync(m => m.Id == id, ct)) return;
+        if (await db.ChatOutbox.AnyAsync(m => m.Id == id, ct)) return true;
         db.ChatOutbox.Add(new ChatOutboxMessage
         {
             Id = id, ChannelId = channel.Id, OrganizationId = organizationId, SendAfter = now, CreatedAt = now,
             Text = ChatFormatter.Digest(channel.Type, heading, entries.Select(e => e.Line).ToArray())
         });
+        return true;
     }
 
     private static Task DropEntriesAsync(NotificationsDbContext db, Guid channelId, CancellationToken ct) =>
