@@ -37,7 +37,9 @@ public sealed class RunNotificationHandler(
         var agents = await directory.FilterAgentsAsync(candidates, cancellationToken);
         var recipients = new List<string>();
         foreach (var candidate in candidates.Where(c => !agents.Contains(c)))
-            if (await access.GetProjectRoleAsync(candidate, e.ProjectId, cancellationToken) is not null) recipients.Add(candidate);
+            if (await access.GetProjectRoleAsync(candidate, e.ProjectId, cancellationToken) is not null
+                && await access.CanOperateFactoryAsync(candidate, e.OrganizationId, cancellationToken))
+                recipients.Add(candidate);
         if (recipients.Count == 0) return;
         var muted = await db.Preferences.Where(x => recipients.Contains(x.UserId) && x.Kind == kind && !x.InApp)
             .Select(x => x.UserId).ToHashSetAsync(cancellationToken);

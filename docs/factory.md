@@ -526,6 +526,11 @@ results, notifications, the MCP tools and the agent activity feed too. Use the *
 should operate the factory; only a Member's **Can start AI work** flag is optional-Owners and
 Admins always can, and Guests never can.
 
+Factory run emails require permission to operate the factory in the run's organization.
+Stakeholders receive no run success, failure, or input-request emails, and their daily
+digests exclude those entries, even if email preferences enable them. Ordinary work-item
+updates still follow their notification preferences.
+
 ## 8. Refine tickets
 
 A refine run turns a short description into a complete, implementation-ready ticket. It is an

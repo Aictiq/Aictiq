@@ -30,6 +30,9 @@ public sealed class NotificationEmailService(
         var organizationDetails = new Dictionary<Guid, OrganizationRef?>();
         foreach (var notification in notifications)
         {
+            var isRun = ChatNotificationService.IsRunKind(notification.Kind);
+            if (isRun && !await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
+                continue;
             if (!profiles.TryGetValue(notification.UserId, out var recipient) || recipient.IsAgent ||
                 await presence.IsActiveAsync(notification.UserId, TimeSpan.FromMinutes(options.Value.PresenceMinutes), ct))
                 continue;
@@ -45,10 +48,9 @@ public sealed class NotificationEmailService(
             var variables = Variables(notification, recipient, unsubscribe.Create(notification.UserId, notification.Kind),
                 emailOptions.Value.BaseUrl, organization?.Slug);
             var template = "notification";
-            // A run's own notification opens the run, for whoever may see runs.
-            if (notification.RunId is { } runId && ChatNotificationService.IsRunKind(notification.Kind) && organization is not null
-                && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl)
-                && await access.CanOperateFactoryAsync(notification.UserId, notification.OrganizationId, ct))
+            // Run notifications reach only Factory operators and open the run itself.
+            if (notification.RunId is { } runId && isRun && organization is not null
+                && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl))
                 variables["notificationUrl"] = $"{emailOptions.Value.BaseUrl.TrimEnd('/')}/o/{Uri.EscapeDataString(organization.Slug)}/{ChatNotificationService.RunPath(runId)}";
             if (transition?.ItemTitle is not null)
             {

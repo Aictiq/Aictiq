@@ -33,7 +33,8 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
         }
     }
 
-    internal async Task RunOnceAsync(CancellationToken ct)
+    /// <summary>Queues eligible daily email digests once; public so tests can drive the sweep.</summary>
+    public async Task RunOnceAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -54,6 +55,7 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
             .ToDictionaryAsync(d => d.UserId, ct);
         var renderer = services.GetRequiredService<EmailTemplateRenderer>();
         var email = services.GetRequiredService<IOptions<EmailOptions>>().Value;
+        var access = services.GetRequiredService<IProjectAccess>();
         var now = clock.GetUtcNow();
 
         foreach (var group in pending)
@@ -64,7 +66,24 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
             if (localNow.Hour != 8) continue;
             var localDay = DateOnly.FromDateTime(localNow.DateTime);
             if (digests.TryGetValue(person.Id, out var prior) && prior.LastDeliveredLocalDate == localDay) continue;
-            var items = group.ToArray();
+            // Permission may have changed since the notification was saved. A user's
+            // Factory access in one organization says nothing about another's runs.
+            var factoryAccess = new Dictionary<Guid, bool>();
+            var items = new List<Notification>();
+            foreach (var notification in group)
+            {
+                if (ChatNotificationService.IsRunKind(notification.Kind))
+                {
+                    if (!factoryAccess.TryGetValue(notification.OrganizationId, out var canOperate))
+                    {
+                        canOperate = await access.CanOperateFactoryAsync(person.Id, notification.OrganizationId, ct);
+                        factoryAccess[notification.OrganizationId] = canOperate;
+                    }
+                    if (!canOperate) continue;
+                }
+                items.Add(notification);
+            }
+            if (items.Count == 0) continue;
             var variables = new Dictionary<string, string>
             {
                 ["recipientName"] = person.DisplayName, ["organizationName"] = "Aictiq",
