@@ -21,6 +21,7 @@ public static class NotificationsModule
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services)
     {
         services.AddModuleDbContext<NotificationsDbContext>("notify");
+        services.AddScoped<NotificationVisibility>();
         services.AddScoped<IUnreadNotificationCounter, UnreadNotificationCounter>();
         services.AddScoped<INotificationPresence, NotificationPresenceService>();
         // One key ring for the API and Workers, in the database: see PostgresDataProtectionKeys.

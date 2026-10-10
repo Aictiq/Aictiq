@@ -129,6 +129,10 @@ public sealed class ChatOutboxMessage : EntityBase
 {
     public Guid ChannelId { get; init; }
 
+    /// <summary>The cause of a personal message, used to recheck Factory access before sending.</summary>
+    public Guid? SourceOrganizationId { get; init; }
+    public NotificationKind? Kind { get; init; }
+
     /// <summary>The tenant of a shared channel, needed to load it; null for a person's own.</summary>
     public Guid? OrganizationId { get; init; }
 
@@ -148,6 +152,9 @@ public sealed class ChatOutboxMessage : EntityBase
 public sealed class ChatDigestEntry : EntityBase
 {
     public Guid ChannelId { get; init; }
+    /// <summary>The cause of a personal digest line; separate from the shared channel's tenant.</summary>
+    public Guid? SourceOrganizationId { get; init; }
+    public NotificationKind? Kind { get; init; }
     public Guid? OrganizationId { get; init; }
     public required string Line { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
