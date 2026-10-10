@@ -101,6 +101,7 @@ const orgQueue = computed(() => {
 
 const usageKinds = ['fiveHour', 'weekly'] as const
 const usageWindowName = { fiveHour: '5-hour', weekly: 'Weekly' } as const
+const usageResetName = { fiveHour: '5-hour', weekly: 'weekly' } as const
 
 /**
  * A row per offered harness whose account reported usage, and the rest named on one line, so a
@@ -552,12 +553,16 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                     >
                   </span>
                 </template>
-                <span
-                  v-if="limits.weekly?.resetsAt && !usageWindowStale(limits, 'weekly')"
-                  class="text-muted-foreground"
-                >
-                  weekly resets {{ usageResetLabel(limits.weekly.resetsAt, true) }}
-                </span>
+                <template v-for="kind in usageKinds" :key="`reset-${kind}`">
+                  <span
+                    v-if="limits[kind]?.resetsAt && !usageWindowStale(limits, kind)"
+                    class="text-muted-foreground"
+                    :data-testid="`runner-usage-reset-${kind}`"
+                  >
+                    {{ usageResetName[kind] }} resets
+                    {{ usageResetLabel(limits[kind]!.resetsAt!, true) }}
+                  </span>
+                </template>
                 <span
                   class="text-muted-foreground"
                   :title="new Date(limits.observedAt).toLocaleString()"
