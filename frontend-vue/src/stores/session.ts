@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { passkeySignInCredential } from '@/api/security'
-import { apiFetch } from '@/utils/api'
+import { ApiError, apiFetch } from '@/utils/api'
 import { turnstileHeaders } from '@/utils/turnstile'
 
 /**
@@ -102,10 +102,22 @@ export const useSessionStore = defineStore('session', () => {
     return loading
   }
 
-  /** Re-reads the session even if one was already resolved. */
+  /**
+   * Re-reads the session even if one was already resolved, in place. The status never goes
+   * back to `unknown`, because that swaps the whole app for the splash and unmounts every
+   * page, open item and unsaved draft with it; a notification arriving is reason enough to
+   * call this. Only a 401 signs out: a network blip keeps the session it already had.
+   */
   async function reload(): Promise<void> {
-    status.value = 'unknown'
-    await load()
+    if (status.value === 'unknown') return load()
+    loading ??= apiFetch<SessionUser>('/auth/session')
+      .then(set, (error: unknown) => {
+        if (error instanceof ApiError && error.isUnauthenticated) clear()
+      })
+      .finally(() => {
+        loading = null
+      })
+    return loading
   }
 
   async function login(
