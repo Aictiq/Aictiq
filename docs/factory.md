@@ -432,13 +432,18 @@ tokens. If the runner is offline or no longer has the workspace, the continue ru
 ### Steer an agent from a comment
 
 Mention an agent in a comment on the item, for example `@builder the redirect should keep the
-query string`, and the agent starts working on what the comment asks. The comment's text is the
-instruction. When the run finishes or fails, the agent replies in the comment's thread with what
-it changed and a link to the pull request, or with the question it needs answered.
+query string`. Once the agent has worked on the item, it starts working on what the comment asks,
+and the comment's text is the instruction. Before that, the agent only answers. When the run
+finishes or fails, the agent replies in the comment's thread with what it changed and a link to
+the pull request, or with its answer or the question it needs answered.
 
-- **First run.** If the agent has never implemented the item, or has only refined it, the mention
-  starts a normal implement run with the comment quoted in its prompt. Refine runs are never
-  continued.
+- **Chat.** If the agent has no implement run on the item yet, from **Hand to agent** or a rule,
+  every mention starts a **chat** run, even one that says "implement this". A chat run answers
+  the comment and nothing else. Like a refine run it leaves the item's state and assignee alone,
+  works in an isolated clone of the default branch, and creates no branch, commit or pull
+  request. Its reply ends with a note that it was a chat Q&A and that **Hand to agent** starts the
+  work. Refine and chat runs do not count as earlier work, so the next mention starts another
+  chat run. The runs list, its **Kind** filter and the run page mark these runs as chat.
 - **Follow-up.** If the agent has an earlier implement run on the item, the mention starts a
   follow-up of it. The follow-up uses the same playbook and branch and goes to the runner that
   ran the earlier run, which holds its session. When that runner is offline the follow-up waits
@@ -448,14 +453,16 @@ it changed and a link to the pull request, or with the question it needs answere
   starts when the item is free, and several mentions run in the order they were written. A
   mention that waits a day on an item no run holds, for example because a person keeps it
   claimed, is dropped and the agent replies to say so.
-- **Workflow.** A mention's run moves the item exactly like any implement run: it is claimed and
-  moved to the first Active state, then to the playbook's success or failure state.
+- **Workflow.** A follow-up moves the item exactly like any implement run: it is claimed and
+  moved to the first Active state, then to the playbook's success or failure state. A chat run
+  moves nothing.
 - **Who can ask.** A mention starts work only when its author could start the run by hand: a
   project Member with **Operate the factory**. A stakeholder's mention, a Guest's, or another
   agent's only notifies, as before, and stakeholders do not see the agent's replies. Mentions of
   people only notify.
 - **History.** The item's **Agent runs** list links a mention's run to its comment, and the run
-  page links a follow-up to the run it follows up.
+  page links a follow-up to the run it follows up. Above the comment box, the item suggests asking
+  the agent a question until it has an implement run, and requesting a follow-up after that.
 
 If no run can ever start for a mention, the agent replies with the reason. For example, the
 project may have no default playbook or be archived, or the author may have lost factory

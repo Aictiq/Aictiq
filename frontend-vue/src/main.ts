@@ -8,6 +8,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 
 import App from './App.vue'
 import router from './router'
+import { installStaleBuildRecovery } from './router/staleBuild'
 import { useOnboardingStore } from './stores/onboarding'
 import { useOrganizationsStore } from './stores/organizations'
 import { useProjectsStore } from './stores/projects'
@@ -44,6 +45,10 @@ const queryOptions: VueQueryPluginOptions = {
 
 const app = createApp(App)
 const pinia = createPinia()
+
+// A tab that slept through a deploy reloads into the new build instead of going blank.
+// Installed before the router so the first navigation is covered too.
+installStaleBuildRecovery(router)
 
 app.use(pinia).use(router).use(VueQueryPlugin, queryOptions)
 

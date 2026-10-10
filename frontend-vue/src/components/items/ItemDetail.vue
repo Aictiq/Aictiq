@@ -313,11 +313,13 @@ const startRun = computed(() =>
     hasLiveRun: liveRun.value !== null,
   }),
 )
-const showAgentFeedback = computed(
-  () =>
-    startRun.value.visible &&
-    !session.user?.isAgent &&
-    itemRuns.value.some((entry) => entry.kind !== 'refine'),
+// A mention continues the agent's implement run when there is one; before that it starts a
+// chat run that only answers, so the hint offers a question rather than a follow-up.
+const showAgentHint = computed(
+  () => startRun.value.visible && !session.user?.isAgent && !runsQuery.isPending.value,
+)
+const hasImplementRun = computed(() =>
+  itemRuns.value.some((entry) => (entry.kind ?? 'implement') === 'implement'),
 )
 const startRunOpen = ref(false)
 const claimRun = computed(() =>
@@ -1229,7 +1231,13 @@ function logged(updated: TimeTrackingItem) {
               :to="{ hash: `#comment-${entry.triggerCommentId}` }"
               class="text-muted-foreground hover:text-foreground shrink-0 text-xs underline underline-offset-2"
               data-testid="run-trigger-comment"
-              >{{ entry.followsUpRunId ? 'Follow-up from a comment' : 'From a comment' }}</RouterLink
+              >{{
+                entry.kind === 'chat'
+                  ? 'Chat from a comment'
+                  : entry.followsUpRunId
+                    ? 'Follow-up from a comment'
+                    : 'From a comment'
+              }}</RouterLink
             >
             <span class="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2">
               <a
@@ -1287,15 +1295,21 @@ function logged(updated: TimeTrackingItem) {
       <section v-if="tab === 'comments'" class="mt-4 space-y-4">
         <form v-if="mayComment" class="space-y-2" @submit.prevent="addComment">
           <p
-            v-if="showAgentFeedback"
+            v-if="showAgentHint"
             class="border-border bg-muted/50 text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
-            data-testid="agent-feedback-hint"
+            :data-testid="hasImplementRun ? 'agent-feedback-hint' : 'agent-chat-hint'"
           >
             <Bot class="text-primary mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>
+            <span v-if="hasImplementRun">
               <strong class="text-foreground font-medium">Want changes?</strong>
               Tag the agent with <span class="text-foreground font-mono">@</span> in a comment and
               describe what to improve to request a follow-up.
+            </span>
+            <span v-else>
+              <strong class="text-foreground font-medium">Have a question?</strong>
+              Tag the agent with <span class="text-foreground font-mono">@</span> in a comment to
+              chat about this item or the codebase. It answers in the thread and changes nothing;
+              use Hand to agent to start the work.
             </span>
           </p>
           <MarkdownEditor

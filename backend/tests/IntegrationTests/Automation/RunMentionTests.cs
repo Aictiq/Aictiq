@@ -15,8 +15,8 @@ using Npgsql;
 namespace Aictiq.IntegrationTests.Automation;
 
 /// <summary>
-/// Steering an agent from the comments: a mention starts a run, or a follow-up of the agent's
-/// earlier run on the runner that kept its session; a mention made while the item is busy waits
+/// Steering an agent from the comments: a mention starts a chat run that only answers, or - once
+/// the agent has an implement run on the item - a follow-up of it on the runner that kept its session; a mention made while the item is busy waits
 /// its turn; the agent answers in the comment's thread; and a stakeholder's mention only notifies.
 /// The Workers handlers are invoked in line, the way the outbox would deliver them.
 /// </summary>
@@ -96,19 +96,32 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Fact]
-    public async Task a_mention_of_an_agent_that_never_ran_starts_an_implement_run_and_it_replies_in_the_thread()
+    public async Task a_mention_on_an_item_with_no_implement_run_starts_a_chat_run_that_replies_in_the_thread()
     {
-        var comment = await CommentAsync(Owner, ItemKey, "@builder the redirect should keep the query string");
+        var before = await ItemAsync(ItemKey);
+        // Worded as a work request, it is still only answered.
+        var comment = await CommentAsync(Owner, ItemKey, "@builder implement this, keeping the query string");
         await DeliverAsync(comment);
 
         var run = Assert.Single(await ItemRunsAsync(ItemKey));
+        Assert.Equal("chat", run.Kind);
         Assert.Equal(comment.Id, run.TriggerCommentId);
         Assert.Null(run.FollowsUpRunId);
         Assert.Equal(OwnerId, run.RequestedBy);
         Assert.Equal(AgentId, run.AgentId);
         var detail = await RunAsync(run.Id);
-        Assert.Contains("> @builder the redirect should keep the query string", detail.PromptSnapshot);
+        Assert.Contains("> @builder implement this, keeping the query string", detail.PromptSnapshot);
         Assert.Contains($"comment {comment.Id}", detail.PromptSnapshot);
+        Assert.Contains("Alice Anderson mentioned you", detail.PromptSnapshot);
+        Assert.Contains("This is a chat run (Q&A), not an implementation of the item", detail.PromptSnapshot);
+        Assert.Contains($"get_item(\"{ItemKey}\")", detail.PromptSnapshot);
+        Assert.DoesNotContain("open a pull request when", detail.PromptSnapshot);
+
+        // Claimed where it stands, like a refine run: no state or assignee change.
+        var claimedItem = await ItemAsync(ItemKey);
+        Assert.Equal(AgentId, claimedItem.ClaimedBy);
+        Assert.Equal(before.StateId, claimedItem.StateId);
+        Assert.Equal(before.AssigneeId, claimedItem.AssigneeId);
 
         // Replayed delivery asks for nothing more.
         await DeliverAsync(comment);
@@ -117,14 +130,32 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         using var runner = RunnerClient(Runner.Secret);
         var claimed = await StartAsync(runner, run.Id);
         Assert.Null(claimed.FollowUp);
+        // An isolated clone of the default branch: no item branch.
+        Assert.True(claimed.WorkOnDefaultBranch);
+        Assert.Equal(claimed.DefaultBranch, claimed.BranchName);
         await FinishAsync(runner, run.Id, new RunnerFinishRequest(
-            "succeeded", 0, "Kept the query string on redirect.", PullRequest, null, null, null, null, "sess-1"));
+            "succeeded", 0, "The redirect drops the query string in LoginRedirect.", null, null, null, null, null, "sess-1"));
         await SettleAsync(run.Id);
+
+        var after = await ItemAsync(ItemKey);
+        Assert.Equal(before.StateId, after.StateId);
+        Assert.Equal(before.AssigneeId, after.AssigneeId);
+        Assert.Null(after.ClaimedBy);
 
         var reply = (await CommentsAsync(ItemKey)).Items.Single(c => c.Author.IsAgent);
         Assert.Equal(comment.Id, reply.ParentCommentId);
-        Assert.Contains("Kept the query string on redirect.", reply.BodyMarkdown);
-        Assert.Contains($"[Pull request]({PullRequest})", reply.BodyMarkdown);
+        Assert.StartsWith($"Chat run {run.Id} succeeded", reply.BodyMarkdown);
+        Assert.Contains("The redirect drops the query string in LoginRedirect.", reply.BodyMarkdown);
+        Assert.EndsWith($"_{Aictiq.Modules.WorkItems.Events.RunFinishedHandler.ChatRunNote}_", reply.BodyMarkdown);
+
+        // A chat run is not earlier work: the next mention is another chat, not a follow-up.
+        var again = await CommentAsync(Owner, ItemKey, "@builder and where is the logout redirect?");
+        await DeliverAsync(again);
+        var second = (await ItemRunsAsync(ItemKey)).Single(r => r.Id != run.Id);
+        Assert.Equal("chat", second.Kind);
+        Assert.Null(second.FollowsUpRunId);
+        Assert.Null(second.RequestedRunnerId);
+        Assert.Equal(again.Id, second.TriggerCommentId);
 
         // A stakeholder sees the item's discussion but not the agent's answer.
         var stakeholderAuth = await Context.RegisterAsync($"stakeholder-{Guid.NewGuid():N}@test.local");
@@ -134,6 +165,28 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
             $"/api/v1/orgs/{Slug}/items/{ItemKey}/comments/", ApiTestContext.Json, Ct))!.Items;
         Assert.Contains(seen, c => c.Id == comment.Id);
         Assert.DoesNotContain(seen, c => c.Author.IsAgent);
+    }
+
+    [Fact]
+    public async Task a_failed_chat_run_answers_in_the_thread_and_leaves_the_item_where_it_was()
+    {
+        var before = await ItemAsync(ItemKey);
+        var comment = await CommentAsync(Owner, ItemKey, "@builder how does the redirect work?");
+        await DeliverAsync(comment);
+        var run = Assert.Single(await ItemRunsAsync(ItemKey));
+
+        using var runner = RunnerClient(Runner.Secret);
+        await StartAsync(runner, run.Id);
+        await FinishAsync(runner, run.Id, new RunnerFinishRequest(
+            "failed", 1, "The harness exited.", null, null, null, null, "harness-exit-1", "sess-1"));
+        await SettleAsync(run.Id);
+
+        var after = await ItemAsync(ItemKey);
+        Assert.Equal(before.StateId, after.StateId);
+        Assert.Null(after.ClaimedBy);
+        var reply = (await CommentsAsync(ItemKey)).Items.Single(c => c.Author.IsAgent);
+        Assert.Equal(comment.Id, reply.ParentCommentId);
+        Assert.StartsWith($"Chat run {run.Id} failed", reply.BodyMarkdown);
     }
 
     [Fact]
@@ -251,7 +304,7 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Fact]
-    public async Task a_refine_run_is_never_followed_up()
+    public async Task a_refine_run_is_never_followed_up_and_the_mention_after_it_is_a_chat()
     {
         var refine = await DispatchAsync(ItemKey);
         using var runner = RunnerClient(Runner.Secret);
@@ -265,6 +318,7 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         var comment = await CommentAsync(Owner, ItemKey, "@builder go ahead and build it");
         await DeliverAsync(comment);
         var run = (await ItemRunsAsync(ItemKey)).Single(r => r.Id != refine.Id);
+        Assert.Equal("chat", run.Kind);
         Assert.Null(run.FollowsUpRunId);
         Assert.Null(run.RequestedRunnerId);
         Assert.Equal(comment.Id, run.TriggerCommentId);
