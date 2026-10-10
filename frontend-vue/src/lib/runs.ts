@@ -156,6 +156,7 @@ export function canRetryRun(
   return (
     (run.status === 'failed' || run.status === 'timedOut') &&
     run.kind !== 'refine' &&
+    run.kind !== 'chat' &&
     !run.superseded &&
     !run.continuedByRunId
   )

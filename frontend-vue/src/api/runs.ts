@@ -80,7 +80,7 @@ export interface Run {
   promptSnapshot: string | null
   /** xmin. */
   version: number
-  /** An implement run delivers code; a refine run rewrites the ticket. */
+  /** An implement run delivers code; a refine run rewrites the ticket; a chat run answers a comment. */
   kind?: RunKind
   /** The harness session a continue run resumes, and a person can resume by hand on the runner. */
   sessionId?: string | null
@@ -155,7 +155,7 @@ export interface ListRunsOptions {
   pageSize?: number
 }
 
-export type RunKind = 'implement' | 'refine'
+export type RunKind = 'implement' | 'refine' | 'chat'
 
 export type RunStatsGrouping = 'agent' | 'project' | 'playbook' | 'runner'
 

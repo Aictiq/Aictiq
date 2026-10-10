@@ -41,6 +41,12 @@ public sealed record RunFinished(
     public bool Refinement { get; init; }
 
     /// <summary>
+    /// A chat run: it answered a comment instead of working the item, so - like a refine run -
+    /// the item stays where it is, and the reply says how to start the work.
+    /// </summary>
+    public bool Chat { get; init; }
+
+    /// <summary>
     /// The comment that asked for the run by mentioning its agent, or null. The outcome comment
     /// is then the agent's reply in that comment's thread rather than a new one.
     /// </summary>

@@ -521,6 +521,7 @@ describe('continuing and retrying runs', () => {
     expect(canRetryRun({ ...failed, continuedByRunId: 'r-2' })).toBe(false)
     // A refinement is asked for again from the item, not retried from here.
     expect(canRetryRun({ ...failed, kind: 'refine' })).toBe(false)
+    expect(canRetryRun({ ...failed, kind: 'chat' })).toBe(false)
   })
 
   it('adds up a chain’s cost and tokens, and says nothing when no run reported any', () => {

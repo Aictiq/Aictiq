@@ -317,6 +317,10 @@ const tokens = computed(() => {
             <dt class="inline">Playbook&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.playbookName ?? '-' }}</dd>
           </div>
+          <div v-if="run.kind === 'chat'" data-testid="run-kind">
+            <dt class="inline">Kind&nbsp;</dt>
+            <dd class="text-foreground inline">chat</dd>
+          </div>
           <div>
             <dt class="inline">Runner&nbsp;</dt>
             <dd class="text-foreground inline" data-testid="run-runner">

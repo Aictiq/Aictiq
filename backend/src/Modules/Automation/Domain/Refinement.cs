@@ -2,7 +2,10 @@ using Aictiq.SharedKernel.Domain;
 
 namespace Aictiq.Modules.Automation.Domain;
 
-/// <summary>What a run is for. An implement run delivers code; a refine run writes the ticket itself.</summary>
+/// <summary>
+/// What a run is for. An implement run delivers code; a refine run writes the ticket itself;
+/// a chat run answers a comment.
+/// </summary>
 public enum RunKind : short
 {
     Implement = 0,
@@ -13,6 +16,13 @@ public enum RunKind : short
     /// its answer, and the person who asked confirms the result.
     /// </summary>
     Refine = 1,
+
+    /// <summary>
+    /// Answers a comment that mentioned the agent on an item no implement run has worked on
+    /// yet. Like a refine run it leaves the item where it is and never commits; its final
+    /// message is the reply in the comment's thread.
+    /// </summary>
+    Chat = 2,
 }
 
 /// <summary>Where one item's refinement stands. Only <see cref="Refining"/> has a live run behind it.</summary>

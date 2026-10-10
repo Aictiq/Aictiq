@@ -52,6 +52,7 @@ const slug = computed(() => org.slug.value)
 const runKinds: { value: RunKind; label: string }[] = [
   { value: 'implement', label: 'Implement' },
   { value: 'refine', label: 'Refine' },
+  { value: 'chat', label: 'Chat' },
 ]
 
 interface Filters {
@@ -479,6 +480,13 @@ watch(
               data-testid="run-scheduled"
               >{{ runScheduledLabel(run) }}</span
             >
+            <span
+              v-if="run.kind === 'chat'"
+              class="text-muted-foreground shrink-0 text-xs"
+              data-testid="run-row-chat"
+            >
+              chat
+            </span>
             <span
               v-if="run.followsUpRunId"
               class="text-muted-foreground shrink-0 text-xs"
