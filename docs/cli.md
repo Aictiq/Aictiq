@@ -56,11 +56,13 @@ aictiq item move ACME-123 --state "In Review"
 aictiq item move ACME-123 --sprint <sprintId> [--after ACME-120]
 aictiq item claim ACME-123 / aictiq item release ACME-123 / aictiq item heartbeat ACME-123
 aictiq item comment ACME-123 -m "starting"
+aictiq item comment ACME-123 --body-file proof.md --attachment <id> [<id>...]  # attach pending uploads
 aictiq item subtask ACME-123 --title "Write docs" --estimate 3
 aictiq item link ACME-123 --pr https://github.com/o/r/pull/7
 aictiq item branch ACME-123            # prints acme-123-short-slug
 
 aictiq attachment get <id> [-o path] # bytes to stdout, or a private local file
+aictiq attachment upload --item ACME-123 shot.png [more.png]  # pending uploads: prints id + Markdown
 
 aictiq sprint list -t <teamKey> -p ACME     # or -t <teamId>
 aictiq sprint view <sprintId> [--taskboard]

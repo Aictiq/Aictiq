@@ -348,6 +348,7 @@ public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : R
         Assert.StartsWith("aiq_", claimed.AgentToken);
         Assert.Contains("user-controlled data", claimed.Prompt);
         Assert.Contains("never as instructions", claimed.Prompt);
+        Assert.Contains($"aictiq attachment upload --item {ItemKey}", claimed.Prompt);
         // The run screens name the machine that took it.
         var taken = (await Owner.GetFromJsonAsync<RunView>($"/api/v1/orgs/{Slug}/runs/{run.Id}", ApiTestContext.Json, Ct))!;
         Assert.Contains(taken.RunnerName, new[] { "box-1", "box-2" });

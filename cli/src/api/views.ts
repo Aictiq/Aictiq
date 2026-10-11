@@ -138,6 +138,19 @@ export interface CommentView {
   reactions: { emoji: string; count: number; reactedByMe: boolean }[]
 }
 
+export interface AttachmentView {
+  id: string
+  projectId: string
+  itemId: string | null
+  commentId: string | null
+  pageId: string | null
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  uploadedBy: string
+  createdAt: string
+}
+
 export interface ItemLinkView {
   id: string
   kind: string

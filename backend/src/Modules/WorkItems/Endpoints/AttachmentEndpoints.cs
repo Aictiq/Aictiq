@@ -123,10 +123,37 @@ public static class AttachmentEndpoints
         IPlanLimits planLimits, TimeProvider clock, CancellationToken ct)
     {
         if ((request.ItemId is not null ? 1 : 0) + (request.CommentId is not null ? 1 : 0) + (request.PageId is not null ? 1 : 0) != 1) return OwnerProblem();
+        return await CommitAsync(attachmentId, request, db, user, access, pages, storage, options.Value, planLimits, clock, ct) switch
+        {
+            CommitOutcome.Committed committed => Results.Ok(View(committed.Attachment)),
+            CommitOutcome.Mismatch => Results.Problem("The uploaded object did not match the approved file.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict),
+            CommitOutcome.OverPlan { Plan: var plan } => Results.Problem(plan.Reason, title: "Plan limit reached.", type: ProblemTypes.PlanLimit,
+                statusCode: StatusCodes.Status402PaymentRequired,
+                extensions: new Dictionary<string, object?> { ["limit"] = plan.Limit, ["upgradeUrl"] = plan.UpgradeUrl }),
+            _ => Results.NotFound(),
+        };
+    }
+
+    internal abstract record CommitOutcome
+    {
+        public sealed record Committed(Attachment Attachment) : CommitOutcome;
+        public sealed record NotFound : CommitOutcome;
+        public sealed record Mismatch : CommitOutcome;
+        public sealed record OverPlan(PlanLimitDecision Plan) : CommitOutcome;
+    }
+
+    /// <summary>
+    /// The commit itself, shared by the REST endpoint and MCP <c>add_comment</c> so an agent's
+    /// screenshots pass the same owner, role, object and allowance checks as a person's upload.
+    /// <paramref name="request"/> names exactly one owner; the caller checks that.
+    /// </summary>
+    internal static async Task<CommitOutcome> CommitAsync(Guid attachmentId, CommitAttachmentRequest request, WorkItemsDbContext db,
+        ICurrentUser user, IProjectAccess access, IWikiPageAccess pages, IBlobStorage storage, AttachmentsOptions policy,
+        IPlanLimits planLimits, TimeProvider clock, CancellationToken ct)
+    {
         var attachment = await db.Attachments.FirstOrDefaultAsync(x => x.Id == attachmentId, ct);
-        if (attachment is null || attachment.Status != AttachmentStatus.Pending || attachment.UploadedBy != user.UserId) return Results.NotFound();
-        if (await access.GetProjectRoleAsync(user.UserId!, attachment.ProjectId, ct) is not { } role || !role.Satisfies(ProjectRole.Member)) return Results.NotFound();
-        var policy = options.Value;
+        if (attachment is null || attachment.Status != AttachmentStatus.Pending || attachment.UploadedBy != user.UserId) return new CommitOutcome.NotFound();
+        if (await access.GetProjectRoleAsync(user.UserId!, attachment.ProjectId, ct) is not { } role || !role.Satisfies(ProjectRole.Member)) return new CommitOutcome.NotFound();
         var blob = await storage.HeadAsync(attachment.ObjectKey, ct);
         if (blob is null || blob.ContentLength != attachment.SizeBytes || blob.ContentLength > policy.MaxBytes ||
             !string.Equals(blob.ContentType, attachment.ContentType, StringComparison.OrdinalIgnoreCase))
@@ -135,20 +162,20 @@ public static class AttachmentEndpoints
             await storage.DeleteAsync(attachment.ObjectKey, ct);
             db.Attachments.Remove(attachment);
             await db.SaveChangesAsync(ct);
-            return Results.Problem("The uploaded object did not match the approved file.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
+            return new CommitOutcome.Mismatch();
         }
         if (request.ItemId is { } itemId)
         {
-            if (!await db.Items.AnyAsync(x => x.Id == itemId && x.ProjectId == attachment.ProjectId, ct)) return Results.NotFound();
+            if (!await db.Items.AnyAsync(x => x.Id == itemId && x.ProjectId == attachment.ProjectId, ct)) return new CommitOutcome.NotFound();
             attachment.ItemId = itemId;
         }
         else if (request.CommentId is not null)
         {
-            if (!await db.Comments.AnyAsync(x => x.Id == request.CommentId && db.Items.Any(i => i.Id == x.ItemId && i.ProjectId == attachment.ProjectId), ct)) return Results.NotFound();
+            if (!await db.Comments.AnyAsync(x => x.Id == request.CommentId && db.Items.Any(i => i.Id == x.ItemId && i.ProjectId == attachment.ProjectId), ct)) return new CommitOutcome.NotFound();
             attachment.CommentId = request.CommentId;
         }
         else if (await pages.CanWriteAsync(request.PageId!.Value, attachment.ProjectId, user.UserId!, ct)) attachment.WikiPageId = request.PageId;
-        else return Results.NotFound();
+        else return new CommitOutcome.NotFound();
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // The lock, then the sum, then the commit - all three inside one transaction. Asking
@@ -157,19 +184,14 @@ public static class AttachmentEndpoints
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtext({attachment.OrganizationId.ToString()}))", ct);
         var plan = await planLimits.CanStoreBytesAsync(attachment.OrganizationId, attachment.SizeBytes, ct);
-        if (!plan.Allowed)
-        {
-            // The upload stays pending - the sweeper collects it - so freeing space and
-            // committing again is the remedy, and nothing already stored was touched.
-            return Results.Problem(plan.Reason, title: "Plan limit reached.", type: ProblemTypes.PlanLimit,
-                statusCode: StatusCodes.Status402PaymentRequired,
-                extensions: new Dictionary<string, object?> { ["limit"] = plan.Limit, ["upgradeUrl"] = plan.UpgradeUrl });
-        }
+        // Over the allowance, the upload stays pending - the sweeper collects it - so freeing
+        // space and committing again is the remedy, and nothing already stored was touched.
+        if (!plan.Allowed) return new CommitOutcome.OverPlan(plan);
         attachment.Status = AttachmentStatus.Committed;
         attachment.CommittedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return Results.Ok(View(attachment));
+        return new CommitOutcome.Committed(attachment);
     }
 
     private static async Task<IResult> Download(HttpContext http, Guid attachmentId, WorkItemsDbContext db, ICurrentUser user,

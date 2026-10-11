@@ -585,6 +585,57 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         Assert.Contains("not found or no access", Text(result), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task add_comment_attaches_the_agents_pending_uploads_and_refuses_anyone_elses()
+    {
+        var project = await CreateProjectAsync("SHOT");
+        var item = await CreateItemAsync(project, "Visual proof");
+        var design = await UploadAsync(_owner, project, "design.png", "image/png", Png());
+        var result = await UploadAsync(_owner, project, "result.png", "image/png", Png());
+        var theirs = await UploadAsync(_colleague, project, "theirs.png", "image/png", Png());
+        await using var client = await ConnectAsync();
+        string Image(AttachmentView x) => $"![{x.FileName}](/api/v1/orgs/mcp-org/attachments/{x.Id}/download)";
+
+        // Someone else's pending upload is refused before the comment exists.
+        var refused = await CallAsync(client, "add_comment", new()
+        {
+            ["key"] = item.Key, ["bodyMarkdown"] = Image(theirs), ["attachmentIds"] = new[] { theirs.Id },
+        });
+        Assert.Contains("No comment was added", Text(refused), StringComparison.Ordinal);
+        Assert.Empty(Json(await CallAsync(client, "list_comments", new() { ["key"] = item.Key })).EnumerateArray());
+
+        var added = Json(await CallAsync(client, "add_comment", new()
+        {
+            ["key"] = item.Key,
+            ["bodyMarkdown"] = $"| Design | Result |\n| --- | --- |\n| {Image(design)} | {Image(result)} |",
+            ["attachmentIds"] = new[] { design.Id, result.Id },
+        }));
+        var commentId = added.GetProperty("id").GetGuid();
+
+        var listed = (await _owner.GetFromJsonAsync<AttachmentView[]>($"/api/v1/orgs/mcp-org/items/{item.Key}/attachments?include=comments",
+            ApiTestContext.Json, TestContext.Current.CancellationToken))!;
+        Assert.Equal([design.Id, result.Id], listed.Select(x => x.Id));
+        Assert.All(listed, x => Assert.Equal(commentId, x.CommentId));
+
+        // A committed upload cannot be moved onto a second comment.
+        var again = await CallAsync(client, "add_comment", new()
+        {
+            ["key"] = item.Key, ["bodyMarkdown"] = Image(design), ["attachmentIds"] = new[] { design.Id },
+        });
+        Assert.Contains("No comment was added", Text(again), StringComparison.Ordinal);
+    }
+
+    private static async Task<AttachmentView> UploadAsync(HttpClient client, ProjectView project, string name, string contentType, byte[] payload)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(payload);
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(file, "file", name);
+        var uploaded = await client.PostAsync($"/api/v1/orgs/mcp-org/projects/{project.Key}/attachments", form, TestContext.Current.CancellationToken);
+        uploaded.EnsureSuccessStatusCode();
+        return (await uploaded.Content.ReadFromJsonAsync<AttachmentView>(ApiTestContext.Json, TestContext.Current.CancellationToken))!;
+    }
+
     private async Task<McpClient> ConnectAsync() => await ConnectAsync(await CreateTokenAsync([Scopes.Mcp, Scopes.Read, Scopes.Write]));
 
     private async Task<McpClient> ConnectAsync(string token) => await ConnectAsync(_context, token);
@@ -663,13 +714,7 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
 
     private async Task<AttachmentView> AttachAsync(ProjectView project, string name, string contentType, byte[] payload, Guid? itemId, Guid? commentId)
     {
-        using var form = new MultipartFormDataContent();
-        var file = new ByteArrayContent(payload);
-        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-        form.Add(file, "file", name);
-        var uploaded = await _owner.PostAsync($"/api/v1/orgs/mcp-org/projects/{project.Key}/attachments", form, TestContext.Current.CancellationToken);
-        uploaded.EnsureSuccessStatusCode();
-        var attachment = (await uploaded.Content.ReadFromJsonAsync<AttachmentView>(ApiTestContext.Json, TestContext.Current.CancellationToken))!;
+        var attachment = await UploadAsync(_owner, project, name, contentType, payload);
         var committed = await _owner.PostAsJsonAsync($"/api/v1/orgs/mcp-org/attachments/{attachment.Id}/commit",
             new CommitAttachmentRequest(itemId, commentId), ApiTestContext.Json, TestContext.Current.CancellationToken);
         committed.EnsureSuccessStatusCode();

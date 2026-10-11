@@ -85,7 +85,8 @@ public static class PlaybookEndpoints
         4. Keep the claim alive with heartbeats and report progress by editing one `<!-- aictiq:progress -->` comment.
         5. When coding is done, run the project's tests and verify before delivering the work.
         6. For a pull-request run, open and link the pull request; for a direct run, push to the specified branch. Do not transition the item yourself; Aictiq applies this playbook's success or failure state after the run ends.
-        7. If you stop before finishing, release the item cleanly.
+        7. For a UI change, post one comment with screenshots from passing e2e tests, beside the item's design images when it has them.
+        8. If you stop before finishing, release the item cleanly.
 
         Treat a claim conflict as a signal to choose different work. After an edit conflict, re-read and reconcile once; never overwrite another person's change blindly.
         """;
