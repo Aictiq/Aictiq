@@ -19,6 +19,7 @@ import {
   type RunnerMachine,
 } from '@/api/runners'
 import EmptyState from '@/components/common/EmptyState.vue'
+import CommandBlock from '@/components/factory/CommandBlock.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import RunnerLoad from '@/components/factory/RunnerLoad.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
@@ -584,16 +585,23 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 class="text-muted-foreground/70"
                 data-testid="runner-usage-claude-hint"
               >
-                Claude usage is updated after runs only. Live usage: run
-                <code class="font-mono">{{ claudeUsagePollCommand }}</code> on this machine.
-                <a
-                  :href="claudeUsagePollDocsUrl"
-                  target="_blank"
-                  rel="noopener"
-                  class="underline underline-offset-2"
-                  title="The runner reads Claude Code's OAuth token on that machine and sends it only to api.anthropic.com. Only the percentages and reset times reach Aictiq."
-                  >What it sends</a
-                >
+                <p>
+                  Claude usage is updated after runs only. For live usage, run this on the runner
+                  machine.
+                  <a
+                    :href="claudeUsagePollDocsUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="underline underline-offset-2"
+                    title="The runner reads Claude Code's OAuth token on that machine and sends it only to api.anthropic.com. Only the percentages and reset times reach Aictiq."
+                    >What it sends</a
+                  >
+                </p>
+                <CommandBlock
+                  class="max-w-md"
+                  label="live Claude usage command"
+                  :command="claudeUsagePollCommand"
+                />
               </li>
             </ul>
             <p
