@@ -68,101 +68,72 @@ function mountDialog() {
         DialogHeader: passthrough,
         DialogTitle: passthrough,
         DialogDescription: passthrough,
-        DialogFooter: passthrough,
-        MarkdownEditor: {
-          props: ['modelValue'],
-          emits: ['update:modelValue'],
-          template:
-            '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
-        },
       },
     },
   })
   wrappers.push(wrapper)
   return { wrapper, client }
 }
-const picker = 'select[aria-label="Choose an item template"]'
-const value = (wrapper: ReturnType<typeof mount>, selector = 'textarea') =>
-  (wrapper.get(selector).element as HTMLInputElement).value
+async function create(wrapper: ReturnType<typeof mount>, title: string, type?: string) {
+  if (type) await wrapper.get('#create-ticket-type').setValue(type)
+  await wrapper.get('#create-ticket-title').setValue(title)
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+}
 
 describe('ticket templates', () => {
-  it('preselects the type default, filters the picker, and swaps untouched prefills', async () => {
+  it('files a quick title with its type default template', async () => {
     const { wrapper } = mountDialog()
-    await flushPromises()
-    expect(value(wrapper, picker)).toBe('bug')
-    expect(wrapper.get(picker).text()).not.toContain('User story')
-    expect(value(wrapper)).toBe(bug.descriptionMarkdown)
-    await wrapper.get(picker).setValue('alternative')
-    expect(value(wrapper)).toBe(alternative.descriptionMarkdown)
-    await wrapper.get('#create-ticket-type').setValue('story')
-    expect(value(wrapper, picker)).toBe('story')
-    expect(value(wrapper)).toBe(story.descriptionMarkdown)
-  })
-  it('preserves edited descriptions when picking another template or changing type', async () => {
-    const { wrapper } = mountDialog()
-    await flushPromises()
-    await wrapper.get('textarea').setValue('My reproduction steps')
-    await wrapper.get(picker).setValue('alternative')
-    await wrapper.get('#create-ticket-type').setValue('story')
-    expect(value(wrapper)).toBe('My reproduction steps')
-  })
-  it('preserves text entered while templates are still loading', async () => {
-    let resolve!: (templates: ItemTemplate[]) => void
-    vi.mocked(listItemTemplates).mockReturnValue(
-      new Promise((done) => {
-        resolve = done
-      }),
-    )
-    const { wrapper } = mountDialog()
-    await wrapper.get('textarea').setValue('Already typed')
-    resolve([bug])
-    await flushPromises()
-    expect(value(wrapper, picker)).toBe('bug')
-    expect(value(wrapper)).toBe('Already typed')
-  })
-  it('sends priority and label defaults with the created ticket', async () => {
-    const { wrapper } = mountDialog()
-    await flushPromises()
-    await wrapper.get('#create-ticket-title').setValue('Broken login')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
+    await create(wrapper, 'Broken login')
     expect(createItem).toHaveBeenCalledWith(
       'acme',
       'WEB',
       expect.objectContaining({
+        type: 'bug',
+        title: 'Broken login',
         descriptionMarkdown: bug.descriptionMarkdown,
         priority: 'high',
         labelIds: ['label'],
       }),
     )
+    expect(wrapper.emitted('created')?.[0]?.[0]).toMatchObject({ key: 'WEB-1' })
   })
-  it('leaves a type with no template empty and clears previous defaults', async () => {
+  it('uses the default of the type picked, never a non-default template', async () => {
     const { wrapper } = mountDialog()
-    await flushPromises()
-    await wrapper.get('#create-ticket-type').setValue('epic')
-    expect(wrapper.find(picker).exists()).toBe(false)
-    expect(value(wrapper)).toBe('')
-    await wrapper.get('#create-ticket-title').setValue('An epic')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
+    await create(wrapper, 'Sign up', 'story')
     expect(createItem).toHaveBeenCalledWith(
       'acme',
       'WEB',
-      expect.objectContaining({ priority: undefined, labelIds: undefined }),
+      expect.objectContaining({
+        type: 'story',
+        descriptionMarkdown: story.descriptionMarkdown,
+        priority: undefined,
+        labelIds: [],
+      }),
     )
   })
-  it('keeps a manual choice after refetch and resets it when reopening', async () => {
-    const { wrapper, client } = mountDialog()
-    await flushPromises()
-    await wrapper.get(picker).setValue('alternative')
-    await client.invalidateQueries()
-    await flushPromises()
-    expect(value(wrapper, picker)).toBe('alternative')
-    await wrapper.setProps({ open: false })
-    await wrapper.setProps({ open: true })
-    await flushPromises()
-    expect(value(wrapper, picker)).toBe('bug')
-    expect(value(wrapper)).toBe(bug.descriptionMarkdown)
+  it('leaves a type with no template empty', async () => {
+    const { wrapper } = mountDialog()
+    await create(wrapper, 'An epic', 'epic')
+    expect(createItem).toHaveBeenCalledWith(
+      'acme',
+      'WEB',
+      expect.objectContaining({
+        descriptionMarkdown: undefined,
+        priority: undefined,
+        labelIds: undefined,
+      }),
+    )
+  })
+  it('still creates the ticket when templates cannot be read', async () => {
+    vi.mocked(listItemTemplates).mockRejectedValue(new Error('offline'))
+    const { wrapper } = mountDialog()
+    await create(wrapper, 'Broken login')
+    expect(createItem).toHaveBeenCalledWith(
+      'acme',
+      'WEB',
+      expect.objectContaining({ title: 'Broken login', descriptionMarkdown: undefined }),
+    )
   })
 })
 
