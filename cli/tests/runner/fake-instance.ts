@@ -54,7 +54,8 @@ export class FakeInstance {
       path: url.pathname,
       query: Object.fromEntries(url.searchParams),
       authorization: req.headers.authorization,
-      body: text ? JSON.parse(text) : undefined,
+      // A multipart upload is kept as its raw text, for assertions on the file part.
+      body: !text ? undefined : req.headers['content-type']?.startsWith('multipart/') ? text : JSON.parse(text),
     }
     this.requests.push(recorded)
     for (const handler of this.handlers) {

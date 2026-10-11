@@ -10,6 +10,7 @@ using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -31,9 +32,11 @@ public sealed record McpItem(string Key, string Title, WorkItemType Type, string
 /// </summary>
 [McpServerToolType]
 public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenant, ICurrentUser user,
-    IProjectAccess access, TenancyDbContext tenancy, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration)
+    IProjectAccess access, TenancyDbContext tenancy, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration,
+    IPlanLimits planLimits, IOptions<AttachmentsOptions> attachmentOptions)
 {
     private const int MaxMcpTextAttachmentBytes = 64 * 1024;
+    private const int MaxCommentAttachments = 20;
     [McpServerTool(Name = "search_items", ReadOnly = true)]
     [Description("Searches work items in a project. Filter uses Aictiq's normal item-filter grammar.")]
     public async Task<IReadOnlyList<McpItem>> SearchItems(string project, string? filter = null, string? q = null, int limit = 25, CancellationToken cancellationToken = default)
@@ -167,9 +170,48 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     public async Task<bool> Heartbeat(string key, CancellationToken cancellationToken = default)
     { var item = await TryWritableAsync(key, cancellationToken); if (item is null || item.ClaimedBy != user.UserId) return false; item.ClaimHeartbeatAt = clock.GetUtcNow(); item.UpdatedAt = item.ClaimHeartbeatAt.Value; await db.SaveChangesAsync(cancellationToken); return true; }
 
+    /// <summary>
+    /// An agent cannot stream image bytes through a tool call, so files arrive the way a
+    /// person's do: uploaded as pending attachments (<c>aictiq attachment upload</c>), then
+    /// committed here to the new comment through the same commit as the REST endpoint - the
+    /// same project role, size, type and storage-allowance rules. The ids are checked before
+    /// the comment exists, so a wrong id does not leave a comment with a broken image.
+    /// </summary>
     [McpServerTool(Name = "add_comment")]
-    public async Task<object?> AddComment(string key, string bodyMarkdown, CancellationToken cancellationToken = default)
-    { if (!ValidBody(bodyMarkdown)) throw new McpException("bodyMarkdown must contain 1 to 20,000 characters."); var item = await Visible(key, cancellationToken); if (item is null) throw new McpAnswerException($"item '{key}' not found or no access"); await RefuseArchivedAsync(item, cancellationToken); var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, AuthorId = user.UserId!, BodyMarkdown = bodyMarkdown.Trim(), BodyHtml = WorkItemEndpoints.Render(bodyMarkdown.Trim()), CreatedAt = clock.GetUtcNow() }; db.Comments.Add(comment); await db.SaveChangesAsync(cancellationToken); return new { comment.Id, comment.CreatedAt }; }
+    [Description("Adds a comment to an item. attachmentIds commits files you uploaded with `aictiq attachment upload` (pending, in this item's project) to the comment; show an image inline with ![alt](/api/v1/orgs/{org}/attachments/{id}/download) in bodyMarkdown.")]
+    public async Task<object?> AddComment(string key, string bodyMarkdown, IReadOnlyList<Guid>? attachmentIds = null, CancellationToken cancellationToken = default)
+    {
+        if (!ValidBody(bodyMarkdown)) throw new McpException("bodyMarkdown must contain 1 to 20,000 characters.");
+        var ids = (attachmentIds ?? []).Distinct().ToArray();
+        if (ids.Length > MaxCommentAttachments) throw new McpException($"attachmentIds may name at most {MaxCommentAttachments} files.");
+        var item = await Visible(key, cancellationToken); if (item is null) throw new McpAnswerException($"item '{key}' not found or no access");
+        await RefuseArchivedAsync(item, cancellationToken);
+        if (ids.Length > 0)
+        {
+            var me = user.UserId;
+            var pending = await db.Attachments.AsNoTracking()
+                .Where(x => ids.Contains(x.Id) && x.Status == AttachmentStatus.Pending && x.UploadedBy == me && x.ProjectId == item.ProjectId)
+                .Select(x => x.Id).ToListAsync(cancellationToken);
+            if (ids.Except(pending).ToArray() is { Length: > 0 } missing)
+                throw new McpAnswerException($"attachment {string.Join(", ", missing)} is not a pending upload of yours in project {item.ProjectKey}; upload it with `aictiq attachment upload --item {item.Key}` and pass the returned id. No comment was added.");
+        }
+        var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, AuthorId = user.UserId!, BodyMarkdown = bodyMarkdown.Trim(), BodyHtml = WorkItemEndpoints.Render(bodyMarkdown.Trim()), CreatedAt = clock.GetUtcNow() };
+        db.Comments.Add(comment); await db.SaveChangesAsync(cancellationToken);
+        foreach (var id in ids)
+        {
+            var outcome = await AttachmentEndpoints.CommitAsync(id, new CommitAttachmentRequest(null, comment.Id), db, user, access, pages, storage,
+                attachmentOptions.Value, planLimits, clock, cancellationToken);
+            if (outcome is AttachmentEndpoints.CommitOutcome.Committed) continue;
+            var reason = outcome switch
+            {
+                AttachmentEndpoints.CommitOutcome.OverPlan { Plan: var plan } => plan.Reason ?? "the organization's storage allowance is used up",
+                AttachmentEndpoints.CommitOutcome.Mismatch => "the stored object did not match the upload",
+                _ => "it is not a pending upload of yours in this project",
+            };
+            throw new McpAnswerException($"comment {comment.Id} was added, but attachment {id} could not be attached: {reason}. Edit the comment with update_comment so it does not show a broken image.");
+        }
+        return new { comment.Id, comment.CreatedAt };
+    }
 
     [McpServerTool(Name = "list_comments", ReadOnly = true)]
     public async Task<IReadOnlyList<object>> ListComments(string key, int limit = 100, CancellationToken cancellationToken = default)

@@ -111,6 +111,46 @@ export class AictiqClient {
   }
 
   /**
+   * Posts a multipart form - the attachment upload route takes the file as a `file` part,
+   * exactly as the web app sends it, so the server's size, type and image rules apply.
+   */
+  async upload<T, P extends PathFor<'post'>>(
+    path: P,
+    form: FormData,
+    options: Pick<RequestOptions<P, 'post'>, 'path'> = {},
+  ): Promise<T> {
+    const url = new URL(this.baseUrl + expand(path as string, options.path ?? {}))
+    let response: Response
+    try {
+      response = await this.doFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: 'application/json',
+          'User-Agent': 'aictiq-cli',
+        },
+        body: form,
+      })
+    } catch (cause) {
+      throw new CliError(
+        `Cannot reach ${this.baseUrl}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ExitCode.Error,
+      )
+    }
+    const text = await response.text()
+    const payload: unknown = text.length === 0 ? undefined : safeJson(text)
+    if (!response.ok) {
+      const problem = isProblem(payload) ? payload : undefined
+      throw new CliError(
+        formatProblem(problem, `${response.status} ${response.statusText}`),
+        exitCodeForStatus(response.status),
+        problem,
+      )
+    }
+    return payload as T
+  }
+
+  /**
    * Downloads an authenticated response without trying to interpret it as JSON. Attachments
    * deliberately use the normal API route (rather than a presigned object-store URL), so a
    * PAT's organization and project visibility checks remain in force.

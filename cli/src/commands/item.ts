@@ -1,5 +1,5 @@
 import { Command, Option } from 'commander'
-import type { CommentView, ItemLinkView, PagedResult, WorkItemView } from '../api/views.js'
+import type { AttachmentView, CommentView, ItemLinkView, PagedResult, WorkItemView } from '../api/views.js'
 import type { WorkItemPriority, WorkItemType } from '../api/views.js'
 import { createContext } from '../context.js'
 import type { Context, GlobalOptions } from '../context.js'
@@ -446,20 +446,37 @@ export function itemCommand(globals: () => GlobalOptions): Command {
     .argument('<key>', 'Item key, e.g. ACME-123')
     .option('-m, --body <markdown>', 'Comment body in Markdown')
     .option('--body-file <path>', 'Read the body from a file, or - for stdin')
-    .action(async (key: string, options: { body?: string; bodyFile?: string }) => {
+    .option(
+      '--attachment <id...>',
+      'Pending upload ids from `aictiq attachment upload` to attach to this comment',
+    )
+    .action(async (key: string, options: { body?: string; bodyFile?: string; attachment?: string[] }) => {
       const ctx = createContext(globals())
       const body = await readBody(options.body, options.bodyFile)
       if (!body || body.trim().length === 0) {
         throw new CliError('Pass -m "text" or --body-file <path>.', ExitCode.Validation)
       }
+      const orgSlug = await ctx.org()
       const comment = await ctx.client.request<
         CommentView,
         '/api/v1/orgs/{orgSlug}/items/{itemKey}/comments',
         'post'
       >('post', '/api/v1/orgs/{orgSlug}/items/{itemKey}/comments', {
-        path: { orgSlug: await ctx.org(), itemKey: normalizeItemKey(key) },
+        path: { orgSlug, itemKey: normalizeItemKey(key) },
         body: { bodyMarkdown: body },
       })
+      // A comment has no id until it is posted, so its files are committed right after -
+      // the same order the web app uses.
+      for (const attachmentId of new Set(options.attachment ?? [])) {
+        await ctx.client.request<
+          AttachmentView,
+          '/api/v1/orgs/{orgSlug}/attachments/{attachmentId}/commit',
+          'post'
+        >('post', '/api/v1/orgs/{orgSlug}/attachments/{attachmentId}/commit', {
+          path: { orgSlug, attachmentId },
+          body: { commentId: comment.id },
+        })
+      }
 
       if (ctx.json) return printJson(comment)
       print(`Comment added to ${normalizeItemKey(key)}.`)

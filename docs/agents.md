@@ -139,6 +139,14 @@ there is none yet. `update_comment` only edits comments the calling identity wro
 keeps the previous body as a revision, so nothing is lost. Save `add_comment` for things a
 person should read once: a decision taken, a blocker found, a question.
 
+**Show UI changes.** For a change a reviewer would otherwise have to run to see, post one
+comment with screenshots from passing e2e tests: upload them with
+`aictiq attachment upload --item ACME-123 <files...>` (pending, with the same size, type and
+role rules as a person's upload; it prints each id and its Markdown image), then call
+`add_comment(key, body, attachmentIds)`. When the item has a design image, a
+`| Design | Result |` table puts each design beside its screenshot. Never post a screenshot
+from a failed test, or one showing secrets or real user data. Runs get this as part of their prompt.
+
 **Link the pull request and hand it over.** `link_item(key, url)` attaches the PR;
 `transition_item(key, version, "In Review")` moves the item. If a transition is refused,
 the workflow does not allow it from the current state - read `get_workflow(project)` rather
