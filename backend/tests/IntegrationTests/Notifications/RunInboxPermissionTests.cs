@@ -19,6 +19,7 @@ public sealed class RunInboxPermissionTests(PostgresFixture postgres, GarageFixt
     [InlineData(NotificationKind.RunSucceeded)]
     [InlineData(NotificationKind.RunFailed)]
     [InlineData(NotificationKind.RunNeedsInput)]
+    [InlineData(NotificationKind.RunRefined)]
     public async Task inbox_and_unread_count_apply_current_factory_permission_before_paging(NotificationKind kind)
     {
         var ct = TestContext.Current.CancellationToken;

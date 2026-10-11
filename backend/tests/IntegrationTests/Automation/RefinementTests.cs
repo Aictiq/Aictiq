@@ -178,6 +178,8 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
 
         var finished = await StagedRunFinishedAsync(claimed.RunId);
         Assert.True(finished.Refinement);
+        Assert.True(finished.NeedsInput);
+        Assert.False(finished.Refined);
         Assert.Null(finished.OnSuccessStateId);
         Assert.Null(finished.OnFailureStateId);
 
@@ -244,9 +246,12 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
         var failed = await GetRefinementAsync(ItemKey);
         Assert.Equal(RefinementStatus.Failed, failed.Status);
         Assert.Contains("without submitting", failed.Summary);
+        var unanswered = await StagedRunFinishedAsync(claimed.RunId);
+        Assert.False(unanswered.NeedsInput);
+        Assert.False(unanswered.Refined);
 
         // Try again; this time the agent rewrites the ticket and says it is ready.
-        await InvokeRunFinishedAsync(await StagedRunFinishedAsync(claimed.RunId));
+        await InvokeRunFinishedAsync(unanswered);
         await RefineAsync(ItemKey);
         var retry = await ClaimAsync(runner);
         await using (var agent = await ConnectAsync(retry.AgentToken))
@@ -257,6 +262,11 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
             }, cancellationToken: Ct);
             Assert.NotEqual(true, ready.IsError);
         }
+        (await StartedAsync(runner, retry.RunId)).EnsureSuccessStatusCode();
+        (await FinishAsync(runner, retry.RunId, RunOutcomes.Succeeded, "Refined.")).EnsureSuccessStatusCode();
+        var refined = await StagedRunFinishedAsync(retry.RunId);
+        Assert.True(refined.Refined);
+        Assert.False(refined.NeedsInput);
         var view = await GetRefinementAsync(ItemKey);
         Assert.Equal(RefinementStatus.Ready, view.Status);
 

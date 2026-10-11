@@ -22,14 +22,23 @@ namespace Aictiq.IntegrationTests.Notifications;
 [Trait("Category", "Notifications")]
 public sealed class RunEmailPermissionTests(PostgresFixture postgres, GarageFixture garage)
 {
+    private const string Implement = "implement", Chat = "chat", Refine = "refine",
+        RefineNeedsInput = "refine-needs-input", RefineReady = "refine-ready";
+
     [Theory]
-    [InlineData(RunOutcomes.Succeeded, false, NotificationKind.RunSucceeded)]
-    [InlineData(RunOutcomes.Failed, false, NotificationKind.RunFailed)]
-    [InlineData(RunOutcomes.TimedOut, false, NotificationKind.RunFailed)]
-    [InlineData(RunOutcomes.Cancelled, false, NotificationKind.RunFailed)]
-    [InlineData(RunOutcomes.Succeeded, true, NotificationKind.RunNeedsInput)]
+    [InlineData(RunOutcomes.Succeeded, Implement, NotificationKind.RunSucceeded, "The run on WEB-1 succeeded.")]
+    [InlineData(RunOutcomes.Failed, Implement, NotificationKind.RunFailed, "The run on WEB-1 failed.")]
+    [InlineData(RunOutcomes.TimedOut, Implement, NotificationKind.RunFailed, "The run on WEB-1 timed out.")]
+    [InlineData(RunOutcomes.Cancelled, Implement, NotificationKind.RunFailed, "The run on WEB-1 was cancelled.")]
+    [InlineData(RunOutcomes.Succeeded, Chat, NotificationKind.RunSucceeded, "The run on WEB-1 succeeded.")]
+    [InlineData(RunOutcomes.Succeeded, RefineNeedsInput, NotificationKind.RunNeedsInput, "The refine run on WEB-1 needs your input.")]
+    [InlineData(RunOutcomes.Succeeded, RefineReady, NotificationKind.RunRefined, "WEB-1 is refined and ready for review.")]
+    [InlineData(RunOutcomes.Succeeded, Refine, NotificationKind.RunFailed, "The refine run on WEB-1 finished without a refined ticket.")]
+    [InlineData(RunOutcomes.Failed, Refine, NotificationKind.RunFailed, "The run on WEB-1 failed.")]
+    [InlineData(RunOutcomes.TimedOut, Refine, NotificationKind.RunFailed, "The run on WEB-1 timed out.")]
+    [InlineData(RunOutcomes.Cancelled, Refine, NotificationKind.RunFailed, "The run on WEB-1 was cancelled.")]
     public async Task run_events_exclude_stakeholder_requesters_and_assignees_but_email_operators(
-        string outcome, bool needsInput, NotificationKind expectedKind)
+        string outcome, string run, NotificationKind expectedKind, string expectedMessage)
     {
         var ct = TestContext.Current.CancellationToken;
         await using var context = await CreateAsync(appRole: true);
@@ -48,7 +57,10 @@ public sealed class RunEmailPermissionTests(PostgresFixture postgres, GarageFixt
 
         RunFinished Finished(string requestedBy) => new(organization.Id, project.Id, item.Id, item.Key,
             Guid.NewGuid(), "agent", outcome, null, null, "Completed work", null, "Operator-only failure detail")
-            { RequestedBy = requestedBy, NeedsInput = needsInput, Refinement = needsInput };
+        {
+            RequestedBy = requestedBy, Chat = run == Chat, Refinement = run.StartsWith(Refine, StringComparison.Ordinal),
+            NeedsInput = run == RefineNeedsInput, Refined = run == RefineReady
+        };
 
         await HandleAsync(context, Finished(stakeholder.User.Id), ct);
         await using var scope = context.Factory.Services.CreateAsyncScope();
@@ -63,6 +75,7 @@ public sealed class RunEmailPermissionTests(PostgresFixture postgres, GarageFixt
         var notification = Assert.Single(await db.Notifications.ToListAsync(ct));
         Assert.Equal(admin.User.Id, notification.UserId);
         Assert.Equal(expectedKind, notification.Kind);
+        Assert.Equal(expectedMessage, notification.Message);
         var mail = Assert.Single(await db.EmailOutbox.ToListAsync(ct));
         Assert.Equal(ApiTestContext.AdminEmail, mail.ToAddress);
         Assert.Contains($"/o/run-mail/factory/runs/{eligibleEvent.RunId}", mail.BodyText);
@@ -76,6 +89,7 @@ public sealed class RunEmailPermissionTests(PostgresFixture postgres, GarageFixt
     [InlineData(NotificationKind.RunSucceeded)]
     [InlineData(NotificationKind.RunFailed)]
     [InlineData(NotificationKind.RunNeedsInput)]
+    [InlineData(NotificationKind.RunRefined)]
     public async Task immediate_delivery_rechecks_factory_permission_for_stored_run_notifications(NotificationKind kind)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -145,7 +159,8 @@ public sealed class RunEmailPermissionTests(PostgresFixture postgres, GarageFixt
         await AddMemberAsync(context, organization.Id, crossOrganization.User.Id, false, ct);
         await AddMemberAsync(context, otherOrganization.Id, crossOrganization.User.Id, true, ct);
         await AddMemberAsync(context, organization.Id, stakeholder.User.Id, false, ct);
-        var runKinds = new[] { NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput };
+        var runKinds = new[] { NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput,
+            NotificationKind.RunRefined };
         await using (var scope = context.Factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();

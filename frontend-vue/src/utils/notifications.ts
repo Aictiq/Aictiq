@@ -25,6 +25,7 @@ export const notificationKinds: NotificationKind[] = [
   'runSucceeded',
   'runFailed',
   'runNeedsInput',
+  'runRefined',
 ]
 
 const kindLabels: Record<NotificationKind, string> = {
@@ -42,6 +43,7 @@ const kindLabels: Record<NotificationKind, string> = {
   runSucceeded: 'Run succeeded',
   runFailed: 'Run failed',
   runNeedsInput: 'Run needs input',
+  runRefined: 'Refinement ready',
 }
 
 /** A kind the API added after this build still reads as something rather than nothing. */

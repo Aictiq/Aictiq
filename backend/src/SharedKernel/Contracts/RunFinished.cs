@@ -57,4 +57,7 @@ public sealed record RunFinished(
 
     /// <summary>A refine run that submitted <c>needs_input</c>: a person must answer its questions.</summary>
     public bool NeedsInput { get; init; }
+
+    /// <summary>A refine run that submitted <c>ready</c>: the rewritten ticket waits for review.</summary>
+    public bool Refined { get; init; }
 }

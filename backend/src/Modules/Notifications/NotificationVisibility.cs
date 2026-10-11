@@ -15,7 +15,7 @@ public sealed class NotificationVisibility(NotificationsDbContext db, IProjectAc
             .Where(x => x.UserId == userId && (!unreadOnly || x.ReadAt == null));
         var runOrganizations = await query
             .Where(x => x.Kind == NotificationKind.RunSucceeded || x.Kind == NotificationKind.RunFailed
-                || x.Kind == NotificationKind.RunNeedsInput)
+                || x.Kind == NotificationKind.RunNeedsInput || x.Kind == NotificationKind.RunRefined)
             .Select(x => x.OrganizationId).Distinct().ToListAsync(cancellationToken);
         var permittedOrganizations = new List<Guid>();
         foreach (var organizationId in runOrganizations)
@@ -23,7 +23,7 @@ public sealed class NotificationVisibility(NotificationsDbContext db, IProjectAc
                 permittedOrganizations.Add(organizationId);
 
         return query.Where(x => (x.Kind != NotificationKind.RunSucceeded && x.Kind != NotificationKind.RunFailed
-                && x.Kind != NotificationKind.RunNeedsInput)
+                && x.Kind != NotificationKind.RunNeedsInput && x.Kind != NotificationKind.RunRefined)
             || permittedOrganizations.Contains(x.OrganizationId));
     }
 }

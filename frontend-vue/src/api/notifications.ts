@@ -15,6 +15,7 @@ export type NotificationKind =
   | 'runSucceeded'
   | 'runFailed'
   | 'runNeedsInput'
+  | 'runRefined'
 export interface Notification {
   id: string
   organizationId: string
