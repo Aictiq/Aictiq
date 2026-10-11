@@ -18,7 +18,8 @@ public sealed record RuleView(
     Guid Id, Guid ProjectId, string ProjectKey, string ProjectName, string Name,
     Guid TriggerStateId, Guid? RequiredLabelId, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, bool Enabled, string CreatedBy,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, RuleFiringSummary? LastFiring);
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, RuleFiringSummary? LastFiring,
+    IReadOnlyList<string>? RequiredTags = null);
 
 public sealed record RuleFiringSummary(DateTimeOffset At, string ItemKey, Guid? RunId, string? SkipReason);
 
@@ -26,8 +27,10 @@ public sealed record RuleFiringSummary(DateTimeOffset At, string ItemKey, Guid? 
 public sealed record RuleFiringView(
     Guid ItemId, string ItemKey, Guid EventId, DateTimeOffset At, Guid? RunId, string? RunStatus, string? SkipReason);
 
+/// <param name="RequiredTags">Fleet mode: tags the rule's runs require on top of the playbook's. Kept, but ignored, while fleet mode is off.</param>
 public sealed record CreateRuleRequest(
-    string? Name, Guid? TriggerStateId, Guid? RequiredLabelId, Guid? PlaybookId, string? AgentId, bool? Enabled = true);
+    string? Name, Guid? TriggerStateId, Guid? RequiredLabelId, Guid? PlaybookId, string? AgentId, bool? Enabled = true,
+    IReadOnlyList<string>? RequiredTags = null);
 
 /// <summary>
 /// <see cref="RequiredLabelId"/> follows <c>UpdatePlaybookRequest</c>'s pattern for
@@ -49,6 +52,8 @@ public sealed class UpdateRuleRequest
     public Guid? PlaybookId { get; init; }
     public string? AgentId { get; init; }
     public bool? Enabled { get; init; }
+    /// <summary>Fleet mode: the rule's required tags, replacing the old ones. Null leaves them.</summary>
+    public IReadOnlyList<string>? RequiredTags { get; init; }
     public uint Version { get; init; }
 
     [JsonIgnore] public bool HasRequiredLabelId { get; private set; }
@@ -149,6 +154,8 @@ public static class RuleEndpoints
         var errors = await ValidateAsync(db, project.Id, user.UserId!,
             request.Name, request.TriggerStateId, request.RequiredLabelId, request.PlaybookId, request.AgentId,
             workflows, labels, pages, access, agents, ct);
+        var requiredTags = FleetTags.Normalize(request.RequiredTags);
+        if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
         if (errors.Count > 0) return Validation(errors);
 
         var now = clock.GetUtcNow();
@@ -162,6 +169,7 @@ public static class RuleEndpoints
             PlaybookId = request.PlaybookId!.Value,
             AgentUserId = request.AgentId!,
             Enabled = request.Enabled ?? true,
+            RequiredTags = requiredTags!,
             CreatedBy = user.UserId!,
             CreatedAt = now,
             UpdatedAt = now,
@@ -191,6 +199,8 @@ public static class RuleEndpoints
         var errors = await ValidateAsync(db, project.Id, user.UserId!,
             name, triggerStateId, requiredLabelId, playbookId, agentId,
             workflows, labels, pages, access, agents, ct);
+        var requiredTags = request.RequiredTags is null ? row.RequiredTags : FleetTags.Normalize(request.RequiredTags);
+        if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
         if (errors.Count > 0) return Validation(errors);
 
         row.Name = name.Trim();
@@ -199,6 +209,7 @@ public static class RuleEndpoints
         row.PlaybookId = playbookId;
         row.AgentUserId = agentId;
         row.Enabled = request.Enabled ?? row.Enabled;
+        row.RequiredTags = requiredTags!;
         row.UpdatedAt = clock.GetUtcNow();
         db.Entry(row).Property(rule => rule.Version).OriginalValue = request.Version;
         try { await db.SaveChangesAsync(ct); }
@@ -299,7 +310,7 @@ public static class RuleEndpoints
                 rule.TriggerStateId, rule.RequiredLabelId, rule.PlaybookId, playbooks.GetValueOrDefault(rule.PlaybookId),
                 rule.AgentUserId, people.TryGetValue(rule.AgentUserId, out var agent) ? agent.DisplayName : null,
                 rule.Enabled, rule.CreatedBy, rule.CreatedAt, rule.UpdatedAt, rule.Version,
-                lastFirings.GetValueOrDefault(rule.Id));
+                lastFirings.GetValueOrDefault(rule.Id), rule.RequiredTags);
         }).ToList();
     }
 

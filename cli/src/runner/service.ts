@@ -18,6 +18,8 @@ export interface ServiceOptions {
   /** Absolute path of the CLI entry script. */
   entry: string
   parallel: string
+  /** `runner start --tag`, already normalized; one comma-separated argument, as `--tag a,b` takes it. */
+  tags?: string[]
   /** The PATH the service runs with, so it finds git and every harness. */
   path: string
   /** The home directory; macOS logs go below it. */
@@ -61,7 +63,7 @@ export function serviceDefinition(platform: ServicePlatform, options: ServiceOpt
   }
 }
 
-export function systemdUnit({ node, entry, parallel, path }: ServiceOptions): string {
+export function systemdUnit({ node, entry, parallel, tags, path }: ServiceOptions): string {
   return `# Save as ~/.config/systemd/user/aictiq-runner.service, then:
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now aictiq-runner
@@ -77,7 +79,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${node} ${entry} runner start --parallel ${parallel}
+ExecStart=${node} ${entry} runner start --parallel ${parallel}${tags?.length ? ` --tag ${tags.join(',')}` : ''}
 Restart=on-failure
 RestartSec=10
 # Exit ${RevokedExitCode} means the secret was revoked; restarting cannot fix that.
@@ -103,7 +105,7 @@ export const LaunchdLabel = 'com.aictiq.runner'
  * instead of letting them finish. Paths reach the wrapper as arguments, never inside the
  * script text, so no quoting can break.
  */
-const LaunchdWrapper = `"$1" "$2" runner start --parallel "$3" &
+const launchdWrapper = (tagged: boolean) => `"$1" "$2" runner start --parallel "$3"${tagged ? ' --tag "$4"' : ''} &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM INT
 wait "$child"
@@ -112,7 +114,7 @@ while kill -0 "$child" 2>/dev/null; do wait "$child"; status=$?; done
 if [ "$status" -eq ${RevokedExitCode} ]; then exit 0; fi
 exit "$status"`
 
-export function launchdAgent({ node, entry, parallel, path, home }: ServiceOptions): string {
+export function launchdAgent({ node, entry, parallel, tags, path, home }: ServiceOptions): string {
   // A macOS path even when the definition is generated elsewhere (`--platform macos`).
   const log = posix.join(home, 'Library', 'Logs', 'aictiq-runner.log')
   const plistPath = `~/Library/LaunchAgents/${LaunchdLabel}.plist`
@@ -138,11 +140,11 @@ export function launchdAgent({ node, entry, parallel, path, home }: ServiceOptio
   <array>
     ${string('/bin/sh')}
     ${string('-c')}
-    ${string(LaunchdWrapper)}
+    ${string(launchdWrapper(Boolean(tags?.length)))}
     ${string('aictiq-runner')}
     ${string(node)}
     ${string(entry)}
-    ${string(parallel)}
+    ${string(parallel)}${tags?.length ? `\n    ${string(tags.join(','))}` : ''}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -182,7 +184,7 @@ export const ScheduledTaskName = 'Aictiq runner'
  * that exits non-zero, so the task runs a loop script that restarts the runner itself and
  * stops on the revoked exit. The loop also writes the log, since a task has no console.
  */
-export function scheduledTaskInstaller({ node, entry, parallel, path }: ServiceOptions): string {
+export function scheduledTaskInstaller({ node, entry, parallel, tags, path }: ServiceOptions): string {
   const loop = `# Written by \`aictiq runner install-service\`; the "${ScheduledTaskName}" task runs it at logon.
 $ErrorActionPreference = 'Continue'
 $env:PATH = ${ps(path)}
@@ -190,7 +192,7 @@ $env:${ServiceEnvironmentVariable} = '1'
 $log = Join-Path $env:LOCALAPPDATA 'aictiq\\runner.log'
 while ($true) {
   # "$_" turns stderr's error records back into the plain lines the runner wrote.
-  & ${ps(node)} ${ps(entry)} runner start --parallel ${ps(parallel)} 2>&1 |
+  & ${ps(node)} ${ps(entry)} runner start --parallel ${ps(parallel)}${tags?.length ? ` --tag ${ps(tags.join(','))}` : ''} 2>&1 |
     ForEach-Object { "$_" } | Add-Content -Path $log -Encoding utf8
   if ($LASTEXITCODE -eq ${RevokedExitCode}) {
     Add-Content -Path $log -Encoding utf8 -Value 'The runner secret was revoked; not restarting.'

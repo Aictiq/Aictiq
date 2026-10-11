@@ -376,6 +376,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/settings/OrgAgentsView.vue'),
         meta: { requiresAuth: true, title: 'Agents' },
       },
+      {
+        path: 'fleet',
+        name: 'org-settings-fleet',
+        component: () => import('@/views/settings/OrgFleetView.vue'),
+        meta: { requiresAuth: true, title: 'Fleet' },
+      },
       { path: 'billing', name: 'org-settings-billing', component: () => import('@/views/settings/OrgBillingView.vue'), meta: { requiresAuth: true, title: 'Billing' } },
       {
         path: 'integrations',

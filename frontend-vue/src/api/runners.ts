@@ -75,6 +75,8 @@ export interface RunnerCapabilities {
   usageLimits?: RunnerUsageLimits[] | null
   /** Claude usage is read from Anthropic between runs (`aictiq runner usage --claude-oauth on`). */
   claudeUsagePoll?: boolean | null
+  /** Fleet mode: the tags the CLI was started with (`--tag`). Absent from older runners. */
+  tags?: string[] | null
 }
 
 export interface Runner {
@@ -90,6 +92,12 @@ export interface Runner {
   isOnline: boolean
   isDisabled: boolean
   createdAt: string
+  /** Fleet mode: the tags an Admin gave it here. Absent from older servers. */
+  tags?: string[]
+  /** The admin tags, the CLI's `--tag`s, `os:<os>` and `arch:<arch>`: what required tags match. */
+  effectiveTags?: string[]
+  /** Enrolled with the fleet's token; it removes itself once idle. */
+  ephemeral?: boolean
 }
 
 export interface RunnerIssued {
@@ -156,6 +164,8 @@ export interface RunnerLoad {
   unassignedQueued: number
   unassignedScheduled: number
   nextUnassignedScheduledFor: string | null
+  /** When the oldest due run still waiting was queued (or became due); null when none waits. */
+  oldestQueuedSince?: string | null
 }
 
 export const getRunnerLoad = (slug: string) => apiFetch<RunnerLoad>(`/orgs/${slug}/runners/load`)
@@ -172,6 +182,8 @@ export interface RunnerChoice {
   isOnline: boolean
   /** Harness allowances the runner last reported. Absent from older servers and runners. */
   usageLimits?: RunnerUsageLimits[] | null
+  /** Its effective tags, for fleet mode's required tags. Absent from older servers. */
+  tags?: string[]
 }
 
 export const listRunnerChoices = (slug: string) =>
@@ -195,12 +207,13 @@ export const registerRunnerOnMachine = (slug: string, sameMachineAs: string, nam
 
 /**
  * No version to echo: the runner rewrites its own row on every heartbeat, so a version token
- * would make every edit here race a machine. Both fields are absolute assignments.
+ * would make every edit here race a machine. Every field is an absolute assignment; `tags`
+ * replaces the admin tags (fleet mode), never the CLI's own.
  */
 export const updateRunner = (
   slug: string,
   runnerId: string,
-  body: { name?: string; disabled?: boolean },
+  body: { name?: string; disabled?: boolean; tags?: string[] },
 ) => apiFetch<Runner>(`/orgs/${slug}/runners/${runnerId}`, { method: 'PATCH', body })
 
 /** Retires it for good: its secret stops working and it leaves the roster. */

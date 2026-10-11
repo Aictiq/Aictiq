@@ -30,6 +30,12 @@ export interface RunnerProfile {
    * project has no `workspaces` entry. Absolute, or starting with `~/`.
    */
   repoRoots: string[]
+  /**
+   * Set by `aictiq runner enroll` (fleet mode): the runner exists only for this machine's life.
+   * `runner start --idle-exit` deregisters it and drops the profile when it goes idle. Absent
+   * means a runner registered by hand, which is never deregistered.
+   */
+  ephemeral?: true
 }
 
 /**
@@ -127,6 +133,7 @@ export function writeRunnerConfig(config: RunnerConfig, path = runnerConfigPath(
       token: profile.token,
       workspaces: profile.workspaces,
       repoRoots: profile.repoRoots,
+      ...(profile.ephemeral ? { ephemeral: true } : {}),
     })),
   }
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
@@ -160,7 +167,7 @@ const UuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 function readProfile(value: unknown): RunnerProfile | null {
   if (typeof value !== 'object' || value === null) return null
-  const { url, token, organization, workspaces, repoRoots } = value as Record<string, unknown>
+  const { url, token, organization, workspaces, repoRoots, ephemeral } = value as Record<string, unknown>
   if (typeof url !== 'string' || typeof token !== 'string') return null
 
   const mapped: Record<string, string> = {}
@@ -178,6 +185,7 @@ function readProfile(value: unknown): RunnerProfile | null {
     ...(typeof organization === 'string' && organization !== '' ? { organization } : {}),
     workspaces: mapped,
     repoRoots: roots,
+    ...(ephemeral === true ? { ephemeral: true as const } : {}),
   }
 }
 

@@ -16,7 +16,7 @@ public sealed record PlaybookView(
     Guid Id, Guid ProjectId, string Name, Guid? WikiPageId, string Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
     string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false,
-    IReadOnlyList<Guid>? StagePlaybookIds = null);
+    IReadOnlyList<Guid>? StagePlaybookIds = null, IReadOnlyList<string>? RequiredTags = null);
 
 /// <summary>A playbook's follow-up playbooks, in the order they run; empty removes them all.</summary>
 public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybookIds);
@@ -25,9 +25,11 @@ public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybook
 /// What agents should follow. Aictiq files it as a page in the wiki's Factory section, named
 /// after the playbook. Give this or <paramref name="WikiPageId"/>, a page already in that section.
 /// </param>
+/// <param name="RequiredTags">Fleet mode: tags every run of the playbook requires of its runner. Kept, but ignored, while fleet mode is off.</param>
 public sealed record CreatePlaybookRequest(
     string? Name, Guid? WikiPageId, string? Harness,
-    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null, bool WorkOnDefaultBranch = false);
+    Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null, bool WorkOnDefaultBranch = false,
+    IReadOnlyList<string>? RequiredTags = null);
 
 /// <param name="InFactorySection">
 /// False for a playbook from before its page had to live in the Factory section: saving new
@@ -55,6 +57,8 @@ public sealed class UpdatePlaybookRequest
     }
     public int? MaxMinutes { get; init; }
     public bool? WorkOnDefaultBranch { get; init; }
+    /// <summary>Fleet mode: the playbook's required tags, replacing the old ones. Null leaves them.</summary>
+    public IReadOnlyList<string>? RequiredTags { get; init; }
     /// <summary>New instructions: a new revision of the playbook's Factory page, or a new page there when it has none.</summary>
     public string? InstructionsMarkdown { get; init; }
     public uint Version { get; init; }
@@ -164,6 +168,8 @@ public static class PlaybookEndpoints
             projectId, workflows, ct);
         await ValidateInstructionsAsync(errors, request.InstructionsMarkdown,
             request.InstructionsMarkdown is null ? request.WikiPageId : null, required: true, projectId, factoryPages, ct);
+        var requiredTags = FleetTags.Normalize(request.RequiredTags);
+        if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
         if (errors.Count > 0) return Validation(errors);
         // ux_playbooks_project_name would refuse the row anyway, but only after its page was written.
         if (await NameTakenAsync(db, projectId, request.Name!, null, ct))
@@ -186,6 +192,7 @@ public static class PlaybookEndpoints
             OnFailureStateId = request.OnFailureStateId,
             MaxMinutes = request.MaxMinutes,
             WorkOnDefaultBranch = request.WorkOnDefaultBranch,
+            RequiredTags = requiredTags!,
             CreatedBy = user.UserId!,
             CreatedAt = now,
             UpdatedAt = now,
@@ -224,6 +231,8 @@ public static class PlaybookEndpoints
         // instructions are next saved; only a page named in this request must be there.
         await ValidateInstructionsAsync(errors, request.InstructionsMarkdown,
             request.InstructionsMarkdown is null ? request.WikiPageId : null, required: pageId is null, projectId, factoryPages, ct);
+        var requiredTags = request.RequiredTags is null ? row.RequiredTags : FleetTags.Normalize(request.RequiredTags);
+        if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
         if (errors.Count > 0) return Validation(errors);
         if (await NameTakenAsync(db, projectId, name, row.Id, ct))
             return Conflict("A playbook with this name already exists in this project.");
@@ -244,6 +253,7 @@ public static class PlaybookEndpoints
         row.OnFailureStateId = failureStateId;
         row.MaxMinutes = maxMinutes;
         row.WorkOnDefaultBranch = request.WorkOnDefaultBranch ?? row.WorkOnDefaultBranch;
+        row.RequiredTags = requiredTags!;
         row.UpdatedAt = clock.GetUtcNow();
         db.Entry(row).Property(playbook => playbook.Version).OriginalValue = request.Version;
         try { await db.SaveChangesAsync(ct); }
@@ -521,7 +531,7 @@ public static class PlaybookEndpoints
     private static PlaybookView ToView(Playbook row, IReadOnlyList<Guid> stagePlaybookIds) => new(
         row.Id, row.ProjectId, row.Name, row.WikiPageId, row.Harness,
         row.OnSuccessStateId, row.OnFailureStateId, row.MaxMinutes, row.IsDefault,
-        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds);
+        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds, row.RequiredTags);
 
     private static FactorySettingsView ToView(ProjectFactorySettings row) => new(
         row.ProjectId, (short)row.RepoSource, row.RepoFullName, row.DefaultBranch,

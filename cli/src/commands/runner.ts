@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { arch, homedir, platform } from 'node:os'
 import { resolve } from 'node:path'
 import type { GlobalOptions } from '../context.js'
-import { CliError, ExitCode } from '../errors.js'
+import { CliError, ExitCode, formatProblem } from '../errors.js'
 import { print, printJson, renderFields, renderTable } from '../output.js'
 import { promptSecret } from '../prompt.js'
 import { packageRoot, version } from '../version.js'
@@ -19,6 +19,7 @@ import {
 } from '../runner/config.js'
 import type { RunnerConfig, RunnerProfile } from '../runner/config.js'
 import { executeRun } from '../runner/execute.js'
+import { IdleCheckMs, IdleClock, idleExitMinutes, retireEphemeral } from '../runner/idle.js'
 import { describeMissing, harnesses, probeAllHarnesses } from '../runner/harness/index.js'
 import { readUsageLimits, recordUsageLimits, usageLimitsPath } from '../runner/limits.js'
 import { extendProcessPath, harnessDirs, withHarnessDirs } from '../runner/path.js'
@@ -32,6 +33,7 @@ import {
 import { RunnerLoop, RunnerRevokedError } from '../runner/loop.js'
 import { RunnerSupervisor } from '../runner/supervisor.js'
 import { UsagePoller } from '../runner/usagePoll.js'
+import { collectTags, normalizeTags } from '../runner/tags.js'
 import type { RunnerCapabilities, UpdateFailure } from '../runner/types.js'
 import {
   cliEntryPath,
@@ -88,69 +90,50 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         )
       }
       const url = rawUrl.replace(/\/+$/, '')
+      await storeRegistration(globals, { url, token, name: options.name })
+    })
 
-      const existing = readRunnerConfig()
-      const machineId = existing?.machineId ?? randomUUID()
-      // Verify before writing, as `auth login` does: a stored secret that never worked
-      // turns into a service that restarts forever somewhere nobody is looking.
-      // A registration runs in a terminal, so it is not a service yet: the guide says so rather
-      // than "cannot tell" until `runner start` reports for itself.
-      const capabilities = { ...(await probe(1, machineId)), service: false }
-      const hello = await new RunnerClient({ baseUrl: url, token })
-        .hello(capabilities)
-        .catch((error: unknown) => {
-          throw asCliError(error)
-        })
-
-      const profiles = existing?.profiles ?? []
-      const index = await matchingProfile(profiles, url, token, hello.organizationSlug, capabilities)
-      const previous = index >= 0 ? profiles[index] : undefined
-      const profile: RunnerProfile = {
-        url,
-        token,
-        organization: hello.organizationSlug,
-        // Re-registering one organization (a rotated secret) keeps the repository map
-        // someone built up; a new organization starts with its own, empty one.
-        workspaces: previous?.workspaces ?? {},
-        repoRoots: previous?.repoRoots ?? [],
-      }
-      const next = index >= 0 ? profiles.map((p, i) => (i === index ? profile : p)) : [...profiles, profile]
-      const name = options.name ?? existing?.name
-      writeRunnerConfig({
-        machineId,
-        ...(name ? { name } : {}),
-        profiles: next,
-        attachments: existing?.attachments ?? { maxCount: DefaultAttachmentMaxCount, maxBytes: DefaultAttachmentMaxBytes },
-      })
-
-      if (globals().json) {
-        printJson({
-          url,
-          runner: hello,
-          capabilities,
-          configPath: runnerConfigPath(),
-          organizations: next.map(profileLabel),
-        })
-        return
-      }
-      const organizations = next.map(profileLabel)
-      const lines = [
-        `Registered runner "${hello.name}" with ${url} (${hello.organizationSlug}).`,
-        `Harnesses: ${capabilities.harnesses.map((h) => h.name).join(', ') || 'none found on PATH'}`,
-        `Config written to ${runnerConfigPath()}.`,
-      ]
-      if (next.length > 1) {
-        lines.push(
-          '',
-          `This machine now runs for ${next.length} organizations: ${organizations.join(', ')}.`,
-          'Runs from different organizations never execute at the same time.',
-          `Repository roots and mappings are per organization: \`aictiq runner root <path> --org ${hello.organizationSlug}\`.`,
-          'A running `aictiq runner start` picks this up within a few seconds; otherwise start it.',
+  runner
+    .command('enroll')
+    .description(
+      'Fleet mode: create an ephemeral runner with an enrollment token (jfe_…) and store its secret, as `register` does',
+    )
+    .option('--url <url>', 'Base URL of the Aictiq instance')
+    .option('--token <token>', 'Enrollment token; read from stdin when omitted')
+    .option('--name <name>', 'The runner\'s name (default: the instance picks one)')
+    .option('--tag <tag>', 'A tag for this runner; repeat it or separate tags with commas', collectTags)
+    .action(async (options: { url?: string; token?: string; name?: string; tag?: string[] }) => {
+      const global = globals()
+      const rawUrl = options.url ?? global.url
+      if (!rawUrl) {
+        throw new CliError(
+          'Pass --url with the address of your Aictiq instance.',
+          ExitCode.Validation,
         )
-      } else {
-        lines.push('Start it with `aictiq runner start`.')
       }
-      print(lines.join('\n'))
+      const tags = normalizeTags(options.tag)
+      const enrollmentToken =
+        options.token ??
+        global.token ??
+        process.env.AICTIQ_ENROLL_TOKEN ??
+        (await promptSecret('Enrollment token: '))
+      if (!enrollmentToken?.startsWith('jfe_')) {
+        throw new CliError('An enrollment token starts with jfe_.', ExitCode.Validation)
+      }
+      const url = rawUrl.replace(/\/+$/, '')
+      const name = options.name?.trim() || null
+      const enrollment = await new RunnerClient({ baseUrl: url, token: enrollmentToken })
+        .enroll(name, tags)
+        .catch((error: unknown) => {
+          throw enrollmentError(error, name)
+        })
+      await storeRegistration(globals, {
+        url,
+        token: enrollment.secret,
+        name: name ?? undefined,
+        tags,
+        ephemeral: true,
+      })
     })
 
   runner
@@ -337,18 +320,27 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     .option('--keep-workspaces', 'Leave each run’s checkout on disk after it finishes')
     .option('--workspace-root <path>', 'Where run checkouts are created')
     .option('--no-auto-update', 'Only log a newer CLI on npm; never install it and restart')
+    .option('--tag <tag>', 'A tag reported to every organization; repeat it or separate tags with commas', collectTags)
+    .option(
+      '--idle-exit <minutes>',
+      'Exit once no run has been active for this many minutes (1-1440), deregistering ephemeral runners first',
+    )
     .action(
       async (options: {
         parallel: string
         keepWorkspaces?: boolean
         workspaceRoot?: string
         autoUpdate: boolean
+        tag?: string[]
+        idleExit?: string
       }) => {
         const config = requireConfig()
         const parallel = Number.parseInt(options.parallel, 10)
         if (!Number.isInteger(parallel) || parallel < 1 || parallel > 16) {
           throw new CliError('--parallel is between 1 and 16.', ExitCode.Validation)
         }
+        const tags = normalizeTags(options.tag)
+        const idleMinutes = idleExitMinutes(options.idleExit)
         // Keeps the machine id, and rewrites a file from before profiles in the new shape.
         writeRunnerConfig(config)
 
@@ -402,7 +394,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                   const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
                   await usage.refresh()
                   return {
-                    ...(await probe(parallel, config.machineId, own)),
+                    ...(await probe(parallel, config.machineId, own, tags)),
                     service: startedAsService(),
                     ...(updateFailure ? { updateFailure } : {}),
                     usageLimits: readUsageLimits(),
@@ -413,6 +405,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                 floor,
                 floorKey: profileKey(profile),
                 onHello,
+                onActivity: () => idle?.touch(),
                 execute: (run, hello, shutdown) => {
                   // Re-read per run, so a new mapping or root applies without restarting the
                   // runner. Only this profile's: another organization's roots never apply.
@@ -448,6 +441,9 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         const updater = new SelfUpdater({ current: version, packageRoot, entry: cliEntry(), log })
         /** The version to install once the runs in flight are done, when a check found one. */
         let target: string | null = null
+        /** Counts from now: a runner that never gets a run still leaves after the idle time. */
+        const idle = idleMinutes === null ? null : new IdleClock(idleMinutes * 60_000)
+        let idled = false
         let supervisor = createSupervisor()
         let interrupted = false
 
@@ -473,7 +469,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             )
             return
           }
-          if (interrupted || target) return
+          if (interrupted || idled || target) return
           try {
             await updater.installation()
           } catch (error) {
@@ -515,10 +511,20 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           // Before claiming anything, so an outdated runner upgrades without a run to wait for.
           await check()
           const timer = setInterval(() => void check(), UpdateCheckIntervalMs)
+          // `expired` is false while any run is in flight, and stopping waits for the runs in
+          // flight anyway (one claimed in the same instant included), so no run is cut short.
+          const idleTimer = idle
+            ? setInterval(() => {
+                if (idled || interrupted || target || !idle.expired(supervisor.inFlight)) return
+                idled = true
+                log(`No run for ${idleMinutes} min; stopping (--idle-exit)`)
+                supervisor.stop()
+              }, IdleCheckMs)
+            : undefined
           try {
-            while (!upgraded && !interrupted) {
+            while (!upgraded && !interrupted && !idled) {
               if (!target) await supervisor.run()
-              if (interrupted || !target) break
+              if (interrupted || idled || !target) break
               try {
                 upgraded = await updater.install(target)
               } catch (error) {
@@ -530,6 +536,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
             }
           } finally {
             clearInterval(timer)
+            clearInterval(idleTimer)
             clearTimeout(retry)
           }
         } catch (error) {
@@ -537,6 +544,17 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
         } finally {
           process.off('SIGINT', onSignal)
           process.off('SIGTERM', onSignal)
+        }
+        if (idled && !upgraded) {
+          await retireEphemeral({
+            readConfig: () => readRunnerConfig(),
+            writeConfig: (current) => writeRunnerConfig(current),
+            client: (profile) => new RunnerClient({ baseUrl: profile.url, token: profile.token }),
+            local: log,
+          })
+          log('Idle; exiting')
+          process.exitCode = ExitCode.Ok
+          return
         }
         if (!upgraded) return
         if (interrupted) {
@@ -646,7 +664,8 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     )
     .option('--parallel <n>', 'Runs executed at the same time', '1')
     .option('--platform <platform>', 'linux, macos or windows (default: this machine)')
-    .action((options: { parallel: string; platform?: string }) => {
+    .option('--tag <tag>', 'A tag the runner reports; repeat it or separate tags with commas', collectTags)
+    .action((options: { parallel: string; platform?: string; tag?: string[] }) => {
       const platform = options.platform ?? servicePlatform()
       if (!isServicePlatform(platform)) {
         throw new CliError(
@@ -659,6 +678,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           node: process.execPath,
           entry: cliEntry(),
           parallel: options.parallel,
+          tags: normalizeTags(options.tag),
           // `runner start` appends these again on every probe, so a harness installed later
           // in one of them is found without regenerating the definition.
           path:
@@ -673,10 +693,91 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
   return runner
 }
 
+/**
+ * What `register` and `enroll` share once they hold a `jrn_` secret: say hello with it, then
+ * store it as this organization's profile. `enroll` marks the profile ephemeral.
+ */
+async function storeRegistration(
+  globals: () => GlobalOptions,
+  registration: { url: string; token: string; name?: string; tags?: string[]; ephemeral?: boolean },
+): Promise<void> {
+  const { url, token } = registration
+  const existing = readRunnerConfig()
+  const machineId = existing?.machineId ?? randomUUID()
+  // Verify before writing, as `auth login` does: a stored secret that never worked
+  // turns into a service that restarts forever somewhere nobody is looking.
+  // A registration runs in a terminal, so it is not a service yet: the guide says so rather
+  // than "cannot tell" until `runner start` reports for itself.
+  const capabilities = { ...(await probe(1, machineId, undefined, registration.tags)), service: false }
+  const hello = await new RunnerClient({ baseUrl: url, token })
+    .hello(capabilities)
+    .catch((error: unknown) => {
+      throw asCliError(error)
+    })
+
+  const profiles = existing?.profiles ?? []
+  const index = await matchingProfile(profiles, url, token, hello.organizationSlug, capabilities)
+  const previous = index >= 0 ? profiles[index] : undefined
+  const profile: RunnerProfile = {
+    url,
+    token,
+    organization: hello.organizationSlug,
+    // Re-registering one organization (a rotated secret) keeps the repository map
+    // someone built up; a new organization starts with its own, empty one.
+    workspaces: previous?.workspaces ?? {},
+    repoRoots: previous?.repoRoots ?? [],
+    ...(registration.ephemeral ? { ephemeral: true as const } : {}),
+  }
+  const next = index >= 0 ? profiles.map((p, i) => (i === index ? profile : p)) : [...profiles, profile]
+  const name = registration.name ?? existing?.name
+  writeRunnerConfig({
+    machineId,
+    ...(name ? { name } : {}),
+    profiles: next,
+    attachments: existing?.attachments ?? { maxCount: DefaultAttachmentMaxCount, maxBytes: DefaultAttachmentMaxBytes },
+  })
+
+  if (globals().json) {
+    printJson({
+      url,
+      runner: hello,
+      capabilities,
+      configPath: runnerConfigPath(),
+      organizations: next.map(profileLabel),
+    })
+    return
+  }
+  const organizations = next.map(profileLabel)
+  const lines = [
+    registration.ephemeral
+      ? `Enrolled ephemeral runner "${hello.name}" with ${url} (${hello.organizationSlug}).`
+      : `Registered runner "${hello.name}" with ${url} (${hello.organizationSlug}).`,
+    `Harnesses: ${capabilities.harnesses.map((h) => h.name).join(', ') || 'none found on PATH'}`,
+    `Config written to ${runnerConfigPath()}.`,
+  ]
+  if (next.length > 1) {
+    lines.push(
+      '',
+      `This machine now runs for ${next.length} organizations: ${organizations.join(', ')}.`,
+      'Runs from different organizations never execute at the same time.',
+      `Repository roots and mappings are per organization: \`aictiq runner root <path> --org ${hello.organizationSlug}\`.`,
+      'A running `aictiq runner start` picks this up within a few seconds; otherwise start it.',
+    )
+  } else {
+    lines.push(
+      registration.ephemeral
+        ? 'Start it with `aictiq runner start --idle-exit <minutes>`, so it deregisters itself once idle.'
+        : 'Start it with `aictiq runner start`.',
+    )
+  }
+  print(lines.join('\n'))
+}
+
 async function probe(
   maxParallel: number,
   machineId: string,
   profile?: Pick<RunnerProfile, 'workspaces' | 'repoRoots'>,
+  tags: string[] = [],
 ): Promise<RunnerCapabilities> {
   // A service's PATH was frozen when its definition was generated, and lacks every per-user
   // directory a shell profile adds; the probe, each harness and git all use the extended one.
@@ -695,6 +796,7 @@ async function probe(
     ...(profile
       ? { workspaces: Object.keys(profile.workspaces).sort(), repoRoots: [...profile.repoRoots] }
       : {}),
+    ...(tags.length > 0 ? { tags: [...tags] } : {}),
   }
 }
 
@@ -792,6 +894,32 @@ function asCliError(error: unknown): unknown {
     )
   }
   return error
+}
+
+/** `runner enroll`'s refusals, in the terms of an enrollment token rather than a runner secret. */
+function enrollmentError(error: unknown, name: string | null): unknown {
+  if (error instanceof RunnerHttpError) {
+    if (error.status === 401) {
+      return new CliError(
+        'The enrollment token is not valid, or fleet mode is off for that organization.',
+        ExitCode.Auth,
+        error.problem,
+      )
+    }
+    if (error.status === 409) {
+      return new CliError(
+        name
+          ? `A runner named "${name}" already exists in that organization. Pass another --name.`
+          : formatProblem(error.problem, 'That runner name is taken. Pass another --name.'),
+        ExitCode.Conflict,
+        error.problem,
+      )
+    }
+    if (error.status === 400) {
+      return new CliError(formatProblem(error.problem, error.message), ExitCode.Validation, error.problem)
+    }
+  }
+  return asCliError(error)
 }
 
 function isServicePlatform(value: string): value is ServicePlatform {

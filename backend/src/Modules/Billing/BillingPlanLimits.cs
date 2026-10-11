@@ -1,5 +1,6 @@
 using Aictiq.Modules.Billing.Domain;
 using Aictiq.SharedKernel.Contracts;
+using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -19,7 +20,7 @@ namespace Aictiq.Modules.Billing;
 /// </summary>
 public sealed class BillingPlanLimits(BillingDbContext db, IOrganizationPlanUsageSource usage,
     IStorageUsageSource storage, IUserDirectory users, IOrganizationBillingState state,
-    FreeTierLedger freeTier, IOptions<BillingOptions> options) : IPlanLimits
+    FreeTierLedger freeTier, AmbientCurrentTenant tenant, IOptions<BillingOptions> options) : IPlanLimits
 {
     public async Task<SeatDecision> CanAddSeatAsync(Guid organizationId, int additional = 1, CancellationToken cancellationToken = default)
     {
@@ -95,6 +96,25 @@ public sealed class BillingPlanLimits(BillingDbContext db, IOrganizationPlanUsag
             $"The free plan allows {freeTier.Limits.MaxRunners} registered runners per organization. "
             + "Delete a runner, or upgrade to Hosted for unlimited runners.",
             options.Value.UpgradeUrl);
+    }
+
+    /// <summary>
+    /// Paid means a subscription Stripe is charging for (<see cref="SubscriptionStatuses.IsBilling"/>),
+    /// on a plan that is not one of the free ones. An evaluation is entitled to Hosted but has not
+    /// paid for it, so it is offered the upgrade like the free tiers. Self-hosted instances are
+    /// not offered fleet mode yet; support may come later.
+    /// </summary>
+    public async Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken ct = default)
+    {
+        if (SelfHosted || !options.Value.IsSaas) return FleetModeAvailability.Hidden;
+        using var scope = tenant.Use(organizationId);
+        var subscription = await db.Subscriptions.AsNoTracking()
+            .Select(x => new { x.Status, x.Plan })
+            .SingleOrDefaultAsync(ct);
+        return subscription is { } row && row.Status.IsBilling()
+            && row.Plan is not (PlanCodes.Free or PlanCodes.HostedFree or PlanCodes.SelfHosted)
+                ? FleetModeAvailability.Available
+                : FleetModeAvailability.UpgradeRequired;
     }
 
     /// <summary>

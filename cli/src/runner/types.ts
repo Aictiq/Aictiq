@@ -77,6 +77,15 @@ export interface RunnerCapabilities {
   usageLimits?: HarnessUsageLimits[]
   /** Whether this machine reads Claude usage from Anthropic between runs (`runner usage --claude-oauth`). */
   claudeUsagePoll?: boolean
+  /** `--tag` on `runner start` (or `runner enroll`): what fleet mode routes runs by. Absent when there are none. */
+  tags?: string[]
+}
+
+/** What `POST /runner/enroll` answers: a runner the enrollment token created, and its `jrn_` secret. */
+export interface RunnerEnrollment {
+  runnerId: string
+  name: string
+  secret: string
 }
 
 export interface RunnerHello {

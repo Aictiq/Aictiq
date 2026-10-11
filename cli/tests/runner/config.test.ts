@@ -8,6 +8,7 @@ import {
   runnerConfigPath,
   writeRunnerConfig,
 } from '../../src/runner/config.js'
+import type { RunnerConfig } from '../../src/runner/config.js'
 
 const machineId = '4d1c7f2e-9b1a-4c3e-8f5d-2a6b7c8d9e0f'
 
@@ -18,11 +19,12 @@ describe('runner.json', () => {
 
   it('round-trips its profiles with mode 0600 and ignores non-string workspace entries', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'aictiq-runner-')), 'runner.json')
-    const config = {
+    const config: RunnerConfig = {
       machineId,
       profiles: [
         { url: 'https://j.example', token: 'jrn_a', organization: 'acme', workspaces: { ACME: '/src/acme' }, repoRoots: ['/src/acme-clients'] },
         { url: 'https://j.example', token: 'jrn_b', organization: 'globex', workspaces: { ACME: '/src/globex-acme' }, repoRoots: [] },
+        { url: 'https://j.example', token: 'jrn_c', organization: 'initech', workspaces: {}, repoRoots: [], ephemeral: true },
       ],
       attachments: { maxCount: 10, maxBytes: 1024 },
     }
@@ -30,7 +32,8 @@ describe('runner.json', () => {
     expect(statSync(path).mode & 0o777).toBe(0o600)
     expect(readRunnerConfig(path)).toEqual(config)
 
-    writeFileSync(path, JSON.stringify({ machineId, profiles: [{ url: 'u', token: 't', workspaces: { A: '/a', B: 3 }, repoRoots: ['/r', 3, ''] }, { url: 'broken' }] }))
+    // Only `ephemeral: true` marks a profile ephemeral; anything else reads as one registered by hand.
+    writeFileSync(path, JSON.stringify({ machineId, profiles: [{ url: 'u', token: 't', workspaces: { A: '/a', B: 3 }, repoRoots: ['/r', 3, ''], ephemeral: 'yes' }, { url: 'broken' }] }))
     const read = readRunnerConfig(path)!
     expect(read.profiles).toEqual([{ url: 'u', token: 't', workspaces: { A: '/a' }, repoRoots: ['/r'] }])
     expect(read.attachments).toEqual({ maxCount: 25, maxBytes: 25 * 1024 * 1024 })

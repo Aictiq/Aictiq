@@ -21,6 +21,8 @@ import {
 import EmptyState from '@/components/common/EmptyState.vue'
 import CommandBlock from '@/components/factory/CommandBlock.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
+import FleetDowngradedNotice from '@/components/factory/FleetDowngradedNotice.vue'
+import FleetTagInput from '@/components/factory/FleetTagInput.vue'
 import RunnerLoad from '@/components/factory/RunnerLoad.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import PlanLimitNotice from '@/components/common/PlanLimitNotice.vue'
@@ -43,10 +45,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { useFleetStatus } from '@/composables/useFleetStatus'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
 import { planLimitRefusal, type PlanLimitRefusal } from '@/lib/billing'
 import { since } from '@/lib/claims'
+import {
+  fleetWaitingCount,
+  runnerTagChips,
+  runnerTagSourceLabel,
+  waitedFor,
+  type RunnerTagSource,
+} from '@/lib/fleet'
 import {
   claudeUsagePollCommand,
   claudeUsagePollDocsUrl,
@@ -87,6 +97,81 @@ const mayManage = computed(() => hasOrgRole(org.record.value?.role, 'admin'))
 const runners = ref<Runner[]>([])
 /** What the runners hold and what waits for them; null until read, or when it could not be. */
 const runnerLoad = ref<RunnerLoadData | null>(null)
+
+/**
+ * Fleet mode adds tags, slots and the queue's health to the roster. While it is not active the
+ * roster is exactly what it always was: none of what follows renders.
+ */
+const {
+  active: fleetActive,
+  downgraded: fleetDowngraded,
+  knownTags,
+  refresh: refreshFleet,
+} = useFleetStatus(slug)
+
+/** Every waiting run (for any runner and for one in particular), and how long the oldest has waited. */
+const fleetQueue = computed(() => {
+  if (!fleetActive.value || !runnerLoad.value) return null
+  return {
+    waiting: fleetWaitingCount(runnerLoad.value),
+    oldest: waitedFor(runnerLoad.value.oldestQueuedSince),
+    online: runners.value.filter((runner) => runnerStatus(runner) === 'online').length,
+  }
+})
+
+const tagChipClass: Record<RunnerTagSource, string> = {
+  admin: 'border-primary/40 text-foreground',
+  cli: '',
+  platform: 'text-muted-foreground',
+}
+
+/** The runner whose admin tags are being edited, and the tags as they stand in the dialog. */
+const editingTags = ref<Runner | null>(null)
+const tagDraft = ref<string[]>([])
+const savingTags = ref(false)
+const tagErrors = ref<string[]>([])
+
+function openTags(runner: Runner) {
+  editingTags.value = runner
+  tagDraft.value = [...(runner.tags ?? [])]
+  tagErrors.value = []
+}
+
+/**
+ * The tags the dialog cannot change: the CLI's and the platform's. One the CLI also gives
+ * stays on the runner when the admin copy is removed, so it shows here as soon as it is.
+ */
+const lockedTags = computed(() => {
+  const runner = editingTags.value
+  if (!runner) return []
+  const admin = new Set(runner.tags ?? [])
+  const cli = new Set(runner.capabilities?.tags ?? [])
+  return (runner.effectiveTags ?? [...cli]).filter(
+    (tag) => (cli.has(tag) || !admin.has(tag)) && !tagDraft.value.includes(tag),
+  )
+})
+
+async function saveTags() {
+  const runner = editingTags.value
+  if (!runner) return
+  savingTags.value = true
+  tagErrors.value = []
+  try {
+    replace(await updateRunner(slug.value, runner.id, { tags: tagDraft.value }))
+    editingTags.value = null
+    toast.saved(`Tags of ${runner.name} saved.`)
+    // A tag no runner had before is now a known one, for every required-tags field.
+    void refreshFleet()
+  } catch (error) {
+    if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
+      tagErrors.value = Object.values(error.fieldErrors).flat()
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    savingTags.value = false
+  }
+}
 
 /** Runs for any runner, once for the organization rather than on every runner. */
 const orgQueue = computed(() => {
@@ -431,6 +516,30 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
       </div>
     </header>
 
+    <FleetDowngradedNotice v-if="mayManage && fleetDowngraded" :slug="slug" class="mb-3" />
+
+    <div
+      v-if="fleetQueue && !loading && runners.length"
+      class="border-border mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border px-3 py-2 text-xs"
+      data-testid="fleet-queue"
+    >
+      <span class="font-medium">Fleet</span>
+      <span>
+        <span class="tabular-nums" data-testid="fleet-queue-online">{{ fleetQueue.online }}</span>
+        <span class="text-muted-foreground"> of {{ runners.length }} runners online</span>
+      </span>
+      <span>
+        <span class="tabular-nums" data-testid="fleet-queue-waiting">{{ fleetQueue.waiting }}</span>
+        <span class="text-muted-foreground">
+          {{ fleetQueue.waiting === 1 ? 'run' : 'runs' }} waiting</span
+        >
+      </span>
+      <span v-if="fleetQueue.waiting > 0 && fleetQueue.oldest" data-testid="fleet-queue-oldest">
+        <span class="text-muted-foreground">oldest waiting</span>
+        {{ fleetQueue.oldest }}
+      </span>
+    </div>
+
     <p
       v-if="orgQueue && !loading && runners.length"
       class="text-muted-foreground pb-2 text-[11px]"
@@ -504,6 +613,50 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
                 {{ harness.name }}
               </Badge>
             </div>
+            <div
+              v-if="fleetActive"
+              class="mt-1 flex flex-wrap items-center gap-1"
+              :aria-label="`Tags of ${runner.name}`"
+              data-testid="runner-tags"
+            >
+              <Badge
+                v-if="runner.ephemeral"
+                variant="outline"
+                class="text-[10px]"
+                title="Enrolled with the fleet's token; it removes itself once idle"
+                data-testid="runner-ephemeral"
+              >
+                Ephemeral
+              </Badge>
+              <Badge
+                v-for="chip in runnerTagChips(runner)"
+                :key="chip.tag"
+                variant="outline"
+                class="font-mono text-[10px]"
+                :class="tagChipClass[chip.source]"
+                :title="runnerTagSourceLabel[chip.source]"
+                :data-testid="`runner-tag-${chip.source}`"
+              >
+                {{ chip.tag }}
+              </Badge>
+              <span
+                v-if="runnerTagChips(runner).length === 0"
+                class="text-muted-foreground text-[11px]"
+              >
+                No tags
+              </span>
+              <Button
+                variant="ghost"
+                size="xs"
+                class="text-muted-foreground h-5 px-1.5 text-[11px]"
+                :disabled="busyId === runner.id"
+                :aria-label="`Edit tags of ${runner.name}`"
+                data-testid="runner-edit-tags"
+                @click="openTags(runner)"
+              >
+                Edit tags
+              </Button>
+            </div>
             <RunnerLoad
               class="mt-1.5"
               :slug="slug"
@@ -511,6 +664,7 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
               :slots="runner.capabilities?.maxParallel ?? 1"
               :entry="loadFor(runnerLoad, runner.id)"
               :muted="runnerStatus(runner) !== 'online'"
+              :show-slots="fleetActive"
             />
             <ul
               v-if="runner.capabilities && runner.capabilities.harnesses.length"
@@ -943,6 +1097,52 @@ const statusDot: Record<ReturnType<typeof runnerStatus>, string> = {
         <DialogFooter>
           <Button data-testid="runner-continue-setup" @click="continueSetup">
             I have copied it - continue setup
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      :open="editingTags !== null"
+      @update:open="
+        (open: boolean) => {
+          if (!open && !savingTags) editingTags = null
+        }
+      "
+    >
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Tags of {{ editingTags?.name }}</DialogTitle>
+          <DialogDescription>
+            A run that requires tags only goes to a runner that has all of them. The tags set on
+            the machine (<code class="font-mono">--tag</code>) and its platform are shown first and
+            change only there.
+          </DialogDescription>
+        </DialogHeader>
+        <form id="runner-tags" class="space-y-1.5" novalidate @submit.prevent="saveTags">
+          <label for="runner-tags-input" class="text-sm font-medium">Admin tags</label>
+          <FleetTagInput
+            id="runner-tags-input"
+            v-model="tagDraft"
+            :locked="lockedTags"
+            :suggestions="knownTags"
+            testid="runner-tags-input"
+            placeholder="gpu-enabled"
+          />
+          <p v-for="message in tagErrors" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </form>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="savingTags" @click="editingTags = null">Cancel</Button>
+          <Button
+            type="submit"
+            form="runner-tags"
+            :disabled="savingTags"
+            data-testid="runner-tags-save"
+          >
+            <Loader2 v-if="savingTags" class="animate-spin" aria-hidden="true" />
+            Save tags
           </Button>
         </DialogFooter>
       </DialogContent>

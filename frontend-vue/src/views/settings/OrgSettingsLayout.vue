@@ -2,11 +2,12 @@
 import { computed, provide, ref, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 
-import { getOrganization, type Organization } from '@/api/organizations'
+import { getOrganization, hasOrgRole, type Organization } from '@/api/organizations'
 import EmptyState from '@/components/common/EmptyState.vue'
 import SettingsShell from '@/components/settings/SettingsShell.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
+import { useFleetStatus } from '@/composables/useFleetStatus'
 import { orgScopeKey, type OrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
 import { orgSettingsLinks } from '@/router/paths'
@@ -85,7 +86,14 @@ const scope: OrgScope = {
 
 provide(orgScopeKey, scope)
 
-const links = computed(() => orgSettingsLinks(slug.value))
+const fleet = useFleetStatus(slug)
+
+// Fleet is an Admin's tab, and none at all where the instance does not offer fleet mode.
+const links = computed(() =>
+  orgSettingsLinks(slug.value, {
+    fleet: hasOrgRole(record.value?.role, 'admin') && !fleet.hidden.value,
+  }),
+)
 </script>
 
 <template>

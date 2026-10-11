@@ -32,6 +32,9 @@ public sealed class Rule : TenantEntity, IAudited
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Tags the rule's runs require of their runner, on top of the playbook's, while fleet mode is on.</summary>
+    public string[] RequiredTags { get; set; } = [];
+
     public required string CreatedBy { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; }

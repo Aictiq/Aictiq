@@ -117,6 +117,85 @@ namespace Aictiq.Modules.Automation.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.FleetSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("EnrollTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("enroll_token_hash");
+
+                    b.Property<string>("EnrollTokenPrefix")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("enroll_token_prefix");
+
+                    b.Property<DateTimeOffset?>("LastScaleCallAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_scale_call_at");
+
+                    b.Property<string>("LastScaleCallError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_scale_call_error");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("ScaleAfterSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("scale_after_seconds");
+
+                    b.Property<int>("ScaleCooldownSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("scale_cooldown_seconds");
+
+                    b.Property<string>("ScaleWebhookSecretProtected")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("scale_webhook_secret_protected");
+
+                    b.Property<string>("ScaleWebhookUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("scale_webhook_url");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fleet_settings");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fleet_settings_organization_id");
+
+                    b.ToTable("fleet_settings", "automation", t =>
+                        {
+                            t.HasCheckConstraint("ck_fleet_settings_scale_after", "scale_after_seconds BETWEEN 30 AND 86400");
+
+                            t.HasCheckConstraint("ck_fleet_settings_scale_cooldown", "scale_cooldown_seconds BETWEEN 60 AND 86400");
+
+                            t.HasCheckConstraint("ck_fleet_settings_webhook_secret", "scale_webhook_url IS NULL OR scale_webhook_secret_protected IS NOT NULL");
+                        });
+                });
+
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ItemRefinement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -271,6 +350,13 @@ namespace Aictiq.Modules.Automation.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid")
                         .HasColumnName("project_id");
+
+                    b.PrimitiveCollection<string[]>("RequiredTags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("required_tags")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -529,6 +615,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("required_label_id");
 
+                    b.PrimitiveCollection<string[]>("RequiredTags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("required_tags")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<Guid>("TriggerStateId")
                         .HasColumnType("uuid")
                         .HasColumnName("trigger_state_id");
@@ -766,6 +859,13 @@ namespace Aictiq.Modules.Automation.Migrations
                     b.Property<Guid?>("RequestedRunnerId")
                         .HasColumnType("uuid")
                         .HasColumnName("requested_runner_id");
+
+                    b.PrimitiveCollection<string[]>("RequiredTags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("required_tags")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<Guid?>("ReworkOfRunId")
                         .HasColumnType("uuid")
@@ -1035,6 +1135,10 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("disabled_at");
 
+                    b.Property<bool>("Ephemeral")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ephemeral");
+
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_seen_at");
@@ -1054,6 +1158,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("character varying(450)")
                         .HasColumnName("registered_by");
+
+                    b.PrimitiveCollection<string[]>("Tags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("tags")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()

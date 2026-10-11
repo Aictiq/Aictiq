@@ -9,6 +9,7 @@ import { listProjectMembers } from '@/api/projects'
 import { createRule, updateRule, type Rule, type UpdateRuleBody } from '@/api/rules'
 import type { WorkflowState } from '@/api/workflows'
 import EmptyState from '@/components/common/EmptyState.vue'
+import FleetTagInput from '@/components/factory/FleetTagInput.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,7 +21,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useFleetStatus } from '@/composables/useFleetStatus'
 import { useToast } from '@/composables/useToast'
+import {
+  requiredTagErrors,
+  sameFleetTags,
+  unknownFleetTags,
+  unknownFleetTagWarning,
+} from '@/lib/fleet'
 import { orgSettingsPath, projectSettingsPath } from '@/router/paths'
 import { ApiError, ConflictError } from '@/utils/api'
 
@@ -60,6 +68,15 @@ const requiredLabelId = ref('')
 const playbookId = ref('')
 const agentId = ref('')
 const enabled = ref(true)
+/** Fleet mode only: never shown, and never sent, while it is not active. */
+const requiredTags = ref<string[]>([])
+
+const { active: fleetActive, knownTags } = useFleetStatus(() => props.slug)
+
+/** What the chosen playbook already requires; the rule's tags come on top. */
+const playbookTags = computed(
+  () => playbooks.value.find((playbook) => playbook.id === playbookId.value)?.requiredTags ?? [],
+)
 
 const submitting = ref(false)
 const error = ref<string | null>(null)
@@ -77,6 +94,7 @@ function resetFields() {
   playbookId.value = rule?.playbookId ?? ''
   agentId.value = rule?.agentId ?? ''
   enabled.value = rule?.enabled ?? true
+  requiredTags.value = [...(rule?.requiredTags ?? [])]
 }
 
 watch(
@@ -137,6 +155,9 @@ async function submit() {
       if (playbookId.value !== original.playbookId) body.playbookId = playbookId.value
       if (agentId.value !== original.agentId) body.agentId = agentId.value
       if (enabled.value !== original.enabled) body.enabled = enabled.value
+      if (fleetActive.value && !sameFleetTags(requiredTags.value, original.requiredTags ?? [])) {
+        body.requiredTags = requiredTags.value
+      }
       saved = await updateRule(props.slug, props.projectKey, original.id, body)
     } else {
       saved = await createRule(props.slug, props.projectKey, {
@@ -146,9 +167,16 @@ async function submit() {
         playbookId: playbookId.value,
         agentId: agentId.value,
         enabled: enabled.value,
+        ...(fleetActive.value ? { requiredTags: requiredTags.value } : {}),
       })
     }
     toast.success(`${saved.name} ${props.rule ? 'updated' : 'created'}.`)
+    // Saved all the same: a runner with the tag may be about to connect (scale from zero).
+    if (fleetActive.value) {
+      for (const tag of unknownFleetTags(saved.requiredTags ?? [], knownTags.value)) {
+        toast.warning(unknownFleetTagWarning(tag))
+      }
+    }
     // Saved first: a parent that closes the dialog on update:open may drop the context
     // (which project's list to add to) it needs to handle the saved rule.
     emit('saved', saved)
@@ -302,6 +330,28 @@ async function submit() {
             </option>
           </select>
           <p v-for="message in fieldErrors.agentId" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </div>
+
+        <div v-if="fleetActive" class="space-y-1.5">
+          <label for="rule-required-tags" class="text-sm font-medium">Required tags</label>
+          <FleetTagInput
+            id="rule-required-tags"
+            v-model="requiredTags"
+            :locked="playbookTags"
+            :suggestions="knownTags"
+            testid="rule-required-tags"
+            placeholder="gpu-enabled"
+          />
+          <p class="text-muted-foreground text-xs">
+            Its runs go only to a runner with all of these, on top of what the playbook requires.
+          </p>
+          <p
+            v-for="message in requiredTagErrors(fieldErrors)"
+            :key="message"
+            class="text-destructive text-xs"
+          >
             {{ message }}
           </p>
         </div>

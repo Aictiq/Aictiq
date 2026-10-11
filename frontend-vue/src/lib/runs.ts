@@ -3,9 +3,12 @@ import type {
   RunChainLink,
   RunLogPage,
   RunLogLine,
+  RunScaleUp,
   RunStatus,
   StageVerdict,
 } from '@/api/runs'
+import { since } from '@/lib/claims'
+import { durationLabel } from '@/lib/fleet'
 
 /**
  * Run presentation rules, kept out of the components because they decide what a
@@ -233,18 +236,40 @@ export function runWaitingMessage(
     waiting.ahead > 0
       ? ` ${waiting.ahead} queued run${waiting.ahead === 1 ? ' goes' : 's go'} first.`
       : ''
+  // Fleet mode's scale from zero helps a run any runner may take, never one sent to a runner.
+  const scale = waiting.scaleUp ? ` ${scaleUpMessage(waiting.scaleUp, now)}` : ''
   switch (waiting.reason) {
     case 'runner-offline':
       return `Waiting for ${names}, which is offline. It starts when ${names} comes back.`
     case 'runner-busy':
       return `Waiting for ${names}, which is busy with another run. It starts when that run finishes.${ahead}`
     case 'no-runner':
-      return `No online runner offers ${run.harness}. It starts when one connects.`
+      return `No online runner offers ${run.harness}. It starts when one connects.${scale}`
+    case 'no-matching-runner': {
+      const tags = waiting.requiredTags?.length
+        ? `the tags ${waiting.requiredTags.join(', ')}`
+        : 'the required tags'
+      return `No online runner offers ${run.harness} with ${tags}. It starts when one connects.${scale}`
+    }
     case 'runners-busy':
-      return `Every runner that offers ${run.harness} is busy (${names}). It starts when one of them finishes.${ahead}`
+      return `Every runner that offers ${run.harness} is busy (${names}). It starts when one of them finishes.${ahead}${scale}`
     case 'runner-free':
       return `${names} ${waiting.runners.length === 1 ? 'has' : 'have'} a free slot and should pick it up within seconds.${ahead} If nothing happens, the machine may be finishing another organization's run first.`
   }
+}
+
+/**
+ * What fleet mode's scale from zero did about the waiting runs: its webhook's last call and
+ * how it went, or when it will be called. The call is the organization's, not this run's, so
+ * it is said as "last called" rather than claimed for this run.
+ */
+export function scaleUpMessage(scaleUp: RunScaleUp, now: Date = new Date()): string {
+  const when = scaleUp.lastCalledAt ? ` ${since(scaleUp.lastCalledAt, now)}` : ''
+  if (scaleUp.error) {
+    return `Scale from zero last called its webhook${when}, and the call failed: ${scaleUp.error.replace(/\.$/, '')}.`
+  }
+  if (scaleUp.lastCalledAt) return `Scale from zero last called its webhook${when}.`
+  return `Scale from zero calls its webhook once a run has waited ${durationLabel(scaleUp.afterSeconds)}.`
 }
 
 // ── Scheduled runs ──────────────────────────────────────────────────────────────────

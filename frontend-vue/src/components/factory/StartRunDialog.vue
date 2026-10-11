@@ -9,6 +9,7 @@ import { getFactorySettings, listPlaybooks, type Playbook } from '@/api/playbook
 import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
 import { listProjectMembers } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
+import FleetTagInput from '@/components/factory/FleetTagInput.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,8 +21,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useFleetStatus } from '@/composables/useFleetStatus'
 import { useToast } from '@/composables/useToast'
 import { since } from '@/lib/claims'
+import { requiredTagErrors } from '@/lib/fleet'
 import {
   usageLimitsForRun,
   usagePercent,
@@ -90,7 +93,32 @@ const assignable = computed(() =>
 const playbookHarness = computed(() => playbooks.value.find((p) => p.id === playbookId.value)?.harness ?? null)
 
 
-const compatibleRunners = computed(() => runners.value.filter((runner) => runnerCanRun(runner, playbookHarness.value)))
+/**
+ * Fleet mode: tags the run requires on top of the playbook's. Never shown, and never sent,
+ * while fleet mode is not active.
+ */
+const requiredTags = ref<string[]>([])
+const { active: fleetActive, knownTags } = useFleetStatus(() => props.slug)
+
+/** What the chosen playbook already requires: shown as required, and not sent again. */
+const playbookTags = computed(() =>
+  fleetActive.value
+    ? (playbooks.value.find((p) => p.id === playbookId.value)?.requiredTags ?? [])
+    : [],
+)
+
+/** In fleet mode a runner without every required tag would never take the run. */
+function runnerHasTags(runner: RunnerChoice) {
+  if (!fleetActive.value) return true
+  const tags = new Set(runner.tags ?? [])
+  return [...playbookTags.value, ...requiredTags.value].every((tag) => tags.has(tag))
+}
+
+const compatibleRunners = computed(() =>
+  runners.value.filter(
+    (runner) => runnerCanRun(runner, playbookHarness.value) && runnerHasTags(runner),
+  ),
+)
 
 /** One runner is no choice: every run goes to it anyway. */
 const showRunners = computed(() => runners.value.length > 1)
@@ -136,9 +164,12 @@ const usageWindows = computed(() => {
   })
 })
 
-// A playbook with another harness may rule the chosen runner out.
+// A playbook with another harness may rule the chosen runner out, and so may a required tag.
 watch(playbookHarness, (harness) => {
   if (chosenRunner.value && !runnerCanRun(chosenRunner.value, harness)) runnerId.value = null
+})
+watch([playbookTags, requiredTags], () => {
+  if (chosenRunner.value && !runnerHasTags(chosenRunner.value)) runnerId.value = null
 })
 
 watch(
@@ -148,6 +179,7 @@ watch(
     error.value = null
     fieldErrors.value = {}
     scheduled.value = false
+    requiredTags.value = []
     loadFailed.value = false
     loading.value = true
     try {
@@ -206,6 +238,10 @@ async function submit() {
       runnerId: showRunners.value ? runnerId.value : null,
       // Left out entirely when starting now, so the request is the one it always was.
       ...(scheduledFor ? { scheduledFor: scheduledFor.toISOString() } : {}),
+      // The same for required tags: only in fleet mode, and only when there are any.
+      ...(fleetActive.value && requiredTags.value.length
+        ? { requiredTags: requiredTags.value }
+        : {}),
     })
     writeRunChoice(props.projectKey, {
       playbookId: playbookId.value,
@@ -351,6 +387,30 @@ async function submit() {
             {{ chosenRunner.name }} is offline. The run waits in the queue until it comes back.
           </p>
           <p v-for="message in fieldErrors.runnerId" :key="message" class="text-destructive text-xs">
+            {{ message }}
+          </p>
+        </div>
+        <div v-if="fleetActive" class="space-y-1.5">
+          <label for="start-run-required-tags" class="text-sm font-medium">Required tags</label>
+          <FleetTagInput
+            id="start-run-required-tags"
+            v-model="requiredTags"
+            :locked="playbookTags"
+            :suggestions="knownTags"
+            testid="start-run-required-tags"
+            placeholder="gpu-enabled"
+            warn-unknown
+          />
+          <p class="text-muted-foreground text-xs">
+            Only a runner with all of these takes the run.<template v-if="playbookTags.length">
+              The playbook's own are already required.</template
+            >
+          </p>
+          <p
+            v-for="message in requiredTagErrors(fieldErrors)"
+            :key="message"
+            class="text-destructive text-xs"
+          >
             {{ message }}
           </p>
         </div>

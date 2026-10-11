@@ -115,6 +115,9 @@ public sealed class RunSweeper(
                 // this tick. A chain goes first: its next step carries on work already in flight.
                 await scope.ServiceProvider.GetRequiredService<ChainQueue>().SweepAsync(cancellationToken);
                 await scope.ServiceProvider.GetRequiredService<RunMentionQueue>().SweepAsync(cancellationToken);
+                // After everything above has had its chance to start or settle runs: only what
+                // still waits counts toward scaling up.
+                await scope.ServiceProvider.GetRequiredService<FleetScaler>().SweepAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

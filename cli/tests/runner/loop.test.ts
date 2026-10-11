@@ -111,6 +111,39 @@ describe('RunnerLoop', () => {
     })
   })
 
+  it('reports activity when it claims a run and when that run ends, for --idle-exit', async () => {
+    let claims = 0
+    instance.on((r) => {
+      if (r.path.endsWith('/runner/hello')) return { status: 200, body: hello }
+      if (r.path.endsWith('/runs/claim'))
+        return ++claims === 1 ? { status: 200, body: claimedRun() } : { status: 204 }
+      return undefined
+    })
+    const events: string[] = []
+    let ended: () => void
+    const done = new Promise<void>((resolve) => (ended = resolve))
+    const loop = new RunnerLoop({
+      client: new RunnerClient({ baseUrl: instance.url, token: 'jrn_x' }),
+      parallel: 1,
+      probe: async () => capabilities,
+      local: () => {},
+      onActivity: () => {
+        events.push(`activity:${loop.inFlight}`)
+        if (events.filter((e) => e.startsWith('activity')).length === 2) ended()
+      },
+      execute: async () => {
+        events.push('execute')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      },
+    })
+    const running = loop.run()
+    await done
+    loop.stop()
+    await running
+    // Claimed before it runs; ended once it no longer counts as in flight.
+    expect(events).toEqual(['activity:0', 'execute', 'activity:0'])
+  })
+
   it('exits with a revoked error when the instance answers token-revoked', async () => {
     instance.on((r) =>
       r.path.endsWith('/runner/hello')

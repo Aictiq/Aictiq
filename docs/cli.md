@@ -185,7 +185,8 @@ aictiq runner map ACME ~/src/aictiq [--org <slug>]  # project key → local clon
 aictiq runner map ACME --remove [--org <slug>]
 aictiq runner remove <org>            # stop running for one organization on this machine
 aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
-aictiq runner start [--parallel 2] [--keep-workspaces] [--workspace-root <dir>] [--no-auto-update]
+aictiq runner start [--parallel 2] [--tag gpu-enabled] [--idle-exit <minutes>] [--keep-workspaces] [--workspace-root <dir>] [--no-auto-update]
+aictiq runner enroll --url <url> --token <jfe_token> [--name <name>] [--tag <tag>] # fleet mode: an ephemeral runner registers itself
 aictiq runner usage [--claude-oauth on|off] # stored 5-hour and weekly usage; opt in to the live Claude poll
 aictiq runner update                  # install the latest @aictiq/cli now and report old → new
 aictiq runner install-service [--parallel 2] [--platform linux|macos|windows] # systemd unit, launchd agent or Task Scheduler installer

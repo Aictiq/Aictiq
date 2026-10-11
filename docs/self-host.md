@@ -188,6 +188,10 @@ Organization seeding is **first-run only in the strict sense**: it does nothing 
 organization exists, not merely when one with that slug exists. Keying on the slug would
 recreate a deliberately deleted organization on the next restart.
 
+[Fleet mode](factory.md#9-fleet-mode-paid-hosted-plans) (runner tags, load balancing and
+scale from zero) is not offered on self-hosted installs for now: the setting stays hidden and
+runs dispatch as they always have. Support may come later.
+
 ## External Postgres and tenant roles
 
 Aictiq uses two database logins. `aictiq_app` is the API/Workers login and is subject to

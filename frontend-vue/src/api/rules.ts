@@ -39,6 +39,8 @@ export interface Rule {
   /** xmin: echo it back on PATCH or the API answers 409. */
   version: number
   lastFiring: RuleLastFiring | null
+  /** Fleet mode: tags the rule's runs require on top of the playbook's. Absent from older servers. */
+  requiredTags?: string[]
 }
 
 export interface RuleFiring {
@@ -61,6 +63,8 @@ export interface SaveRuleBody {
   playbookId: string
   agentId: string
   enabled?: boolean
+  /** Fleet mode only; left out entirely while it is off. */
+  requiredTags?: string[]
 }
 
 export interface UpdateRuleBody extends Partial<SaveRuleBody> {

@@ -36,6 +36,8 @@ export function useToast() {
   return {
     success: (message: string, description?: string) => toast.success(message, { description }),
     info: (message: string, description?: string) => toast(message, { description }),
+    /** Went through, but something about it deserves a second look. Never blocks anything. */
+    warning: (message: string, description?: string) => toast.warning(message, { description }),
     /** Someone else's change to what is on screen - shown in the activity corner. */
     activity: (message: string, description?: string) =>
       toast(message, { description, toasterId: activityToasterId }),

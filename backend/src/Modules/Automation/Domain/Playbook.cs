@@ -27,6 +27,9 @@ public sealed class Playbook : TenantEntity, IAudited
     public int MaxMinutes { get; set; } = 60;
     public bool IsDefault { get; set; }
     public bool WorkOnDefaultBranch { get; set; }
+
+    /// <summary>Tags every run of this playbook requires of its runner while fleet mode is on.</summary>
+    public string[] RequiredTags { get; set; } = [];
     public required string CreatedBy { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; set; }

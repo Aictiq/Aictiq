@@ -17,19 +17,24 @@ namespace Aictiq.Modules.Automation.Endpoints;
 
 /// <param name="TokenDisplay"><c>jrn_a1b2c3d4…</c> - all that survives of the secret.</param>
 /// <param name="IsOnline">Seen within two heartbeats. Decided here so every client agrees on what "online" means.</param>
+/// <param name="Tags">The tags an Admin set here. The CLI's own are in <c>capabilities.tags</c>.</param>
+/// <param name="EffectiveTags">What fleet mode matches a run against: these, the CLI's, and <c>os:</c>/<c>arch:</c>.</param>
+/// <param name="Ephemeral">Enrolled by a machine with the fleet's token; it removes itself once idle.</param>
 public sealed record RunnerView(
     Guid Id, string Name, string TokenDisplay, string RegisteredBy, string? RegisteredByName,
     RunnerCapabilities? Capabilities, DateTimeOffset? LastSeenAt, bool IsOnline, bool IsDisabled,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt, IReadOnlyList<string>? Tags = null, IReadOnlyList<string>? EffectiveTags = null,
+    bool Ephemeral = false);
 
 /// <summary>
 /// A runner as someone starting a run sees it: enough to pick one, nothing about who
 /// registered it or its secret. Disabled runners are left out; they cannot take a run.
 /// </summary>
 /// <param name="UsageLimits">The harness allowances the runner last reported, so the dialog can show what is left.</param>
+/// <param name="Tags">Fleet mode: the runner's tags, so the dialog can say which runners a run's required tags leave.</param>
 public sealed record RunnerChoiceView(
     Guid Id, string Name, IReadOnlyList<string> Harnesses, bool IsOnline,
-    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null);
+    IReadOnlyList<RunnerUsageLimits>? UsageLimits = null, IReadOnlyList<string>? Tags = null);
 
 /// <summary>
 /// How busy the organization's runners are, from the live runs the caller can see: what each
@@ -38,9 +43,10 @@ public sealed record RunnerChoiceView(
 /// <param name="Runners">One entry per runner with live runs; a runner with none is left out.</param>
 /// <param name="UnassignedQueued">Due runs that any runner may take.</param>
 /// <param name="UnassignedScheduled">Runs for any runner scheduled for later.</param>
+/// <param name="OldestQueuedSince">When the longest-waiting due run started waiting, any runner's or one runner's.</param>
 public sealed record RunnerLoadView(
     IReadOnlyList<RunnerLoadEntry> Runners, int UnassignedQueued, int UnassignedScheduled,
-    DateTimeOffset? NextUnassignedScheduledFor);
+    DateTimeOffset? NextUnassignedScheduledFor, DateTimeOffset? OldestQueuedSince = null);
 
 /// <param name="Running">Runs the runner holds (assigned or running), out of its <c>maxParallel</c> slots.</param>
 /// <param name="Queued">Due runs that requested this runner and wait for it.</param>
@@ -82,7 +88,8 @@ public sealed record RunnerMachineOrganizationView(string Slug, string Name, Gui
 /// than deltas; there is nothing a stale read could silently undo.
 /// </summary>
 /// <param name="Disabled">True disables the runner (its secret answers <c>token-revoked</c>); false enables it again.</param>
-public sealed record UpdateRunnerRequest(string? Name, bool? Disabled);
+/// <param name="Tags">Fleet mode: the runner's tags, replacing the ones set here before. Null leaves them.</param>
+public sealed record UpdateRunnerRequest(string? Name, bool? Disabled, IReadOnlyList<string>? Tags = null);
 
 public sealed record RunnerHelloRequest(RunnerCapabilities? Capabilities);
 
@@ -172,6 +179,7 @@ public static partial class RunnerEndpoints
             {
                 group.Key.RequestedRunnerId, group.Key.Later,
                 Count = group.Count(), Next = group.Min(run => run.ScheduledFor),
+                Oldest = group.Min(run => run.ScheduledFor ?? run.QueuedAt),
             })
             .ToListAsync(cancellationToken);
         var active = await live
@@ -211,7 +219,8 @@ public static partial class RunnerEndpoints
             entries,
             unassigned.Where(group => !group.Later).Sum(group => group.Count),
             unassigned.Where(group => group.Later).Sum(group => group.Count),
-            unassigned.Where(group => group.Later).Min(group => group.Next)));
+            unassigned.Where(group => group.Later).Min(group => group.Next),
+            waiting.Where(group => !group.Later).Select(group => (DateTimeOffset?)group.Oldest).Min()));
     }
 
     private static async Task<IResult> ChoicesAsync(
@@ -226,7 +235,7 @@ public static partial class RunnerEndpoints
             r.Id, r.Name,
             [.. (r.Capabilities?.Harnesses ?? []).Select(h => h.Name)],
             IsOnline(r, options.Value, now),
-            r.Capabilities?.UsageLimits)).ToList());
+            r.Capabilities?.UsageLimits, FleetTags.Effective(r))).ToList());
     }
 
     /// <summary>
@@ -365,6 +374,11 @@ public static partial class RunnerEndpoints
         {
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = [nameError] }, type: ProblemTypes.Validation);
         }
+        var tags = request.Tags is null ? null : FleetTags.Normalize(request.Tags);
+        if (request.Tags is not null && tags is null)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["tags"] = [FleetTags.Rule] }, type: ProblemTypes.Validation);
+        }
 
         var runner = await db.Runners.FirstOrDefaultAsync(r => r.Id == runnerId && r.DeletedAt == null, cancellationToken);
         if (runner is null)
@@ -380,6 +394,10 @@ public static partial class RunnerEndpoints
         if (request.Disabled is { } disabled)
         {
             runner.DisabledAt = disabled ? runner.DisabledAt ?? now : null;
+        }
+        if (tags is not null)
+        {
+            runner.Tags = tags;
         }
         runner.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
@@ -505,7 +523,7 @@ public static partial class RunnerEndpoints
             runner.Capabilities, runner.LastSeenAt,
             IsOnline: IsOnline(runner, options, now),
             IsDisabled: runner.DisabledAt is not null,
-            runner.CreatedAt);
+            runner.CreatedAt, runner.Tags, FleetTags.Effective(runner), runner.Ephemeral);
 
     internal static bool IsOnline(Runner runner, AutomationOptions options, DateTimeOffset now) =>
         runner.IsUsable && runner.LastSeenAt is { } seen && now - seen <= options.OnlineWindow;
@@ -584,6 +602,10 @@ public static partial class RunnerEndpoints
             && (failure.Version is null or { Length: 0 or > 64 } || failure.Error is null or { Length: 0 or > 1000 }))
         {
             errors["capabilities.updateFailure"] = ["A version of at most 64 characters and an error of at most 1000."];
+        }
+        if (capabilities.Tags is { } tags && FleetTags.Normalize(tags) is null)
+        {
+            errors["capabilities.tags"] = [FleetTags.Rule];
         }
         if (capabilities.UsageLimits is { } limits
             && (limits.Count > 16
