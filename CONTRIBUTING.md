@@ -3,7 +3,7 @@
 Thanks for helping make Aictiq useful for software teams and their agents. By participating,
 you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-For questions and ideas, join the [Aictiq Discord community](https://discord.gg/yFzzTPSXU).
+For questions and ideas, join the [Aictiq Discord community](https://discord.gg/spEKjvJ685).
 
 ## Before you start
 

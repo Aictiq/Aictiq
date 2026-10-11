@@ -14,7 +14,7 @@ hero:
       link: /agents
     - theme: alt
       text: Join Discord
-      link: https://discord.gg/yFzzTPSXU
+      link: https://discord.gg/spEKjvJ685
 
 features:
   - title: A safe loop for agents
