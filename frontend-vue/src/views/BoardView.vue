@@ -42,8 +42,8 @@ import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useToast } from '@/composables/useToast'
 import { vNearEnd } from '@/lib/nearEnd'
 import { destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
-import { useCreateTicket } from '@/composables/useCreateTicket'
-import { opensOnCreate, typeLabels } from '@/lib/hierarchy'
+import { createTicket } from '@/composables/useCreateTicket'
+import { typeLabels } from '@/lib/hierarchy'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -54,7 +54,6 @@ const organizations = useOrganizationsStore()
 const projects = useProjectsStore()
 const session = useSessionStore()
 const teams = useTeamsStore()
-const createTicket = useCreateTicket()
 const route = useRoute()
 const itemModal = useItemModal()
 const client = useQueryClient()
@@ -145,6 +144,8 @@ const workflowStates = computed(() => workflowQuery.data.value?.states ?? [])
 const projectMembers = computed(() => projectMembersQuery.data.value ?? [])
 // The assignee filter is applied by the server, so column counts and WIP stay exact.
 const visibleBoard = board
+// New work starts in the first column; the others are reached by moving it there.
+const firstColumn = computed(() => visibleBoard.value?.columns[0]?.name ?? null)
 const cards = computed(() => visibleBoard.value?.columns.flatMap((column) => column.cards) ?? [])
 const generalStateCounts = computed(() => {
   const totals = { new: 0, doing: 0, done: 0 }
@@ -533,6 +534,7 @@ const vFocus = { mounted: (el: HTMLElement) => el.focus() }
 const draft = ref<{ column: string; type: WorkItemType; title: string } | null>(null)
 const creatingCard = ref(false)
 function startDraft(column: string) {
+  if (collapsed.value.has(column)) toggleColumn(column)
   draft.value = { column, type: board.value?.types[0] ?? 'story', title: '' }
   const next = new Set(collapsed.value)
   next.delete(column)
@@ -543,7 +545,7 @@ async function submitDraft(column: { name: string; stateIds: string[] }) {
   if (!current?.title.trim() || creatingCard.value) return
   creatingCard.value = true
   try {
-    const created = await createItem(slug.value, projectKey.value, {
+    const created = await createTicket(client, slug.value, projectKey.value, {
       type: current.type,
       title: current.title.trim(),
       teamId: teamId.value,
@@ -554,7 +556,9 @@ async function submitDraft(column: { name: string; stateIds: string[] }) {
     await client.invalidateQueries({
       queryKey: ['board', slug.value, projectKey.value, teamId.value],
     })
-    if (opensOnCreate(created.type)) itemModal.open(created.key)
+    // The quick title is only a start: the rest is written in the item detail.
+    draft.value = null
+    itemModal.open(created.key)
   } catch (error) {
     toast.error(error, 'The item could not be created.')
   } finally {
@@ -584,11 +588,11 @@ watch(
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <button
-            v-if="projectKey && !projects.current?.isArchived"
+            v-if="projectKey && !projects.current?.isArchived && firstColumn"
             type="button"
             class="bg-primary text-primary-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm"
             data-testid="board-create-ticket"
-            @click="createTicket.open(projectKey, { teamId: teamId || null })"
+            @click="startDraft(firstColumn)"
           >
             <Plus class="size-4" /> Create ticket
           </button>
@@ -656,7 +660,7 @@ watch(
         role="region"
       >
         <section
-          v-for="column in visibleBoard?.columns ?? []"
+          v-for="(column, columnIndex) in visibleBoard?.columns ?? []"
           :key="column.name"
           :aria-label="column.name"
           class="bg-muted/30 border-border flex flex-none flex-col rounded-lg border transition-colors"
@@ -704,7 +708,7 @@ watch(
               aria-label="WIP limit exceeded"
             />
             <button
-              v-if="!collapsed.has(column.name)"
+              v-if="columnIndex === 0 && !collapsed.has(column.name)"
               class="text-muted-foreground hover:text-foreground hover:bg-background rounded p-0.5"
               :aria-label="`Add item to ${column.name}`"
               @click="startDraft(column.name)"
@@ -953,7 +957,7 @@ watch(
               </button>
             </div>
             <button
-              v-if="draft?.column !== column.name"
+              v-if="columnIndex === 0 && draft?.column !== column.name"
               class="text-muted-foreground hover:text-foreground hover:bg-background/60 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-sm"
               @click="startDraft(column.name)"
             >

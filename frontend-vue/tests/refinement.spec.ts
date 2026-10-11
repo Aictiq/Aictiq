@@ -144,7 +144,6 @@ describe('CreateTicketDialog', () => {
 
       await wrapper.find('#create-ticket-type').setValue('bug')
       await wrapper.find('#create-ticket-title').setValue('  Login button broken  ')
-      await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
       await wrapper.find('form').trigger('submit')
       await flushPromises()
 
@@ -155,7 +154,6 @@ describe('CreateTicketDialog', () => {
         body: {
           type: 'bug',
           title: 'Login button broken',
-          descriptionMarkdown: 'The login button does nothing',
           teamId: 'team-1',
         },
       })
@@ -166,11 +164,10 @@ describe('CreateTicketDialog', () => {
     },
   )
 
-  it('requires a title even with a description and refinement configured', async () => {
+  it('requires a title even with refinement configured', async () => {
     const { wrapper, calls } = await mountDialog(true, true)
     const create = wrapper.find('[data-testid="create-ticket-submit"]')
     expect(create.attributes('disabled')).toBeDefined()
-    await wrapper.find('[data-testid="description"]').setValue('The login button does nothing')
     await wrapper.find('#create-ticket-title').setValue('   ')
     expect(create.attributes('disabled')).toBeDefined()
     await wrapper.find('form').trigger('submit')
