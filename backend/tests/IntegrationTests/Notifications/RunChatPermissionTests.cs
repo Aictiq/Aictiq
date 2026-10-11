@@ -113,8 +113,8 @@ public sealed class RunChatPermissionTests(PostgresFixture postgres, GarageFixtu
         await chat.QueueAsync(excluded.Append(ordinary).Concat(allowed).ToArray(), null, respectPresence: false, ct);
         var outbox = await db.ChatOutbox.ToListAsync(ct);
         var digest = await db.ChatDigestEntries.ToListAsync(ct);
-        Assert.Equal(mode == EmailNotificationMode.Immediate ? 4 : 0, outbox.Count);
-        Assert.Equal(mode == EmailNotificationMode.Digest ? 4 : 0, digest.Count);
+        Assert.Equal(mode == EmailNotificationMode.Immediate ? RunKinds.Length + 1 : 0, outbox.Count);
+        Assert.Equal(mode == EmailNotificationMode.Digest ? RunKinds.Length + 1 : 0, digest.Count);
         var messages = outbox.Select(message => (message.SourceOrganizationId, message.Kind))
             .Concat(digest.Select(message => (message.SourceOrganizationId, message.Kind))).ToArray();
         Assert.DoesNotContain(messages, message => message.SourceOrganizationId == organization.Id && message.Kind != NotificationKind.Transitioned);
@@ -210,7 +210,7 @@ public sealed class RunChatPermissionTests(PostgresFixture postgres, GarageFixtu
         {
             await scope.ServiceProvider.GetRequiredService<ChatNotificationService>()
                 .QueueAsync(notifications, null, respectPresence: false, ct);
-            Assert.Equal(4, await scope.ServiceProvider.GetRequiredService<NotificationsDbContext>().ChatOutbox.CountAsync(ct));
+            Assert.Equal(RunKinds.Length + 1, await scope.ServiceProvider.GetRequiredService<NotificationsDbContext>().ChatOutbox.CountAsync(ct));
         }
         await RevokeAsync(context, "delivery-chat", member.User.Id, ct);
         await Delivery(context).RunOnceAsync(ct);
@@ -219,7 +219,7 @@ public sealed class RunChatPermissionTests(PostgresFixture postgres, GarageFixtu
         Assert.Contains("Ordinary update", sent.Text);
         await using var inspection = context.Factory.Services.CreateAsyncScope();
         var messages = await inspection.ServiceProvider.GetRequiredService<NotificationsDbContext>().ChatOutbox.ToListAsync(ct);
-        Assert.Equal(3, messages.Count(message => message.Status == EmailStatus.Skipped));
+        Assert.Equal(RunKinds.Length, messages.Count(message => message.Status == EmailStatus.Skipped));
         Assert.Equal(1, messages.Count(message => message.Status == EmailStatus.Sent));
     }
 
@@ -257,7 +257,7 @@ public sealed class RunChatPermissionTests(PostgresFixture postgres, GarageFixtu
     }
 
     private static readonly NotificationKind[] RunKinds =
-        [NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput];
+        [NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput, NotificationKind.RunRefined];
 
     private Task<ApiTestContext> CreateAsync(RecordingSender sender) =>
         ApiTestContext.CreateAsync(postgres, garage, "run_chat", appRole: true,

@@ -125,7 +125,8 @@ public sealed class ChatNotificationService(
     public static string RunPath(Guid runId) => $"factory/runs/{runId}";
 
     public static bool IsRunKind(NotificationKind kind) =>
-        kind is NotificationKind.RunSucceeded or NotificationKind.RunFailed or NotificationKind.RunNeedsInput;
+        kind is NotificationKind.RunSucceeded or NotificationKind.RunFailed or NotificationKind.RunNeedsInput
+            or NotificationKind.RunRefined;
 
     private static void Add(List<ChatOutboxMessage> outbox, List<ChatDigestEntry> digest, Guid channelId, Guid? organizationId,
         ChatChannelType type, EmailNotificationMode mode, Guid id, ChatMessage message, DateTimeOffset now,

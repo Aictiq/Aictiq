@@ -10,8 +10,10 @@ namespace Aictiq.Modules.Notifications.Events;
 /// <summary>
 /// A finished run tells the person who started it and the item's assignee how it went - in
 /// the inbox, by email and on their chat channels - and posts to the organization's shared
-/// channels. A refine run that came back with questions is its own kind: someone has to
-/// answer before anything else happens. The (user, event) unique key makes a replay a no-op.
+/// channels. A refine run worked on the ticket, not the code, so it never says "succeeded":
+/// one that came back with questions asks for an answer, one that submitted the ticket says
+/// it is ready for review, and one that ended without either is a failure to start again.
+/// The (user, event) unique key makes a replay a no-op.
 /// </summary>
 public sealed class RunNotificationHandler(
     NotificationsDbContext db, IWorkItemLookup items, IProjectAccess access, IUserDirectory directory,
@@ -21,10 +23,9 @@ public sealed class RunNotificationHandler(
     public async Task HandleAsync(RunFinished e, CancellationToken cancellationToken)
     {
         using var scope = tenant.Use(e.OrganizationId);
-        var kind = e.NeedsInput ? NotificationKind.RunNeedsInput
-            : e.Outcome == RunOutcomes.Succeeded ? NotificationKind.RunSucceeded : NotificationKind.RunFailed;
+        var kind = Kind(e);
         var item = (await items.FindByKeysAsync(e.ProjectId, [e.ItemKey], cancellationToken)).FirstOrDefault();
-        var message = Message(kind, e.ItemKey, e.Outcome);
+        var message = Message(kind, e.ItemKey, e.Outcome, e.Refinement);
         // The summary is the agent's own account; a failure reason is operator detail and stays out.
         var summary = string.Join("\n", new[] { item?.Title, kind == NotificationKind.RunFailed ? null : e.Summary }
             .Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -68,14 +69,22 @@ public sealed class RunNotificationHandler(
         catch (DbUpdateException) { /* event replay: the user/event unique key already owns it */ }
     }
 
-    internal static string Message(NotificationKind kind, string itemKey, string outcome) => kind switch
+    internal static NotificationKind Kind(RunFinished e) =>
+        e.NeedsInput ? NotificationKind.RunNeedsInput
+        : e.Outcome != RunOutcomes.Succeeded ? NotificationKind.RunFailed
+        : !e.Refinement ? NotificationKind.RunSucceeded
+        : e.Refined ? NotificationKind.RunRefined : NotificationKind.RunFailed;
+
+    internal static string Message(NotificationKind kind, string itemKey, string outcome, bool refinement) => kind switch
     {
         NotificationKind.RunNeedsInput => $"The refine run on {itemKey} needs your input.",
+        NotificationKind.RunRefined => $"{itemKey} is refined and ready for review.",
         NotificationKind.RunSucceeded => $"The run on {itemKey} succeeded.",
         _ => outcome switch
         {
             RunOutcomes.TimedOut => $"The run on {itemKey} timed out.",
             RunOutcomes.Cancelled => $"The run on {itemKey} was cancelled.",
+            RunOutcomes.Succeeded when refinement => $"The refine run on {itemKey} finished without a refined ticket.",
             _ => $"The run on {itemKey} failed."
         }
     };

@@ -35,7 +35,8 @@ internal static class RunCompletion
             summary, pullRequestUrl, failureReason)
         {
             Refinement = refine, Chat = chat, TriggerCommentId = run.TriggerCommentId, RequestedBy = run.RequestedBy,
-            NeedsInput = refinement is { Status: RefinementStatus.NeedsInput }
+            NeedsInput = refinement is { Status: RefinementStatus.NeedsInput },
+            Refined = refinement is { Status: RefinementStatus.Ready }
         }));
 
         if (refinement is { Status: RefinementStatus.Refining })

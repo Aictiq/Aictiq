@@ -3,7 +3,7 @@ using Aictiq.SharedKernel.Domain;
 namespace Aictiq.Modules.Notifications.Domain;
 
 /// <summary>Stored as its number: new kinds go on the end.</summary>
-public enum NotificationKind : short { Assigned, Mentioned, Commented, Transitioned, Claimed, SprintStarted, SprintCompleted, WikiMentioned, InviteAccepted, Replied, Reacted, RunSucceeded, RunFailed, RunNeedsInput }
+public enum NotificationKind : short { Assigned, Mentioned, Commented, Transitioned, Claimed, SprintStarted, SprintCompleted, WikiMentioned, InviteAccepted, Replied, Reacted, RunSucceeded, RunFailed, RunNeedsInput, RunRefined }
 
 public sealed class Notification : TenantEntity
 {

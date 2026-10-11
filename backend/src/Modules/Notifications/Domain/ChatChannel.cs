@@ -75,7 +75,8 @@ public sealed class OrgChatChannel : TenantEntity, IChatChannel
     public static readonly NotificationKind[] OrgWideKinds =
     [
         NotificationKind.Transitioned, NotificationKind.SprintStarted, NotificationKind.SprintCompleted,
-        NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput
+        NotificationKind.RunSucceeded, NotificationKind.RunFailed, NotificationKind.RunNeedsInput,
+        NotificationKind.RunRefined
     ];
 
     /// <summary>What a newly connected shared channel hears about: the things a team acts on.</summary>
