@@ -29,6 +29,11 @@ export interface Playbook {
    * successful run opens (code review, QA...). Empty for most playbooks.
    */
   stagePlaybookIds: string[]
+  /**
+   * Fleet mode: tags every run of the playbook requires of its runner. Kept, but ignored,
+   * while fleet mode is off. Absent from older servers.
+   */
+  requiredTags?: string[]
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -48,6 +53,8 @@ export interface SavePlaybookBody {
   onFailureStateId: string | null
   workOnDefaultBranch: boolean
   maxMinutes: number
+  /** Fleet mode only; left out entirely while it is off, so a save never touches them. */
+  requiredTags?: string[]
 }
 
 export interface UpdatePlaybookBody extends Partial<SavePlaybookBody> {

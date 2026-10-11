@@ -109,8 +109,8 @@ public static partial class RunProtocolEndpoints
         RunnerClaimRequest? request, HttpContext http, AutomationDbContext db, ICurrentTenant tenant,
         IAgentIdentities agents, IOrganizationLookup organizations, IRepositoryCredentials repoCredentials,
         IRealtimePublisher realtime, IOrganizationBillingState billing, IOptions<AutomationOptions> options,
-        IOptions<EmailOptions> email, IUserDirectory directory, TimeProvider clock, ILoggerFactory loggers,
-        CancellationToken ct)
+        IOptions<EmailOptions> email, IUserDirectory directory, FleetMode fleetMode, TimeProvider clock,
+        ILoggerFactory loggers, CancellationToken ct)
     {
         var logger = loggers.CreateLogger(typeof(RunProtocolEndpoints));
         if (ClaimErrors(request) is { Count: > 0 } errors)
@@ -133,6 +133,8 @@ public static partial class RunProtocolEndpoints
         }
 
         var harnesses = request!.Harnesses!.Distinct(StringComparer.Ordinal).ToArray();
+        // Asked once per poll, not per second: a plan change takes effect on the runner's next poll.
+        var fleet = await fleetMode.GetAsync(organizationId, ct);
         var deadline = clock.GetUtcNow() + TimeSpan.FromSeconds(options.Value.PollTimeoutSeconds);
 
         while (true)
@@ -189,17 +191,19 @@ public static partial class RunProtocolEndpoints
             // then ordered by that time rather than by when it was asked for. Raw SQL because
             // EF would bury the locking clause in a subquery, where Postgres ignores it.
             Guid? claimedRunId;
-            await using (var command = ((NpgsqlConnection)db.Database.GetDbConnection()).CreateCommand())
+            if (fleet.Active)
             {
+                claimedRunId = await FleetCandidateAsync(transaction);
+            }
+            else
+            {
+                // Fleet mode off - never turned on, or the plan no longer allows it: required
+                // tags are ignored, so a run dispatched with them before a downgrade still goes.
+                await using var command = ((NpgsqlConnection)db.Database.GetDbConnection()).CreateCommand();
                 command.Transaction = (NpgsqlTransaction)transaction.GetDbTransaction();
-                command.CommandText = """
+                command.CommandText = $"""
                     SELECT id FROM automation.runs
-                    WHERE organization_id = @organizationId AND status = 0 AND harness = ANY(@harnesses)
-                      AND (scheduled_for IS NULL OR scheduled_for <= @now)
-                      AND (requested_runner_id IS NULL OR requested_runner_id = @runnerId
-                           OR NOT EXISTS (SELECT 1 FROM automation.runners r
-                                          WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
-                      AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
+                    WHERE {ClaimablePredicate}
                     ORDER BY COALESCE(scheduled_for, queued_at)
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -347,7 +351,110 @@ public static partial class RunProtocolEndpoints
                 aictiqUrl, issued.Secret, issued.Token.Display,
                 options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp), false);
         }
+
+        // Fleet mode: the run must want only tags this runner has, the runner must have a free
+        // slot of its maxParallel, and among the online runners that could take it the one with
+        // the most free slots should. A busier runner leaves a run to a freer one for a few
+        // seconds (FleetBalanceGraceSeconds), long enough for that runner's next poll; past
+        // that it takes it anyway, so a runner that is online but not polling strands nothing.
+        // A run sent to this runner is its own, whatever it requires.
+        async Task<Guid?> FleetCandidateAsync(IDbContextTransaction transaction)
+        {
+            var now = clock.GetUtcNow();
+            var runners = await db.Runners.AsNoTracking()
+                .Where(r => r.DeletedAt == null && r.DisabledAt == null)
+                .ToListAsync(ct);
+            if (runners.SingleOrDefault(r => r.Id == runnerId) is not { } me)
+            {
+                return null;
+            }
+
+            var held = await db.Runs.AsNoTracking()
+                .Where(r => (r.Status == RunStatus.Assigned || r.Status == RunStatus.Running) && r.RunnerId != null)
+                .GroupBy(r => r.RunnerId!.Value)
+                .Select(group => new { RunnerId = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(row => row.RunnerId, row => row.Count, ct);
+            int FreeSlots(Runner runner) => Math.Max(1, runner.Capabilities?.MaxParallel ?? 1) - held.GetValueOrDefault(runner.Id);
+
+            var mine = FreeSlots(me);
+            if (mine <= 0)
+            {
+                return null;
+            }
+
+            var myTags = FleetTags.Effective(me);
+            var candidates = new List<(Guid Id, string[] Required, Guid? Requested, string Harness, DateTimeOffset Turn)>();
+            await using (var command = ((NpgsqlConnection)db.Database.GetDbConnection()).CreateCommand())
+            {
+                command.Transaction = (NpgsqlTransaction)transaction.GetDbTransaction();
+                command.CommandText = $"""
+                    SELECT id, required_tags, requested_runner_id, harness, COALESCE(scheduled_for, queued_at)
+                    FROM automation.runs
+                    WHERE {ClaimablePredicate}
+                      AND (requested_runner_id = @runnerId OR required_tags <@ @tags)
+                    ORDER BY COALESCE(scheduled_for, queued_at)
+                    LIMIT 25
+                    """;
+                command.Parameters.AddWithValue("organizationId", organizationId);
+                command.Parameters.AddWithValue("harnesses", harnesses);
+                command.Parameters.AddWithValue("runnerId", runnerId);
+                command.Parameters.AddWithValue("now", now);
+                command.Parameters.AddWithValue("tags", myTags);
+                await using var reader = await command.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    candidates.Add((reader.GetGuid(0), reader.GetFieldValue<string[]>(1),
+                        reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetString(3),
+                        reader.GetFieldValue<DateTimeOffset>(4)));
+                }
+            }
+
+            var others = runners
+                .Where(r => r.Id != runnerId && RunnerEndpoints.IsOnline(r, options.Value, now) && FreeSlots(r) > mine)
+                .Select(r => (Runner: r, Tags: FleetTags.Effective(r)))
+                .ToList();
+            var grace = TimeSpan.FromSeconds(options.Value.FleetBalanceGraceSeconds);
+            var eligible = candidates
+                .Where(run => run.Requested == runnerId
+                    || now - run.Turn >= grace
+                    || !others.Any(other => FleetTags.Satisfies(other.Tags, run.Required)
+                        && (other.Runner.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)))
+                .Select(run => run.Id)
+                .ToArray();
+            if (eligible.Length == 0)
+            {
+                return null;
+            }
+
+            await using var lockCommand = ((NpgsqlConnection)db.Database.GetDbConnection()).CreateCommand();
+            lockCommand.Transaction = (NpgsqlTransaction)transaction.GetDbTransaction();
+            lockCommand.CommandText = """
+                SELECT id FROM automation.runs
+                WHERE id = ANY(@ids) AND status = 0
+                ORDER BY COALESCE(scheduled_for, queued_at)
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+                """;
+            lockCommand.Parameters.AddWithValue("ids", eligible);
+            return await lockCommand.ExecuteScalarAsync(ct) as Guid?;
+        }
     }
+
+    /// <summary>
+    /// The runs a runner may claim, before fleet mode has its say. A run sent to one runner is
+    /// that runner's alone, unless the runner has since been disabled or deleted: then any runner
+    /// may take it rather than leave it queued for a machine that cannot come back. A continue
+    /// run never moves: no other machine has its session, and the sweeper fails it if its runner
+    /// is gone. A scheduled run is nobody's until its time comes.
+    /// </summary>
+    private const string ClaimablePredicate = """
+        organization_id = @organizationId AND status = 0 AND harness = ANY(@harnesses)
+          AND (scheduled_for IS NULL OR scheduled_for <= @now)
+          AND (requested_runner_id IS NULL OR requested_runner_id = @runnerId
+               OR NOT EXISTS (SELECT 1 FROM automation.runners r
+                              WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
+          AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
+        """;
 
     /// <summary>
     /// Hands a claimed run back before it starts. A machine that serves several

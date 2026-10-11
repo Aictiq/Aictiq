@@ -35,6 +35,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<RunMention> RunMentions => Set<RunMention>();
     public DbSet<PlaybookStage> PlaybookStages => Set<PlaybookStage>();
     public DbSet<ChainStep> ChainSteps => Set<ChainStep>();
+    public DbSet<FleetSettings> FleetSettings => Set<FleetSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +49,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.TokenHash).HasMaxLength(64);
             b.Property(x => x.TokenPrefix).HasMaxLength(RunnerCredential.PrefixLength);
             b.Property(x => x.RegisteredBy).HasMaxLength(450);
+            b.Property(x => x.Tags).HasDefaultValueSql("'{}'::text[]");
             b.Property(x => x.Capabilities)
                 .HasColumnType("jsonb")
                 .HasConversion(
@@ -76,6 +78,25 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             });
         });
 
+        modelBuilder.Entity<FleetSettings>(b =>
+        {
+            b.ToTable("fleet_settings");
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.ScaleWebhookUrl).HasMaxLength(Domain.FleetSettings.MaxWebhookUrlLength);
+            b.Property(x => x.ScaleWebhookSecretProtected).HasMaxLength(2000);
+            b.Property(x => x.LastScaleCallError).HasMaxLength(Domain.FleetSettings.MaxWebhookErrorLength);
+            b.Property(x => x.EnrollTokenHash).HasMaxLength(64);
+            b.Property(x => x.EnrollTokenPrefix).HasMaxLength(8);
+            b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_fleet_settings_organization_id");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_fleet_settings_scale_after", "scale_after_seconds BETWEEN 30 AND 86400");
+                t.HasCheckConstraint("ck_fleet_settings_scale_cooldown", "scale_cooldown_seconds BETWEEN 60 AND 86400");
+                t.HasCheckConstraint("ck_fleet_settings_webhook_secret",
+                    "scale_webhook_url IS NULL OR scale_webhook_secret_protected IS NOT NULL");
+            });
+        });
+
         modelBuilder.Entity<Playbook>(b =>
         {
             b.ToTable("playbooks");
@@ -83,6 +104,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.Name).HasMaxLength(Playbook.MaxNameLength);
             b.Property(x => x.Harness).HasMaxLength(16);
             b.Property(x => x.CreatedBy).HasMaxLength(450);
+            b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
             b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_playbooks_project_id");
             b.HasIndex(x => new { x.ProjectId, x.IsDefault }).IsUnique().HasFilter("is_default")
                 .HasDatabaseName("ux_playbooks_default_project");
@@ -172,6 +194,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.Kind).HasConversion<short>();
             b.Property(x => x.StageVerdict).HasConversion<short?>();
             b.Property(x => x.StageFindings).HasMaxLength(Run.MaxStageFindingsLength);
+            b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
 
             b.HasIndex(x => new { x.ProjectId, x.QueuedAt }).HasDatabaseName("ix_runs_project_queued");
             b.HasIndex(x => new { x.OrganizationId, x.Status, x.QueuedAt }).HasDatabaseName("ix_runs_organization_status_queued");
@@ -262,6 +285,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.Name).HasMaxLength(Rule.MaxNameLength);
             b.Property(x => x.AgentUserId).HasMaxLength(Run.MaxActorLength);
             b.Property(x => x.CreatedBy).HasMaxLength(450);
+            b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
             b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_rules_project_id");
             b.HasIndex(x => x.PlaybookId).HasDatabaseName("ix_rules_playbook_id");
             // RESTRICT: a playbook a rule uses cannot be deleted out from under it. The

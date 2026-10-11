@@ -52,7 +52,8 @@ public sealed record RunView(
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
-    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null);
+    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
+    IReadOnlyList<string>? RequiredTags = null);
 
 /// <summary>
 /// What a queued run waits for, so the run page can say it rather than "waiting for a runner".
@@ -65,10 +66,20 @@ public sealed record RunView(
 /// <c>no-runner</c>: no online runner offers the run's harness.
 /// <c>runners-busy</c>: every online runner that offers it has every slot taken.
 /// <c>runner-free</c>: a runner that offers it has a free slot and should take it within seconds.
+/// <c>no-matching-runner</c> (fleet mode): no online runner offers the harness and has every one of
+/// <paramref name="RequiredTags"/>.
 /// </param>
 /// <param name="Runners">The runners the reason is about, by name.</param>
 /// <param name="Ahead">Runs queued before this one that the same runners may take first.</param>
-public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead);
+/// <param name="RequiredTags">Fleet mode: the tags the run requires, while they decide which runners count.</param>
+/// <param name="ScaleUp">Fleet mode: what the scale-from-zero webhook last did, when one is set up.</param>
+public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null);
+
+/// <param name="LastCalledAt">When the webhook was last called, or null when it has not been yet.</param>
+/// <param name="Error">Why that call failed, or null when it succeeded.</param>
+/// <param name="AfterSeconds">How long a run waits before the webhook is called.</param>
+public sealed record RunScaleUpView(DateTimeOffset? LastCalledAt, string? Error, int AfterSeconds);
 
 /// <summary>One run of a continue chain, with what it cost on its own.</summary>
 public sealed record RunChainLink(
@@ -77,8 +88,10 @@ public sealed record RunChainLink(
 
 /// <param name="RunnerId">The runner that must take the run; null for any free runner.</param>
 /// <param name="ScheduledFor">When the run may start, with its offset; null to start now. Must be in the future.</param>
+/// <param name="RequiredTags">Fleet mode only: tags the runner must have, on top of the playbook's. Ignored while fleet mode is off.</param>
 public sealed record DispatchRunRequest(
-    Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null);
+    Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null,
+    IReadOnlyList<string>? RequiredTags = null);
 
 /// <summary>
 /// A person's window on the factory: dispatch, watch, cancel.
@@ -129,7 +142,7 @@ public static class RunEndpoints
         var project = http.ResolvedProject()!;
         var result = await dispatcher.DispatchAsync(
             project, itemKey, request.PlaybookId, request.AgentId, request.RunnerId, DispatchActor.User(user.UserId!), ct,
-            scheduledFor: request.ScheduledFor);
+            scheduledFor: request.ScheduledFor, requiredTags: request.RequiredTags);
         switch (result.Outcome)
         {
             case DispatchOutcome.ItemNotFound:
@@ -240,8 +253,8 @@ public static class RunEndpoints
 
     private static async Task<IResult> GetAsync(
         Guid runId, AutomationDbContext db, ICurrentTenant tenant, ICurrentUser user,
-        IProjectAccess access, IUserDirectory directory, IOptions<AutomationOptions> options, TimeProvider clock,
-        CancellationToken ct)
+        IProjectAccess access, IUserDirectory directory, IOptions<AutomationOptions> options, FleetMode fleetMode,
+        TimeProvider clock, CancellationToken ct)
     {
         if (user.UserId is not { } userId)
         {
@@ -259,17 +272,18 @@ public static class RunEndpoints
         var view = await WithChainAsync(db, run, ToView(run, people, includeDetails: isOperator, names), ct);
         // Runner names are the operators' business, like the runner list they come from.
         return Results.Ok(isOperator
-            ? view with { Waiting = await WaitingAsync(db, run, options.Value, clock.GetUtcNow(), ct) }
+            ? view with { Waiting = await WaitingAsync(db, run, await fleetMode.GetAsync(tenant.OrganizationId!.Value, ct), options.Value, clock.GetUtcNow(), ct) }
             : view);
     }
 
     /// <summary>
     /// Why a queued run is not running yet, judged the way <c>/runner/runs/claim</c> hands runs
     /// out: the runner it was sent to while that one is enabled, otherwise any runner that offers
-    /// its harness. Null for a run that is not queued, or still waits for its start time.
+    /// its harness - and, in fleet mode, has every tag it requires. Null for a run that is not
+    /// queued, or still waits for its start time.
     /// </summary>
     private static async Task<RunWaitView?> WaitingAsync(
-        AutomationDbContext db, Run run, AutomationOptions options, DateTimeOffset now, CancellationToken ct)
+        AutomationDbContext db, Run run, FleetState fleet, AutomationOptions options, DateTimeOffset now, CancellationToken ct)
     {
         if (run.Status != RunStatus.Queued || run.ScheduledFor > now)
         {
@@ -279,6 +293,7 @@ public static class RunEndpoints
         var runners = (await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null && r.DisabledAt == null)
                 .ToListAsync(ct))
             .Where(r => r.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)
+            .Where(r => !fleet.Active || FleetTags.Satisfies(FleetTags.Effective(r), run.RequiredTags))
             .ToList();
         var requested = run.RequestedRunnerId is { } requestedId
             ? await db.Runners.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestedId, ct)
@@ -300,7 +315,7 @@ public static class RunEndpoints
         {
             (true, 0, _) => ("runner-offline", candidates),
             (true, _, 0) => ("runner-busy", online),
-            (false, 0, _) => ("no-runner", []),
+            (false, 0, _) => (fleet.Active && run.RequiredTags.Length > 0 ? "no-matching-runner" : "no-runner", []),
             (false, _, 0) => ("runners-busy", online),
             _ => ("runner-free", free),
         };
@@ -316,7 +331,14 @@ public static class RunEndpoints
                 && (r.RequestedRunnerId == null || candidateIds.Contains(r.RequestedRunnerId.Value)))
             .CountAsync(ct);
 
-        return new RunWaitView(reason, named.Select(r => r.Name).Order(StringComparer.Ordinal).ToList(), ahead);
+        RunScaleUpView? scaleUp = null;
+        if (fleet.Active && await db.FleetSettings.AsNoTracking().SingleOrDefaultAsync(ct) is { ScaleWebhookUrl: not null } settings)
+        {
+            scaleUp = new RunScaleUpView(settings.LastScaleCallAt, settings.LastScaleCallError, settings.ScaleAfterSeconds);
+        }
+
+        return new RunWaitView(reason, named.Select(r => r.Name).Order(StringComparer.Ordinal).ToList(), ahead,
+            fleet.Active && run.RequiredTags.Length > 0 ? run.RequiredTags : null, scaleUp);
     }
 
     /// <summary>
@@ -734,7 +756,7 @@ public static class RunEndpoints
             WorkspacePath: run.WorkspacePath,
             TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName,
             StageVerdict: PlaybookChain.VerdictName(run.StageVerdict), StageIndex: run.StageIndex,
-            ReworkOfRunId: run.ReworkOfRunId);
+            ReworkOfRunId: run.ReworkOfRunId, RequiredTags: run.RequiredTags);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

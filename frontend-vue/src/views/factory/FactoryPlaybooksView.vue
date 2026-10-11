@@ -32,6 +32,7 @@ import { listWorkflows, type WorkflowState } from '@/api/workflows'
 import EmptyState from '@/components/common/EmptyState.vue'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
+import FleetTagInput from '@/components/factory/FleetTagInput.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Badge } from '@/components/ui/badge'
@@ -51,8 +52,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { useFleetStatus } from '@/composables/useFleetStatus'
 import { useOrgScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
+import { requiredTagErrors, unknownFleetTags, unknownFleetTagWarning } from '@/lib/fleet'
 import { wikiPath } from '@/router/paths'
 import { ApiError, ConflictError } from '@/utils/api'
 
@@ -85,6 +88,10 @@ const onSuccessStateId = ref('')
 const onFailureStateId = ref('')
 const maxMinutes = ref(60)
 const workOnDefaultBranch = ref(false)
+/** Fleet mode only: never shown, and never sent, while it is not active. */
+const requiredTags = ref<string[]>([])
+
+const { active: fleetActive, knownTags } = useFleetStatus(() => org.slug.value)
 
 const mayEditCurrent = computed(
   () => editing.value?.group.project.role === 'admin' && !editing.value.group.project.isArchived,
@@ -152,6 +159,7 @@ async function openEditor(group: ProjectPlaybooks, playbook: Playbook | null = n
   onFailureStateId.value = playbook?.onFailureStateId ?? ''
   maxMinutes.value = playbook?.maxMinutes ?? 60
   workOnDefaultBranch.value = playbook?.workOnDefaultBranch ?? false
+  requiredTags.value = [...(playbook?.requiredTags ?? [])]
   fieldErrors.value = {}
   if (!playbook) return
   instructionsLoading.value = true
@@ -184,6 +192,8 @@ async function save() {
     onFailureStateId: onFailureStateId.value || null,
     maxMinutes: maxMinutes.value,
     workOnDefaultBranch: workOnDefaultBranch.value,
+    // Left out entirely while fleet mode is off, so the request is the one it always was.
+    ...(fleetActive.value ? { requiredTags: requiredTags.value } : {}),
   }
 
   submitting.value = true
@@ -204,6 +214,7 @@ async function save() {
     }
     editing.value = null
     toast.success(`${saved.name} ${context.playbook ? 'updated' : 'created'}.`)
+    warnUnknownTags(saved.requiredTags)
   } catch (error) {
     if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
       fieldErrors.value = error.fieldErrors
@@ -216,6 +227,14 @@ async function save() {
     }
   } finally {
     submitting.value = false
+  }
+}
+
+/** Saved all the same: a runner with the tag may be about to connect (scale from zero). */
+function warnUnknownTags(tags: string[] | undefined) {
+  if (!fleetActive.value || !tags?.length) return
+  for (const tag of unknownFleetTags(tags, knownTags.value)) {
+    toast.warning(unknownFleetTagWarning(tag))
   }
 }
 
@@ -428,6 +447,21 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                 · Success: {{ stateName(group, playbook.onSuccessStateId) }} · Failure:
                 {{ stateName(group, playbook.onFailureStateId) }} · {{ playbook.maxMinutes }} min
               </p>
+              <div
+                v-if="fleetActive && playbook.requiredTags?.length"
+                class="mt-1 flex flex-wrap items-center gap-1 text-xs"
+                data-testid="playbook-required-tags-list"
+              >
+                <span class="text-muted-foreground">Requires</span>
+                <Badge
+                  v-for="tag in playbook.requiredTags"
+                  :key="tag"
+                  variant="outline"
+                  class="font-mono text-[10px]"
+                >
+                  {{ tag }}
+                </Badge>
+              </div>
               <RouterLink
                 v-if="playbook.wikiPageId"
                 class="text-primary mt-1 inline-flex items-center gap-1 text-xs hover:underline"
@@ -656,6 +690,27 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                 {{ message }}
               </p>
             </div>
+          </div>
+
+          <div v-if="fleetActive" class="space-y-1.5">
+            <label for="playbook-required-tags" class="text-sm font-medium">Required tags</label>
+            <FleetTagInput
+              id="playbook-required-tags"
+              v-model="requiredTags"
+              :suggestions="knownTags"
+              testid="playbook-required-tags"
+              placeholder="gpu-enabled"
+            />
+            <p class="text-muted-foreground text-xs">
+              Every run of this playbook goes only to a runner that has all of these tags.
+            </p>
+            <p
+              v-for="message in requiredTagErrors(fieldErrors)"
+              :key="message"
+              class="text-destructive text-xs"
+            >
+              {{ message }}
+            </p>
           </div>
 
           <div class="grid gap-4 sm:grid-cols-2">

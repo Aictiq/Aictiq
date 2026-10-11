@@ -641,6 +641,72 @@ refinement failed, so it can be tried again. Starting one needs the same **Can s
 permission as **Hand to agent**. Refinement details, confirmation and project refinement
 settings require that permission too; stakeholders do not see or change ticket refinement.
 
+## 9. Fleet mode (paid hosted plans)
+
+Fleet mode is for teams with many automated or scheduled runs and several runners. It is off
+by default, and while it is off nothing on this page changes: runs go to whichever free runner
+polls first and no tag fields are shown. Only an organization on a paid hosted plan can turn it
+on, under **Settings → Fleet**. Free, hosted-free and evaluation organizations see it as an
+upgrade. It is not offered on self-hosted installs yet; support may come later.
+
+**Runner tags.** A runner's tags describe the machine: `gpu-enabled`, `linux-docker`,
+`mac-m-series`. Set them on the machine with `aictiq runner start --tag gpu-enabled` (repeat
+the flag, or separate tags with commas), or as an Admin under **Factory → Runners → Edit
+tags**. The OS and architecture a runner reports are tags too, as `os:linux` and `arch:arm64`.
+A tag is lower case letters, digits, `-`, `_`, `.` or `:`, at most 50 characters, and a runner
+or run has at most 20.
+
+**Required tags.** A playbook, an automation rule and **Start run** can each require tags. A
+run requires the playbook's tags plus the rule's or the person's, and only a runner that has
+every one of them takes it. A run sent to one particular runner goes to that runner whatever it
+requires. When no online runner offers the run's harness with those tags, the run page says
+**no matching runner**. Saving a tag no runner has ever had shows a warning straight away.
+
+**Load balancing.** When several runners match, the run goes to the one with the most free
+slots (`--parallel` minus the runs it holds), and no runner ever takes more runs than its
+`--parallel`. A busier runner leaves a run to a freer one for a few seconds, long enough for
+that runner's next poll, and then takes it anyway, so a runner that is online but not polling
+never strands work. **Factory → Runners** shows each runner's tags, active and maximum runs,
+and the queue: how many runs wait and how long the oldest has waited.
+
+**Scale from zero.** Under **Settings → Fleet → Scale from zero**, set an HTTPS webhook URL,
+how long a run may wait before it is called, and a cooldown. When a run any runner may take has
+waited longer than the threshold, Aictiq posts once to the webhook and then waits for the
+cooldown, whatever the webhook answered. Point it at your own Docker, KVM or Kubernetes
+automation; Aictiq does not start machines itself. The request carries
+`X-Aictiq-Event: fleet.scale_up` and `X-Aictiq-Signature: sha256=<HMAC-SHA256 of the body>`,
+signed with the secret shown once when the URL is first saved:
+
+```json
+{
+  "event": "fleet.scale_up",
+  "organization": "acme",
+  "aictiqUrl": "https://app.aictiq.com",
+  "sentAt": "2026-10-11T09:00:00Z",
+  "queue": { "waiting": 3, "oldestWaitingSince": "2026-10-11T08:56:12Z" },
+  "demand": [{ "harness": "claude", "requiredTags": ["gpu-enabled"], "runs": 3 }]
+}
+```
+
+A failed or timed-out call is shown on the waiting run's page, and the webhook is not called
+again until the cooldown has passed.
+
+**Ephemeral runners.** Mint an enrollment token under **Settings → Fleet → Ephemeral runners**
+and give it to the machines your webhook starts. Each one registers itself, takes runs, and
+removes itself once it has been idle:
+
+```sh
+aictiq runner enroll --url https://app.aictiq.com --token "$AICTIQ_ENROLL_TOKEN" --tag gpu-enabled
+aictiq runner start --idle-exit 10
+```
+
+An ephemeral runner that stops without removing itself is removed after 15 minutes of
+silence. Revoking the token stops new enrollments; runners already enrolled keep working.
+
+If the organization drops off its paid plan while fleet mode is on, the settings are kept but
+runs dispatch as if fleet mode were off: required tags are ignored, so nothing waits on them,
+and the fleet settings show a notice until the plan is paid again.
+
 ## Retention
 
 Run records stay as item history, with outcome summaries, failure reasons, prompt

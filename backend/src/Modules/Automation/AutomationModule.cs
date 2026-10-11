@@ -5,11 +5,13 @@ using Aictiq.Modules.Automation.Mcp;
 using Aictiq.Modules.Automation.Workers;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Events;
+using Aictiq.SharedKernel.Http;
 using Aictiq.SharedKernel.Mcp;
 using Aictiq.SharedKernel.Persistence;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Aictiq.Modules.Automation;
 
@@ -32,6 +34,22 @@ public static class AutomationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<RunDispatcher>();
+        services.AddScoped<FleetMode>();
+        services.AddSingleton<FleetSecrets>();
+        // Registered with the module rather than the workers so the sweeper a test drives in the
+        // API host finds it. The address is re-checked when the socket opens, as outbound
+        // webhooks' is: a receiver whose DNS flips to a private address after the save still fails.
+        // No retry handler: one attempt per cooldown is the contract, and a retried 5xx would
+        // start a second machine for the same queue.
+        services.AddScoped<FleetScaler>();
+        // EXTEXP0001: RemoveAllResilienceHandlers is still marked experimental; it is the
+        // supported way to opt one client out of ConfigureHttpClientDefaults.
+#pragma warning disable EXTEXP0001
+        services.AddHttpClient(FleetScaler.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(sp => PublicNetworkGuard.CreateHandler(
+                sp.GetRequiredService<IOptions<AutomationOptions>>().Value.FleetWebhookAllowPrivateNetworks))
+            .RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
         services.AddScoped<RunMentionQueue>();
         services.AddScoped<ChainQueue>();
         services.AddScoped<IFactoryPages, AutomationFactoryPages>();
@@ -61,6 +79,7 @@ public static class AutomationModule
     public static IEndpointRouteBuilder MapAutomationEndpoints(this IEndpointRouteBuilder api)
     {
         api.MapRunnerEndpoints();
+        api.MapFleetEndpoints();
         api.MapPlaybookEndpoints();
         api.MapRunEndpoints();
         api.MapRunProtocolEndpoints();

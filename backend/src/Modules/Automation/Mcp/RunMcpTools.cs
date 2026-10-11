@@ -27,8 +27,8 @@ public sealed class RunMcpTools(
     RunDispatcher dispatcher)
 {
     [McpServerTool(Name = "start_run")]
-    [Description("Hands a work item to an agent by queueing a factory run for it. Needs whoami.canOperateFactory. playbook and agent may be a name or an id; each defaults to the project's factory settings. runner, a runner's name or id, makes only that machine take the run; omitted, any free runner does. Answers { runId } or, in words, why not.")]
-    public async Task<object?> StartRun(string key, string? playbook = null, string? agent = null, string? runner = null, CancellationToken cancellationToken = default)
+    [Description("Hands a work item to an agent by queueing a factory run for it. Needs whoami.canOperateFactory. playbook and agent may be a name or an id; each defaults to the project's factory settings. runner, a runner's name or id, makes only that machine take the run; omitted, any free runner does. requiredTags, in fleet mode only, are tags the runner must have on top of the playbook's (e.g. [\"gpu-enabled\"]). Answers { runId } or, in words, why not.")]
+    public async Task<object?> StartRun(string key, string? playbook = null, string? agent = null, string? runner = null, string[]? requiredTags = null, CancellationToken cancellationToken = default)
     {
         var (project, role) = await ProjectForKeyAsync(key, cancellationToken) ?? throw NotFound(key);
         // A Guest sees the item and may not write it: the same "not found or no access" the
@@ -43,7 +43,8 @@ public sealed class RunMcpTools(
         Guid? runnerId = runner is null ? null : await ResolveRunnerAsync(runner, cancellationToken);
 
         var result = await dispatcher.DispatchAsync(
-            project, Normalize(key), playbookId, agentId, runnerId, DispatchActor.User(user.UserId!), cancellationToken);
+            project, Normalize(key), playbookId, agentId, runnerId, DispatchActor.User(user.UserId!), cancellationToken,
+            requiredTags: requiredTags);
         return result.Outcome switch
         {
             DispatchOutcome.Created => new

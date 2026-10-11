@@ -24,6 +24,18 @@ public sealed record PlanLimitDecision(bool Allowed, string? Limit, string? Reas
 /// invitation being accepted - already counted while it was pending, and replaced by the
 /// person accepting it rather than counted twice.
 /// </summary>
+/// <summary>Whether an organization may turn fleet mode on (runner tags, load balancing, scale from zero).</summary>
+public enum FleetModeAvailability
+{
+    /// <summary>Not offered here: a self-hosted instance, or one without billing. Support may come later.</summary>
+    Hidden = 0,
+
+    /// <summary>Offered, but only on a paid hosted plan: free, hosted-free and evaluation organizations see an upgrade.</summary>
+    UpgradeRequired = 1,
+
+    Available = 2,
+}
+
 public sealed record IncomingPerson(string? UserId, string? Email, string? AcceptedInvitationEmail = null);
 
 /// <summary>
@@ -60,6 +72,9 @@ public interface IPlanLimits
 
     /// <param name="registered">Runners the organization has registered now, disabled ones included.</param>
     Task<PlanLimitDecision> CanRegisterRunnerAsync(Guid organizationId, int registered, CancellationToken cancellationToken = default);
+
+    /// <summary>Fleet mode is for organizations a paid hosted subscription is charging for, and nobody else.</summary>
+    Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -82,4 +97,7 @@ public sealed class UnlimitedPlanLimits : IPlanLimits
     public Task<PlanLimitDecision> CanAddPersonAsync(Guid organizationId, IncomingPerson person, CancellationToken cancellationToken = default) => Task.FromResult(PlanLimitDecision.Allow);
     public Task<PlanLimitDecision> CanMakeOwnerAsync(Guid organizationId, string userId, CancellationToken cancellationToken = default) => Task.FromResult(PlanLimitDecision.Allow);
     public Task<PlanLimitDecision> CanRegisterRunnerAsync(Guid organizationId, int registered, CancellationToken cancellationToken = default) => Task.FromResult(PlanLimitDecision.Allow);
+
+    // Fleet mode is not offered on self-hosted installs for now; support may come later.
+    public Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(FleetModeAvailability.Hidden);
 }

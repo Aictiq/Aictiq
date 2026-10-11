@@ -13,6 +13,7 @@ export type OrgSettingsTab =
   | 'members'
   | 'agents'
   | 'invitations'
+  | 'fleet'
   | 'billing'
   | 'integrations'
   | 'notifications'
@@ -95,12 +96,17 @@ export interface SettingsLink {
   tour?: string
 }
 
-export function orgSettingsLinks(slug: string): SettingsLink[] {
+/**
+ * `fleet` adds the Fleet tab: it is an Admin's page, and only where fleet mode is offered at
+ * all - a self-hosted instance never shows it.
+ */
+export function orgSettingsLinks(slug: string, options: { fleet?: boolean } = {}): SettingsLink[] {
   return [
     { to: orgSettingsPath(slug, 'general'), label: 'General' },
     { to: orgSettingsPath(slug, 'members'), label: 'Members' },
     { to: orgSettingsPath(slug, 'invitations'), label: 'Invitations' },
     { to: orgSettingsPath(slug, 'agents'), label: 'Agents' },
+    ...(options.fleet ? [{ to: orgSettingsPath(slug, 'fleet'), label: 'Fleet' }] : []),
     { to: orgSettingsPath(slug, 'billing'), label: 'Billing' },
     { to: orgSettingsPath(slug, 'integrations'), label: 'Integrations' },
     { to: orgSettingsPath(slug, 'notifications'), label: 'Notifications' },

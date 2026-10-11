@@ -5,6 +5,7 @@ import type {
   LogStream,
   RunAttachment,
   RunnerCapabilities,
+  RunnerEnrollment,
   RunnerHello,
 } from './types.js'
 
@@ -69,6 +70,19 @@ export class RunnerClient {
 
   async heartbeat(capabilities: RunnerCapabilities): Promise<void> {
     await this.send('/runner/heartbeat', { capabilities })
+  }
+
+  /**
+   * Fleet mode: trades a `jfe_` enrollment token (this client's `token`) for a new runner and
+   * its `jrn_` secret. The only call made with an enrollment token.
+   */
+  enroll(name: string | null, tags: string[]): Promise<RunnerEnrollment> {
+    return this.send<RunnerEnrollment>('/runner/enroll', { name, tags })
+  }
+
+  /** An ephemeral runner deleting itself on the way out, with its own secret. */
+  async deregister(): Promise<void> {
+    await this.send('/runner/deregister')
   }
 
   /** Long-polls; null when the server had nothing within its poll timeout. */

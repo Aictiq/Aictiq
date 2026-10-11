@@ -114,6 +114,13 @@ public sealed class Run : TenantEntity
     /// </summary>
     public Guid? RequestedRunnerId { get; set; }
 
+    /// <summary>
+    /// The tags a runner must have to take the run, fixed at dispatch: the playbook's, plus the
+    /// rule's or the person's. Empty unless fleet mode was in force then, and ignored by the
+    /// claim while it is not, so a run never waits on tags after a downgrade.
+    /// </summary>
+    public string[] RequiredTags { get; init; } = [];
+
     public RunStatus Status { get; set; }
 
     public required string Harness { get; init; }

@@ -39,6 +39,21 @@ public sealed class AutomationOptions
     public int RunnerLostAfterMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Fleet mode: how long a due run is left for a matching runner with more free capacity
+    /// before a busier one that also matches may take it. Long enough for an idle runner's
+    /// next poll, short enough that a runner that is online but not polling never strands a run.
+    /// </summary>
+    [Range(0, 300)]
+    public int FleetBalanceGraceSeconds { get; set; } = 15;
+
+    /// <summary>An ephemeral runner not seen for this long is removed by the sweeper (it normally removes itself).</summary>
+    [Range(5, 1440)]
+    public int EphemeralRunnerLostAfterMinutes { get; set; } = 15;
+
+    /// <summary>Lets the scale webhook reach private addresses. Development and tests only.</summary>
+    public bool FleetWebhookAllowPrivateNetworks { get; set; }
+
+    /// <summary>
     /// <c>last_seen_at</c> is written at most this often. The throttle is in the <c>WHERE</c>
     /// clause, so concurrent heartbeats from one runner do not each decide to write.
     /// </summary>

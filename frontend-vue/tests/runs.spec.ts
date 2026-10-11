@@ -33,6 +33,7 @@ import {
   runSuccessRate,
   runScheduledLabel,
   runWaitingMessage,
+  scaleUpMessage,
   startRunButton,
   TRUNCATED_SEQ,
   writeRefineRunChoice,
@@ -373,6 +374,70 @@ describe('lib/runs', () => {
       )
       // Without the reason (a viewer who is not an operator) it says what it always said.
       expect(runWaitingMessage(queued)).toBe('Waiting for a runner that offers codex…')
+    })
+
+    it('names the required tags when no runner in the fleet has them all', () => {
+      const queued = { status: 'queued' as const, harness: 'claude' as const }
+      const waiting = (extra: Partial<NonNullable<Run['waiting']>> = {}) =>
+        runWaitingMessage(
+          {
+            ...queued,
+            waiting: { reason: 'no-matching-runner', runners: [], ahead: 0, ...extra },
+          },
+          new Date('2026-10-11T12:00:00Z'),
+        )
+      expect(waiting({ requiredTags: ['gpu-enabled', 'os:linux'] })).toBe(
+        'No online runner offers claude with the tags gpu-enabled, os:linux. It starts when one connects.',
+      )
+      expect(waiting({ requiredTags: null })).toBe(
+        'No online runner offers claude with the required tags. It starts when one connects.',
+      )
+    })
+
+    it('says what scale from zero did about a run that waits for capacity', () => {
+      const now = new Date('2026-10-11T12:00:00Z')
+      const run = (scaleUp: NonNullable<Run['waiting']>['scaleUp']) =>
+        runWaitingMessage(
+          {
+            status: 'queued',
+            harness: 'claude',
+            waiting: {
+              reason: 'no-matching-runner',
+              runners: [],
+              ahead: 0,
+              requiredTags: ['gpu-enabled'],
+              scaleUp,
+            },
+          },
+          now,
+        )
+      expect(run({ lastCalledAt: null, error: null, afterSeconds: 120 })).toBe(
+        'No online runner offers claude with the tags gpu-enabled. It starts when one connects. Scale from zero calls its webhook once a run has waited 2 min.',
+      )
+      expect(run({ lastCalledAt: '2026-10-11T11:56:00Z', error: null, afterSeconds: 120 })).toMatch(
+        / Scale from zero last called its webhook 4 min ago\.$/,
+      )
+      expect(
+        run({ lastCalledAt: '2026-10-11T11:56:00Z', error: 'HTTP 503.', afterSeconds: 120 }),
+      ).toMatch(/ Scale from zero last called its webhook 4 min ago, and the call failed: HTTP 503\.$/)
+      // Without a webhook there is nothing to say about it.
+      expect(run(null)).toBe(
+        'No online runner offers claude with the tags gpu-enabled. It starts when one connects.',
+      )
+    })
+
+    it('never mentions scale from zero for a run sent to one runner', () => {
+      const scaleUp = { lastCalledAt: null, error: null, afterSeconds: 30 }
+      expect(
+        runWaitingMessage({
+          status: 'queued',
+          harness: 'codex',
+          waiting: { reason: 'runner-offline', runners: ['laptop'], ahead: 0, scaleUp },
+        }),
+      ).toBe('Waiting for laptop, which is offline. It starts when laptop comes back.')
+      expect(scaleUpMessage(scaleUp)).toBe(
+        'Scale from zero calls its webhook once a run has waited 30 s.',
+      )
     })
 
     it('names the start time while a scheduled run waits for it', () => {

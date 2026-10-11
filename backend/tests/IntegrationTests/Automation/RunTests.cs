@@ -666,7 +666,8 @@ public sealed class RunLogLimitTests(PostgresFixture postgres, GarageFixture gar
 }
 
 public sealed record DispatchRunRequest(
-    Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null);
+    Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null,
+    IReadOnlyList<string>? RequiredTags = null);
 
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid? PlaybookId,
@@ -683,9 +684,13 @@ public sealed record RunView(
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
-    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null);
+    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
+    IReadOnlyList<string>? RequiredTags = null);
 
-public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead);
+public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null);
+
+public sealed record RunScaleUpView(DateTimeOffset? LastCalledAt, string? Error, int AfterSeconds);
 
 public sealed record RunChainLink(
     Guid Id, string Status, bool AutoContinued, DateTimeOffset QueuedAt, DateTimeOffset? FinishedAt,

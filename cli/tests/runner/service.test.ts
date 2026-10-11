@@ -53,6 +53,23 @@ describe('install-service', () => {
     expect(unit).toContain('Environment=PATH=/usr/local/bin:/usr/bin:/bin')
   })
 
+  it('passes --tag through to runner start as one comma-separated argument, and nothing without tags', () => {
+    const tagged = { ...options, tags: ['docker', 'gpu'] }
+    expect(systemdUnit(tagged)).toContain(
+      'ExecStart=/usr/local/bin/node /opt/aictiq/dist/index.js runner start --parallel 2 --tag docker,gpu\n',
+    )
+    expect(scheduledTaskInstaller(tagged)).toContain("runner start --parallel '2' --tag 'docker,gpu' 2>&1 |")
+    const args = programArguments(launchdAgent(tagged))
+    expect(args[2]).toContain('runner start --parallel "$3" --tag "$4" &')
+    expect(args.slice(3)).toEqual(['aictiq-runner', options.node, options.entry, '2', 'docker,gpu'])
+
+    for (const untagged of [options, { ...options, tags: [] }]) {
+      expect(systemdUnit(untagged)).not.toContain('--tag')
+      expect(launchdAgent(untagged)).not.toContain('--tag')
+      expect(scheduledTaskInstaller(untagged)).not.toContain('--tag')
+    }
+  })
+
   it('marks every definition, so a runner can report that a service started it', () => {
     expect(systemdUnit(options)).toContain('Environment=AICTIQ_RUNNER_SERVICE=1')
     expect(launchdAgent(options)).toContain(

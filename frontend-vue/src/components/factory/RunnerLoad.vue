@@ -18,6 +18,8 @@ const props = defineProps<{
   slots: number
   entry: RunnerLoadEntry
   muted: boolean
+  /** Fleet mode: say `0 / 4 running` rather than `idle`, so capacity reads across the roster. */
+  showSlots?: boolean
 }>()
 
 /** Enough links to see what it holds at a glance; the rest are one filter away. */
@@ -26,6 +28,11 @@ const shownRuns = 3
 const level = computed(() => loadLevel(props.entry.running, props.slots))
 const waiting = computed(() =>
   waitingSummary(props.entry.queued, props.entry.scheduled, props.entry.nextScheduledFor),
+)
+const label = computed(() =>
+  props.showSlots
+    ? `${props.entry.running} / ${props.slots} running`
+    : loadLabel(props.entry.running, props.slots),
 )
 const runsPath = computed(
   () => `${factoryPath(props.slug, 'runs')}?runner=${encodeURIComponent(props.entry.runnerId)}`,
@@ -47,7 +54,7 @@ const runsPath = computed(
         aria-valuemin="0"
         :aria-valuemax="slots"
         :aria-valuenow="entry.running"
-        :aria-valuetext="loadLabel(entry.running, slots)"
+        :aria-valuetext="label"
       >
         <span
           class="block h-full rounded-full"
@@ -55,8 +62,12 @@ const runsPath = computed(
           :style="{ width: `${loadPercent(entry.running, slots)}%` }"
         />
       </span>
-      <span class="tabular-nums" :class="muted || level === 'idle' ? 'text-muted-foreground' : ''">
-        {{ loadLabel(entry.running, slots) }}
+      <span
+        class="tabular-nums"
+        :class="muted || level === 'idle' ? 'text-muted-foreground' : ''"
+        :data-testid="showSlots ? 'runner-slots' : undefined"
+      >
+        {{ label }}
       </span>
     </span>
     <span v-if="entry.active.length" class="flex flex-wrap items-center gap-x-1.5">

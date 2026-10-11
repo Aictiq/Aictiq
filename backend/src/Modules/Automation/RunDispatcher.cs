@@ -102,7 +102,7 @@ public sealed class RunDispatcher(
     AutomationDbContext db, ICurrentTenant tenant, IWorkItemLookup items, IProjectAccess access,
     IAgentIdentities agents, IWikiPageAccess pages, IWikiPageContent pageContent,
     IWorkItemClaims claims, IRealtimePublisher realtime, IOrganizationBillingState billing,
-    TimeProvider clock)
+    FleetMode fleetMode, TimeProvider clock)
 {
     /// <param name="project">The item's project, already resolved and checked by the door.</param>
     /// <param name="itemKey">The item to hand over.</param>
@@ -142,12 +142,23 @@ public sealed class RunDispatcher(
     /// run follows up the agent's earlier implement run like a mention does, with the stage's
     /// findings as its request.
     /// </param>
+    /// <param name="requiredTags">
+    /// Tags the runner must have, on top of the playbook's: a rule's, or a person's on Start run.
+    /// Only while fleet mode is in force; otherwise they are ignored and the run requires none.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
         DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null,
-        MentionDispatch? mention = null, string? harness = null, ReworkDispatch? rework = null)
+        MentionDispatch? mention = null, string? harness = null, ReworkDispatch? rework = null,
+        IReadOnlyList<string>? requiredTags = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
+
+        var tags = FleetTags.Normalize(requiredTags);
+        if (tags is null)
+        {
+            return DispatchResult.Invalid("requiredTags", FleetTags.Rule);
+        }
 
         if (harness is not null && !Harnesses.IsSupported(harness))
         {
@@ -277,6 +288,10 @@ public sealed class RunDispatcher(
                     rework is null ? null : new ReworkPrompt(rework.StageName, rework.StageRunId, rework.Findings,
                         previous!.Id, await PullRequestOfAsync(item.Id, branch, ct), rework.Round, PlaybookChain.MaxReworkRounds));
         var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
+        // A follow-up keeps what its earlier run required, so it can go back to the same kind of machine.
+        var runTags = (await fleetMode.GetAsync(organizationId, ct)).Active
+            ? FleetTags.Union(playbook.RequiredTags, tags, previous?.RequiredTags)
+            : [];
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -289,6 +304,7 @@ public sealed class RunDispatcher(
             Kind = kind,
             AgentUserId = agentUserId,
             RequestedRunnerId = runnerId,
+            RequiredTags = runTags,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
             RuleId = actor.Kind == DispatchActorKind.Rule ? actor.RuleId : null,
             Harness = runHarness,
@@ -388,6 +404,11 @@ public sealed class RunDispatcher(
                 return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
         }
 
+        // The stage's own playbook says what machine it needs; the builder's rule or person asked
+        // for the builder's, so their tags carry over too.
+        var stageTags = (await fleetMode.GetAsync(organizationId, ct)).Active
+            ? FleetTags.Union(stage.RequiredTags, builder.RequiredTags)
+            : [];
         var pullRequestUrl = await PullRequestOfAsync(item.Id, builder.BranchName, ct);
         var prompt = StagePromptComposer.Compose(
             agent.DisplayName ?? builder.AgentUserId, item.Key, project.Key, project.Name,
@@ -404,6 +425,7 @@ public sealed class RunDispatcher(
             Kind = RunKind.Stage,
             AgentUserId = builder.AgentUserId,
             RequestedRunnerId = runnerId,
+            RequiredTags = stageTags,
             RequestedBy = builder.RequestedBy,
             RuleId = builder.RuleId,
             Harness = stage.Harness,
@@ -512,6 +534,7 @@ public sealed class RunDispatcher(
             AgentUserId = previous.AgentUserId,
             // Only the runner that kept the workspace has the session.
             RequestedRunnerId = previous.RunnerId,
+            RequiredTags = previous.RequiredTags,
             RequestedBy = actor.Kind == DispatchActorKind.User ? actor.UserId : null,
             RuleId = actor.Kind == DispatchActorKind.Rule ? actor.RuleId : null,
             Harness = previous.Harness,

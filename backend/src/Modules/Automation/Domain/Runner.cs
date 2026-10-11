@@ -31,6 +31,19 @@ public sealed class Runner : TenantEntity, IAudited
     /// <summary>What the runner said it can do in its last <c>hello</c> or heartbeat; null until it has spoken.</summary>
     public RunnerCapabilities? Capabilities { get; set; }
 
+    /// <summary>
+    /// Tags an Admin set on Factory → Runners, for fleet mode. The CLI's own <c>--tag</c>s arrive
+    /// in <see cref="RunnerCapabilities.Tags"/> instead, so a heartbeat never undoes an edit here;
+    /// <see cref="FleetTags.Effective"/> is the union a run is matched against.
+    /// </summary>
+    public string[] Tags { get; set; } = [];
+
+    /// <summary>
+    /// Registered by a machine with the fleet's enrollment token rather than by a person: it
+    /// removes itself once idle, and the sweeper removes it if it stops answering.
+    /// </summary>
+    public bool Ephemeral { get; set; }
+
     public DateTimeOffset? LastSeenAt { get; set; }
 
     public DateTimeOffset? DisabledAt { get; set; }
@@ -139,6 +152,10 @@ public static class RunnerCredential
 /// Whether the machine reads Claude usage from Anthropic between runs (<c>aictiq runner usage
 /// --claude-oauth on</c>). Without it, Claude usage is only updated after a run. Display only.
 /// </param>
+/// <param name="Tags">
+/// The machine's own tags (<c>aictiq runner start --tag gpu-enabled</c>). Matched against a run's
+/// required tags while fleet mode is on, together with the tags an Admin set on the runner.
+/// </param>
 public sealed record RunnerCapabilities(
     int V,
     IReadOnlyList<RunnerHarness> Harnesses,
@@ -154,7 +171,8 @@ public sealed record RunnerCapabilities(
     string? Path = null,
     RunnerUpdateFailure? UpdateFailure = null,
     IReadOnlyList<RunnerUsageLimits>? UsageLimits = null,
-    bool? ClaudeUsagePoll = null);
+    bool? ClaudeUsagePoll = null,
+    IReadOnlyList<string>? Tags = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>, <c>cursor</c>, <c>copilot</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);

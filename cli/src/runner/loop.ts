@@ -22,6 +22,8 @@ export interface RunnerLoopOptions {
   floorKey?: string
   /** Called once the instance has said who this runner is. */
   onHello?: (hello: RunnerHello) => void
+  /** Called when a run is claimed and when it ends, so `--idle-exit` counts from the last one. */
+  onActivity?: () => void
 }
 
 export class RunnerRevokedError extends Error {
@@ -129,6 +131,7 @@ export class RunnerLoop {
           continue
         }
         if (!claimed) continue
+        this.options.onActivity?.()
         if (floor && !floor.enter(floorKey) && !(await this.handBack(claimed, floor, floorKey)))
           continue
 
@@ -146,6 +149,7 @@ export class RunnerLoop {
           .finally(() => {
             floor?.leave(floorKey)
             this.active.delete(execution)
+            this.options.onActivity?.()
             this.wake?.()
           })
         this.active.add(execution)

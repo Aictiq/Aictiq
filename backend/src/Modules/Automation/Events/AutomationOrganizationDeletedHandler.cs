@@ -38,6 +38,7 @@ public sealed class AutomationOrganizationDeletedHandler(
         await db.RefinementSettings.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.Playbooks.Where(p => p.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.Runners.Where(r => r.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.FleetSettings.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
 
         foreach (var token in liveTokens)
         {

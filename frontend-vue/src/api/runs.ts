@@ -21,14 +21,35 @@ export type RunStatus =
 
 /**
  * What a queued run waits for. `runner-offline`/`runner-busy`: the one runner it was sent to;
- * `no-runner`: no online runner offers its harness; `runners-busy`: every one that does has
+ * `no-runner`: no online runner offers its harness; `no-matching-runner` (fleet mode): none
+ * offers its harness and has every required tag; `runners-busy`: every one that does has
  * every slot taken; `runner-free`: one has a free slot and should take it within seconds.
  */
 export interface RunWaiting {
-  reason: 'runner-offline' | 'runner-busy' | 'no-runner' | 'runners-busy' | 'runner-free'
+  reason:
+    | 'runner-offline'
+    | 'runner-busy'
+    | 'no-runner'
+    | 'no-matching-runner'
+    | 'runners-busy'
+    | 'runner-free'
   runners: string[]
   /** Runs queued before this one that the same runners may take first. */
   ahead: number
+  /** Fleet mode: the tags the run requires, while they decide which runners count. */
+  requiredTags?: string[] | null
+  /** Fleet mode: what scale from zero did about it; present when a scale webhook is set. */
+  scaleUp?: RunScaleUp | null
+}
+
+/** The scale webhook, as far as one waiting run is concerned. */
+export interface RunScaleUp {
+  /** When the webhook was last called; null when it has not been yet. */
+  lastCalledAt: string | null
+  /** Why the last call failed; null when it succeeded or there was none. */
+  error: string | null
+  /** How long a run waits before the webhook is called. */
+  afterSeconds: number
 }
 
 export interface Run {
@@ -112,6 +133,8 @@ export interface Run {
   superseded?: boolean
   /** Single-run read: the runs from the first failure to the last continue, oldest first. */
   chain?: RunChainLink[] | null
+  /** Fleet mode: the tags its runner must have (the playbook's, the rule's and Start run's). */
+  requiredTags?: string[]
 }
 
 /** One run of a continue chain, with what it cost on its own. */
@@ -252,6 +275,8 @@ export interface DispatchRunBody {
   runnerId?: string | null
   /** When the run may start, as an ISO time with its offset. Null starts it now; a past time is refused. */
   scheduledFor?: string | null
+  /** Fleet mode only: tags the runner must have, on top of the playbook's. Left out while it is off. */
+  requiredTags?: string[]
 }
 
 const runsBase = (slug: string) => `/orgs/${slug}/runs`
