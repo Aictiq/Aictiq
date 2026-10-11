@@ -703,6 +703,26 @@ describe('executeRun', () => {
         expect(git(clone, 'branch', '--list', branch).trim()).toBe('')
       })
 
+      it('fails a stage of a playbook chain once the pull request was merged, without a new branch', async () => {
+        const { clone } = repository()
+        delete options.provision
+        options.pullRequestState = async () => 'merged'
+        const contexts: InvocationContext[] = []
+        options.adapters.fake = sessionAdapter(printsCheckout, contexts)
+        const stage = followUpRun(null)
+        stage.followUp = { ...stage.followUp!, instruction: '', requestedByName: null, commentId: null, kind: 'stage' }
+
+        const report = await executeRun(stage, options)
+        expect(report).toMatchObject({
+          outcome: 'failed',
+          failureReason: 'follow-up-target-missing',
+          summary: `I didn't start: the pull request ${pullRequest} from run run-1 was merged, so there is nothing left for this follow-up playbook to check.`,
+        })
+        expect(report).not.toHaveProperty('branchName')
+        expect(contexts).toHaveLength(0)
+        expect(git(clone, 'branch', '--list', 'aictiq/acme-42-follow-up').trim()).toBe('')
+      })
+
       it('fails with follow-up-target-missing without starting the harness', async () => {
         repository()
         delete options.provision

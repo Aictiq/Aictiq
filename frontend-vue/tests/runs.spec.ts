@@ -29,6 +29,7 @@ import {
   readRunChoice,
   runDuration,
   runRequesterLabel,
+  runStageLabels,
   runSuccessRate,
   runScheduledLabel,
   runWaitingMessage,
@@ -312,6 +313,39 @@ describe('lib/runs', () => {
     })
   })
 
+  describe('runStageLabels', () => {
+    const run = {
+      kind: 'implement' as const,
+      playbookName: 'Build',
+      stageVerdict: null,
+      reworkOfRunId: null,
+    }
+
+    it('says nothing for a run outside a playbook chain', () => {
+      expect(runStageLabels(run)).toBeNull()
+      expect(runStageLabels({ ...run, kind: undefined })).toBeNull()
+    })
+
+    it('names a stage run by its playbook, with its verdict once it has one', () => {
+      expect(runStageLabels({ ...run, kind: 'stage', playbookName: 'Code review' })).toEqual({
+        stage: 'Stage: Code review',
+        verdict: null,
+        rework: false,
+      })
+      expect(
+        runStageLabels({ ...run, kind: 'stage', playbookName: 'QA', stageVerdict: 'changes_requested' }),
+      ).toEqual({ stage: 'Stage: QA', verdict: 'changes_requested', rework: false })
+    })
+
+    it('marks the implement run started to address a stage as rework', () => {
+      expect(runStageLabels({ ...run, reworkOfRunId: 'r-stage' })).toEqual({
+        stage: null,
+        verdict: null,
+        rework: true,
+      })
+    })
+  })
+
   describe('runWaitingMessage', () => {
     it('says what a queued run is waiting for, and nothing once it is not', () => {
       expect(runWaitingMessage({ status: 'queued', harness: 'claude' })).toContain('claude')
@@ -522,6 +556,8 @@ describe('continuing and retrying runs', () => {
     // A refinement is asked for again from the item, not retried from here.
     expect(canRetryRun({ ...failed, kind: 'refine' })).toBe(false)
     expect(canRetryRun({ ...failed, kind: 'chat' })).toBe(false)
+    // A stage reviews the builder's pull request; the server starts it, not Retry.
+    expect(canRetryRun({ ...failed, kind: 'stage' })).toBe(false)
   })
 
   it('adds up a chain’s cost and tokens, and says nothing when no run reported any', () => {

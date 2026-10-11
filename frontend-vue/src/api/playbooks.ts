@@ -24,6 +24,11 @@ export interface Playbook {
   workOnDefaultBranch: boolean
   maxMinutes: number
   isDefault: boolean
+  /**
+   * Follow-up playbooks of the same project, in the order they run on the pull request a
+   * successful run opens (code review, QA...). Empty for most playbooks.
+   */
+  stagePlaybookIds: string[]
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -109,6 +114,18 @@ export const deletePlaybook = (slug: string, projectKey: string, id: string) =>
 
 export const promotePlaybook = (slug: string, projectKey: string, id: string) =>
   apiFetch<Playbook>(`${playbooksBase(slug, projectKey)}/${id}/default`, { method: 'PUT' })
+
+/** Replaces the ordered follow-up list; an empty list removes every stage. Project Admin only. */
+export const setPlaybookStages = (
+  slug: string,
+  projectKey: string,
+  id: string,
+  stagePlaybookIds: string[],
+) =>
+  apiFetch<Playbook>(`${playbooksBase(slug, projectKey)}/${id}/stages`, {
+    method: 'PUT',
+    body: { stagePlaybookIds },
+  })
 
 export const createStarterPlaybook = (slug: string, projectKey: string) =>
   apiFetch<Playbook>(`${playbooksBase(slug, projectKey)}/starter`, { method: 'POST' })

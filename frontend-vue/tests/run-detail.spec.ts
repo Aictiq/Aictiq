@@ -194,6 +194,38 @@ describe('RunDetailView continue and retry', () => {
     expect(wrapper.find('[data-testid="run-branch"]').text()).toContain('proj-1-fix-2')
   })
 
+  it('heads a stage run with its stage and verdict, and offers no Retry', async () => {
+    const { wrapper } = await mountRun({
+      ...failed,
+      kind: 'stage',
+      playbookName: 'Code review',
+      status: 'succeeded',
+      stageVerdict: 'pass',
+      continuable: false,
+      continuesRunId: null,
+      chain: null,
+    })
+
+    expect(wrapper.get('[data-testid="run-stage-badge"]').text()).toBe('Stage: Code review')
+    expect(wrapper.get('[data-testid="run-stage-verdict"]').text()).toBe('passed')
+    expect(wrapper.get('[data-testid="run-kind"]').text()).toContain('stage')
+    expect(wrapper.find('[data-testid="run-retry"]').exists()).toBe(false)
+  })
+
+  it('links a rework run to the stage whose findings it addresses', async () => {
+    const { wrapper } = await mountRun({
+      ...failed,
+      reworkOfRunId: 'r-stage',
+      continuesRunId: null,
+      chain: null,
+    })
+
+    expect(wrapper.get('[data-testid="run-rework-badge"]').text()).toBe('Rework')
+    expect(wrapper.get('[data-testid="run-rework-of"] a').attributes('href')).toBe(
+      '/o/acme/factory/runs/r-stage',
+    )
+  })
+
   it('offers neither once the run was continued, and links the next run', async () => {
     const { wrapper } = await mountRun({ ...failed, continuable: false, continuedByRunId: 'r-3' })
 

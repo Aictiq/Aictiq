@@ -225,6 +225,7 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Linking | `link_item` |
 | Delegating | `start_run`, `get_run`, `list_runs` |
 | Refining | `submit_refinement` (refine runs only) |
+| Follow-up playbooks | `submit_stage_verdict` (follow-up playbook runs only) |
 
 There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq://run/{id}`
 resources, which render the same loop, the item's Markdown and a run's status and log tail
@@ -245,6 +246,12 @@ ticket with `update_item`, the run's agent calls `submit_refinement(key, outcome
 summary?)` once: `outcome` is `ready` when the ticket is complete, or `needs_input` with up to
 ten questions only a person can answer. Anyone else, including the run's agent outside a live
 refine run, gets `has no refinement in progress for this agent`.
+
+**Follow-up playbooks** are for [follow-up playbook runs](factory.md#follow-up-playbooks)
+only. After posting its findings on the pull request, the run's agent calls
+`submit_stage_verdict(key, verdict, findings?)` once, last: `verdict` is `pass`, or
+`changes_requested` with `findings` that tell the builder what to change and where. Anyone
+else, including a builder run's agent, gets `has no follow-up playbook run in progress for this agent`.
 
 ---
 

@@ -1,4 +1,11 @@
-import type { Run, RunChainLink, RunLogPage, RunLogLine, RunStatus } from '@/api/runs'
+import type {
+  Run,
+  RunChainLink,
+  RunLogPage,
+  RunLogLine,
+  RunStatus,
+  StageVerdict,
+} from '@/api/runs'
 
 /**
  * Run presentation rules, kept out of the components because they decide what a
@@ -157,9 +164,36 @@ export function canRetryRun(
     (run.status === 'failed' || run.status === 'timedOut') &&
     run.kind !== 'refine' &&
     run.kind !== 'chat' &&
+    // A stage reviews an implement run's pull request; the server starts it, not a person.
+    run.kind !== 'stage' &&
     !run.superseded &&
     !run.continuedByRunId
   )
+}
+
+export const stageVerdictLabel: Record<StageVerdict, string> = {
+  pass: 'passed',
+  changes_requested: 'changes requested',
+}
+
+/**
+ * The small labels a run of a playbook chain carries beside its playbook: a stage run names
+ * its stage ("Stage: Code review") and its verdict once it has one; an implement run the
+ * server started to address a stage's findings says "Rework". Null where nothing applies,
+ * which is every run of a playbook without stages.
+ */
+export function runStageLabels(
+  run: Pick<Run, 'kind' | 'playbookName' | 'stageVerdict' | 'reworkOfRunId'>,
+): { stage: string | null; verdict: StageVerdict | null; rework: boolean } | null {
+  if (run.kind === 'stage') {
+    return {
+      stage: `Stage: ${run.playbookName ?? 'playbook deleted'}`,
+      verdict: run.stageVerdict ?? null,
+      rework: false,
+    }
+  }
+  if (run.reworkOfRunId) return { stage: null, verdict: null, rework: true }
+  return null
 }
 
 /** A continue chain's cost and tokens added up; null where no run reported any. */

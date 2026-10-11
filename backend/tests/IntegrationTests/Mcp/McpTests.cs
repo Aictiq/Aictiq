@@ -691,6 +691,7 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         "start_run" or "list_runs" => new() { ["key"] = key },
         "get_run" => new() { ["runId"] = Guid.NewGuid() },
         "submit_refinement" => new() { ["key"] = key, ["outcome"] = "ready" },
+        "submit_stage_verdict" => new() { ["key"] = key, ["verdict"] = "pass" },
         _ => throw new InvalidOperationException($"Add MCP matrix arguments for tool '{tool}'.")
     };
 

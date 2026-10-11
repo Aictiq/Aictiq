@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ExternalLink, Loader2, MoreHorizontal, Star } from '@lucide/vue'
+import {
+  ArrowDown,
+  ArrowUp,
+  ExternalLink,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  Star,
+  X,
+} from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -11,6 +20,7 @@ import {
   listPlaybooks,
   playbookHarnesses,
   promotePlaybook,
+  setPlaybookStages,
   updatePlaybook,
   type Playbook,
   type PlaybookHarness,
@@ -247,9 +257,17 @@ async function remove() {
   busyId.value = pending.playbook.id
   try {
     await deletePlaybook(org.slug.value, pending.group.project.key, pending.playbook.id)
-    pending.group.playbooks = pending.group.playbooks.filter(
-      (entry) => entry.id !== pending.playbook.id,
-    )
+    // The server drops a deleted playbook from every chain it followed in.
+    pending.group.playbooks = pending.group.playbooks
+      .filter((entry) => entry.id !== pending.playbook.id)
+      .map((entry) =>
+        stagesOf(entry).includes(pending.playbook.id)
+          ? {
+              ...entry,
+              stagePlaybookIds: stagesOf(entry).filter((id) => id !== pending.playbook.id),
+            }
+          : entry,
+      )
     confirmingDelete.value = null
     toast.success(`${pending.playbook.name} deleted. Its wiki page was kept.`)
   } catch (error) {
@@ -257,6 +275,58 @@ async function remove() {
   } finally {
     busyId.value = null
   }
+}
+
+/** Follow-up playbooks, in run order. */
+function stagesOf(playbook: Playbook): string[] {
+  return playbook.stagePlaybookIds ?? []
+}
+
+function playbookName(group: ProjectPlaybooks, id: string) {
+  return group.playbooks.find((entry) => entry.id === id)?.name ?? 'Playbook unavailable'
+}
+
+/** What may follow a playbook: any other playbook of its project not already in its chain. */
+function stageCandidates(group: ProjectPlaybooks, playbook: Playbook) {
+  const taken = new Set(stagesOf(playbook))
+  return group.playbooks.filter((entry) => entry.id !== playbook.id && !taken.has(entry.id))
+}
+
+/** Every change to the chain saves the whole new order; the server answers with the playbook. */
+async function saveStages(group: ProjectPlaybooks, playbook: Playbook, stageIds: string[]) {
+  busyId.value = playbook.id
+  try {
+    const saved = await setPlaybookStages(org.slug.value, group.project.key, playbook.id, stageIds)
+    // In place: the name did not change, so the row stays where the admin is working.
+    group.playbooks = group.playbooks.map((entry) => (entry.id === saved.id ? saved : entry))
+  } catch (error) {
+    const messages = error instanceof ApiError ? error.fieldErrors.stagePlaybookIds : undefined
+    if (messages?.length) toast.saveFailed(null, messages.join(' '))
+    else toast.error(error)
+    if (error instanceof ConflictError) await load()
+  } finally {
+    busyId.value = null
+  }
+}
+
+function addStage(group: ProjectPlaybooks, playbook: Playbook, stage: Playbook) {
+  return saveStages(group, playbook, [...stagesOf(playbook), stage.id])
+}
+
+function moveStage(group: ProjectPlaybooks, playbook: Playbook, index: number, offset: -1 | 1) {
+  const order = [...stagesOf(playbook)]
+  const target = index + offset
+  if (target < 0 || target >= order.length) return
+  ;[order[index], order[target]] = [order[target]!, order[index]!]
+  return saveStages(group, playbook, order)
+}
+
+function removeStage(group: ProjectPlaybooks, playbook: Playbook, index: number) {
+  return saveStages(
+    group,
+    playbook,
+    stagesOf(playbook).filter((_, at) => at !== index),
+  )
 }
 
 function stateName(group: ProjectPlaybooks, stateId: string | null) {
@@ -366,6 +436,94 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                 Open in wiki <ExternalLink class="size-3" aria-hidden="true" />
               </RouterLink>
               <p v-else class="text-destructive mt-1 text-xs">Backing page missing</p>
+
+              <div v-if="stagesOf(playbook).length > 0" class="mt-2 text-xs">
+                <ol
+                  class="flex flex-wrap items-center gap-x-3 gap-y-1"
+                  data-testid="playbook-stage-list"
+                  :aria-label="`Follow-up playbooks of ${playbook.name}`"
+                >
+                  <li class="text-muted-foreground" aria-hidden="true">Then:</li>
+                  <li
+                    v-for="(stageId, index) in stagesOf(playbook)"
+                    :key="stageId"
+                    class="inline-flex items-center gap-0.5"
+                    data-testid="playbook-stage"
+                  >
+                    <span>{{ index + 1 }}. {{ playbookName(group, stageId) }}</span>
+                    <template v-if="group.project.role === 'admin' && !group.project.isArchived">
+                      <Button
+                        v-if="index > 0"
+                        variant="ghost"
+                        size="icon-xs"
+                        class="text-muted-foreground"
+                        :disabled="busyId !== null"
+                        :aria-label="`Run ${playbookName(group, stageId)} earlier`"
+                        data-testid="playbook-stage-up"
+                        @click="moveStage(group, playbook, index, -1)"
+                      >
+                        <ArrowUp aria-hidden="true" />
+                      </Button>
+                      <Button
+                        v-if="index < stagesOf(playbook).length - 1"
+                        variant="ghost"
+                        size="icon-xs"
+                        class="text-muted-foreground"
+                        :disabled="busyId !== null"
+                        :aria-label="`Run ${playbookName(group, stageId)} later`"
+                        data-testid="playbook-stage-down"
+                        @click="moveStage(group, playbook, index, 1)"
+                      >
+                        <ArrowDown aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        class="text-muted-foreground"
+                        :disabled="busyId !== null"
+                        :aria-label="`Remove ${playbookName(group, stageId)} from the follow-ups`"
+                        data-testid="playbook-stage-remove"
+                        @click="removeStage(group, playbook, index)"
+                      >
+                        <X aria-hidden="true" />
+                      </Button>
+                    </template>
+                  </li>
+                </ol>
+                <p class="text-muted-foreground mt-1" data-testid="playbook-stage-hint">
+                  Runs in order after this playbook's pull request, before human review.
+                </p>
+              </div>
+
+              <DropdownMenu
+                v-if="
+                  group.project.role === 'admin' &&
+                  !group.project.isArchived &&
+                  stageCandidates(group, playbook).length > 0
+                "
+              >
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    class="text-muted-foreground -ml-2 mt-1"
+                    :disabled="busyId !== null"
+                    data-testid="playbook-add-stage"
+                  >
+                    <Plus aria-hidden="true" /> Add follow-up playbook
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    v-for="candidate in stageCandidates(group, playbook)"
+                    :key="candidate.id"
+                    data-testid="playbook-add-stage-option"
+                    @select="addStage(group, playbook, candidate)"
+                  >
+                    {{ candidate.name }}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <Loader2

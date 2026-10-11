@@ -49,9 +49,15 @@ public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string
 /// <param name="SessionId">The earlier run's harness session, or null when it reported none or used another harness.</param>
 /// <param name="Instruction">What the person wrote, for the message a resumed session is sent.</param>
 /// <param name="RequestedByName">The person's display name.</param>
+/// <param name="CommentId">The comment that asked, or null for a chain's stage or rework run.</param>
+/// <param name="Kind">
+/// <c>comment</c> for a person's request; <c>stage</c> for a follow-up playbook, which checks the
+/// pull request with a fresh session and has nothing to do once it was merged or closed;
+/// <c>rework</c> for the builder rerun a stage's findings asked for, quoted as the instruction.
+/// </param>
 public sealed record RunFollowUpView(
     Guid PreviousRunId, string? SessionId, string PreviousBranchName, string? PullRequestUrl,
-    string NewBranchName, string Instruction, string? RequestedByName, Guid CommentId);
+    string NewBranchName, string Instruction, string? RequestedByName, Guid? CommentId, string Kind = "comment");
 /// <param name="SessionId">The harness session, sent once the runner knows it, so a run the sweeper ends can still be continued.</param>
 /// <param name="WorkspacePath">The absolute path of the run's checkout on the runner, sent with the session.</param>
 public sealed record RunnerRunHeartbeatRequest(string? SessionId, string? WorkspacePath = null);
@@ -302,17 +308,30 @@ public static partial class RunProtocolEndpoints
                     .Where(r => r.Id == previousRunId)
                     .Select(r => new { r.SessionId, r.Harness, r.RunnerId, r.PullRequestUrl, r.FailureReason })
                     .SingleOrDefaultAsync(ct);
-                var requester = run.RequestedBy is { } requestedBy
-                    ? (await directory.GetAsync([requestedBy], ct)).GetValueOrDefault(requestedBy)?.DisplayName
-                    : null;
+                var stage = run.Kind == RunKind.Stage;
+                // A rework is asked for by the stage that found something, not by a person.
+                var requester = run.ReworkOfRunId is { } stageRunId
+                    ? await db.Runs.AsNoTracking().Where(r => r.Id == stageRunId)
+                        .Join(db.Playbooks.AsNoTracking(), r => r.PlaybookId, p => p.Id, (r, p) => p.Name)
+                        .FirstOrDefaultAsync(ct)
+                    : run.RequestedBy is { } requestedBy
+                        ? (await directory.GetAsync([requestedBy], ct)).GetValueOrDefault(requestedBy)?.DisplayName
+                        : null;
                 // Another harness cannot read the session, and another machine does not have it.
-                var sessionId = previous is { SessionId: { } session } && previous.Harness == run.Harness
+                // A stage never resumes the builder's: it checks the work with fresh eyes.
+                var sessionId = !stage && previous is { SessionId: { } session } && previous.Harness == run.Harness
                     && previous.RunnerId == runnerId && previous.FailureReason != Run.SessionUnavailable
                         ? session
                         : null;
+                // A follow-up of a follow-up that reported no pull request still updates the first one's.
+                var pullRequestUrl = run.WorkOnDefaultBranch ? null : previous?.PullRequestUrl
+                    ?? await db.Runs.AsNoTracking()
+                        .Where(r => r.ItemId == run.ItemId && r.Kind == RunKind.Implement && r.BranchName == run.BranchName && r.PullRequestUrl != null)
+                        .OrderByDescending(r => r.QueuedAt).Select(r => r.PullRequestUrl).FirstOrDefaultAsync(ct);
                 followUp = new RunFollowUpView(
-                    previousRunId, sessionId, run.BranchName, run.WorkOnDefaultBranch ? null : previous?.PullRequestUrl,
-                    BranchNames.Next(run.BranchName), run.Instruction ?? "", requester, run.TriggerCommentId!.Value);
+                    previousRunId, sessionId, run.BranchName, pullRequestUrl,
+                    BranchNames.Next(run.BranchName), run.Instruction ?? "", requester, run.TriggerCommentId,
+                    stage ? "stage" : run.ReworkOfRunId is not null ? "rework" : "comment");
             }
 
             var aictiqUrl = string.IsNullOrWhiteSpace(email.Value.BaseUrl)

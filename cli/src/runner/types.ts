@@ -165,8 +165,15 @@ export interface RunFollowUp {
   instruction: string
   /** Display name of the person who asked, or null. */
   requestedByName: string | null
-  /** The comment that asked; the server replies in its thread when the run finishes. */
-  commentId: string
+  /** The comment that asked; the server replies in its thread when the run finishes. Null for a chain's runs. */
+  commentId: string | null
+  /**
+   * Who asked. `comment`: a person, in `commentId` (absent on older servers). `stage`: a
+   * playbook chain's follow-up playbook, which checks the earlier run's pull request with a
+   * fresh session and has nothing to check once it was merged or closed. `rework`: the builder
+   * rerun a stage asked for; `instruction` is the stage's findings, `requestedByName` its name.
+   */
+  kind?: 'comment' | 'stage' | 'rework'
 }
 
 export type LogStream = 'stdout' | 'stderr' | 'event'

@@ -60,4 +60,28 @@ public sealed record RunFinished(
 
     /// <summary>A refine run that submitted <c>ready</c>: the rewritten ticket waits for review.</summary>
     public bool Refined { get; init; }
+
+    /// <summary>
+    /// The run handed the item to the next step of its playbook chain - a follow-up playbook
+    /// or a rework run - so the item stays where it is: it reaches human review when the chain ends.
+    /// </summary>
+    public bool Chained { get; init; }
+
+    /// <summary>
+    /// Set when the event reports a chain that stopped before its next step could start, rather
+    /// than a run: the comment is <see cref="ChainNote"/> alone, and the run's own history is not repeated.
+    /// </summary>
+    public bool ChainStopped { get; init; }
+
+    /// <summary>What the playbook chain does next, or why it ended; added to the outcome comment.</summary>
+    public string? ChainNote { get; init; }
+
+    /// <summary>A stage run's playbook name, which labels its outcome comment.</summary>
+    public string? StageName { get; init; }
+
+    /// <summary>A stage run's verdict: <c>pass</c> or <c>changes_requested</c>, or null when it gave none.</summary>
+    public string? StageVerdict { get; init; }
+
+    /// <summary>A stage run's findings, shown on the item when it requested changes.</summary>
+    public string? StageFindings { get; init; }
 }

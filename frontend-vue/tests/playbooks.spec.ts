@@ -9,6 +9,7 @@ import {
   getPlaybookInstructions,
   listPlaybooks,
   promotePlaybook,
+  setPlaybookStages,
   updateFactorySettings,
   updatePlaybook,
 } from '@/api/playbooks'
@@ -79,6 +80,24 @@ describe('the playbook endpoints', () => {
       version: 7,
     })
     expect(fetchMock.mock.calls[1]![1]!.method).toBe('PATCH')
+  })
+})
+
+describe('the playbook stages endpoint', () => {
+  it('replaces the whole ordered follow-up list with a PUT', async () => {
+    const fetchMock = stubFetch({ id: 'p1', stagePlaybookIds: ['p2', 'p3'] })
+
+    await setPlaybookStages('acme', 'ACME', 'p1', ['p2', 'p3'])
+    await setPlaybookStages('acme', 'ACME', 'p1', [])
+
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      '/api/v1/orgs/acme/projects/ACME/playbooks/p1/stages',
+    )
+    expect(fetchMock.mock.calls[0]![1]!.method).toBe('PUT')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
+      stagePlaybookIds: ['p2', 'p3'],
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toEqual({ stagePlaybookIds: [] })
   })
 })
 

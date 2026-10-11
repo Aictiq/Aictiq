@@ -80,8 +80,16 @@ export interface Run {
   promptSnapshot: string | null
   /** xmin. */
   version: number
-  /** An implement run delivers code; a refine run rewrites the ticket; a chat run answers a comment. */
+  /**
+   * An implement run delivers code; a refine run rewrites the ticket; a chat run answers a
+   * comment; a stage run is a follow-up playbook (code review, QA...) on an implement run's
+   * pull request, and `playbookName` names that stage.
+   */
   kind?: RunKind
+  /** A stage run's verdict once it has one; null for every other kind. */
+  stageVerdict?: StageVerdict | null
+  /** The stage run whose findings this implement run was started to address; set by the server. */
+  reworkOfRunId?: string | null
   /** The harness session a continue run resumes, and a person can resume by hand on the runner. */
   sessionId?: string | null
   /** The run's checkout on its runner, where `sessionId` resumes. Null for runs from before runners reported it. */
@@ -155,7 +163,9 @@ export interface ListRunsOptions {
   pageSize?: number
 }
 
-export type RunKind = 'implement' | 'refine' | 'chat'
+export type RunKind = 'implement' | 'refine' | 'chat' | 'stage'
+
+export type StageVerdict = 'pass' | 'changes_requested'
 
 export type RunStatsGrouping = 'agent' | 'project' | 'playbook' | 'runner'
 

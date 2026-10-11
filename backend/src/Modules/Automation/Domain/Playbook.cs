@@ -33,6 +33,24 @@ public sealed class Playbook : TenantEntity, IAudited
     public uint Version { get; private set; }
 }
 
+/// <summary>
+/// One follow-up playbook in a playbook's chain. After a successful run of
+/// <see cref="PlaybookId"/> opens or updates its pull request, the stages run on that pull
+/// request one after another, by <see cref="Position"/>, before the item reaches human review.
+/// A stage is a plain playbook of the same project; its own stages are never followed.
+/// </summary>
+public sealed class PlaybookStage : TenantEntity
+{
+    /// <summary>A chain longer than this costs more than it can catch.</summary>
+    public const int MaxStages = 10;
+
+    public Guid PlaybookId { get; init; }
+
+    public Guid StagePlaybookId { get; init; }
+
+    public int Position { get; init; }
+}
+
 public enum ProjectRepositorySource : short
 {
     GitHubBinding = 0,

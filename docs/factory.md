@@ -352,6 +352,35 @@ its name. The instructions are the prompt text, and their wiki page's permission
 prompt's access control: a person who cannot read the page cannot manually start a run from it. Keep secrets
 out of playbooks and review their revision history like code.
 
+### Follow-up playbooks
+
+A playbook can hand its pull request to other playbooks of the project before a person
+reviews it: a code review, a QA pass, a security check. On **Factory → Playbooks**, choose
+**Add follow-up playbook** on the builder playbook and pick one; add more, reorder or remove
+them in the list that appears. Playbooks without follow-up playbooks look and work as before.
+Each follow-up playbook is a plain playbook with its own instructions, harness and time limit,
+so its instructions decide what it checks.
+
+When a builder run on a branch succeeds, the follow-up playbooks run one after another on the
+same branch and pull request, as the builder's agent, each in a fresh session. A follow-up
+playbook may push commits to the branch, posts its findings on the pull request, and ends
+with `submit_stage_verdict`: `pass` or `changes_requested`. The item stays where it is until
+the chain ends:
+
+- every follow-up playbook passed: the item goes to the builder playbook's success state;
+- one requested changes: the builder reruns on the same branch with the findings as its
+  request, then the follow-up playbooks start again from the first. After three such rework
+  rounds for an item, the item goes to the success state with the last findings on it;
+- one failed, timed out, was cancelled or gave no verdict: the item goes to the success state
+  with a note, so a chain never blocks its ticket.
+
+The builder and its follow-up playbooks never run at the same time: each waits until the item
+is free, like a [comment request](#steer-an-agent-from-a-comment). Follow-up runs appear in
+the item's run history labelled with their playbook's name and count toward usage like any
+run. A follow-up playbook's own follow-up playbooks are not run. A playbook that pushes
+directly to the default branch has no pull request, so it starts no chain. Follow-up
+playbooks need runner 0.11.0 or later.
+
 ## 5. Start a run and read its result
 
 Open an unclaimed item and choose **Hand to agent**, then select the playbook and agent. By
