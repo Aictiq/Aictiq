@@ -13,7 +13,7 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)
 [![Postgres 17](https://img.shields.io/badge/Postgres-17-336791)](https://www.postgresql.org/)
 
-[Documentation](https://aictiq.github.io/Aictiq/) · [Getting started](docs/getting-started.md) · [Connect an agent](docs/agents.md) · [Self-hosting](docs/self-host.md) · [Discord](https://discord.gg/yFzzTPSXU)
+[Documentation](https://aictiq.github.io/Aictiq/) · [Getting started](docs/getting-started.md) · [Connect an agent](docs/agents.md) · [Self-hosting](docs/self-host.md) · [Discord](https://discord.gg/spEKjvJ685)
 
 </div>
 
@@ -166,7 +166,7 @@ respect.
 
 ## Contributing
 
-Join the [Aictiq Discord community](https://discord.gg/yFzzTPSXU) to ask questions,
+Join the [Aictiq Discord community](https://discord.gg/spEKjvJ685) to ask questions,
 share what you are building, and discuss ideas.
 
 Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md) and the

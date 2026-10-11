@@ -23,7 +23,7 @@ export default defineConfig({
       { text: 'Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
       { text: 'API', link: '/api' },
-      { text: 'Discord', link: 'https://discord.gg/yFzzTPSXU' }
+      { text: 'Discord', link: 'https://discord.gg/spEKjvJ685' }
     ],
     sidebar: [
       {

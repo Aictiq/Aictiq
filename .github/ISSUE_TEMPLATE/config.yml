@@ -4,7 +4,7 @@ blank_issues_enabled: false
 
 contact_links:
   - name: Discord community
-    url: https://discord.gg/yFzzTPSXU
+    url: https://discord.gg/spEKjvJ685
     about: Ask questions, share what you are building, and discuss ideas with the Aictiq community.
   - name: Report a security vulnerability
     url: https://github.com/Aictiq/Aictiq/security/advisories/new
