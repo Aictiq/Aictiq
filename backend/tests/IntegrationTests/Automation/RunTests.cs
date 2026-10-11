@@ -683,7 +683,7 @@ public sealed record RunView(
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
-    RunWaitView? Waiting = null);
+    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null);
 
 public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead);
 
@@ -710,7 +710,7 @@ public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string
 
 public sealed record RunFollowUpView(
     Guid PreviousRunId, string? SessionId, string PreviousBranchName, string? PullRequestUrl,
-    string NewBranchName, string Instruction, string? RequestedByName, Guid CommentId);
+    string NewBranchName, string Instruction, string? RequestedByName, Guid? CommentId, string Kind = "comment");
 
 public sealed record RunnerHeartbeatView(bool CancelRequested);
 

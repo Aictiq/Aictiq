@@ -276,6 +276,13 @@ export async function executeRun(
           createdBranch,
           ...(options.pullRequestState ? { pullRequestState: options.pullRequestState } : {}),
         })
+        if (target.kind === 'new' && followUp.kind === 'stage') {
+          // A new branch would hold none of the work the stage was asked to check.
+          target = {
+            kind: 'missing',
+            detail: `I didn't start: the pull request ${followUp.pullRequestUrl ?? ''} from run ${followUp.previousRunId} was ${target.because}, so there is nothing left for this follow-up playbook to check.`,
+          }
+        }
         await applyFollowUpTarget(
           workspace.checkout,
           followUp,

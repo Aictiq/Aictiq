@@ -46,6 +46,7 @@ import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import TimeTrackingPopover from '@/components/common/TimeTrackingPopover.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
+import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import RefinementPanel from '@/components/items/RefinementPanel.vue'
 import CommentReactions from '@/components/items/CommentReactions.vue'
@@ -1220,9 +1221,10 @@ function logged(updated: TimeTrackingItem) {
               data-testid="run-scheduled"
               >{{ runScheduledLabel(entry) }}</span
             >
-            <span class="text-muted-foreground truncate text-xs">
+            <span v-if="entry.kind !== 'stage'" class="text-muted-foreground truncate text-xs">
               {{ entry.playbookName ?? '' }}
             </span>
+            <RunStageBadges :run="entry" />
             <span v-if="runRequesterLabel(entry)" class="text-muted-foreground max-w-full text-xs italic">
               {{ runRequesterLabel(entry) }}
             </span>

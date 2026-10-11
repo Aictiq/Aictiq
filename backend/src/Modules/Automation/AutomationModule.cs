@@ -33,6 +33,7 @@ public static class AutomationModule
             .ValidateOnStart();
         services.AddScoped<RunDispatcher>();
         services.AddScoped<RunMentionQueue>();
+        services.AddScoped<ChainQueue>();
         services.AddScoped<IFactoryPages, AutomationFactoryPages>();
         // The run tools, the aictiq://run/{id} resource: the API host discovers them from
         // this assembly exactly as it discovers WorkItems'.

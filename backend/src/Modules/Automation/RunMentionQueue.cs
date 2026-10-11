@@ -101,7 +101,7 @@ public sealed class RunMentionQueue(
     public async Task<bool> StartNextAsync(Guid itemId, CancellationToken ct)
     {
         if (await db.Runs.AnyAsync(run => run.ItemId == itemId && run.Status < RunStatus.Succeeded, ct)
-            || await RunFinishPendingAsync(itemId, ct))
+            || await RunFinishPendingAsync(db, itemId, ct))
         {
             return false;
         }
@@ -236,7 +236,7 @@ public sealed class RunMentionQueue(
     /// carries that run's claim - and its move to the outcome state - so a run started now would
     /// lose its claim, and its state, to the old run's finish a moment later.
     /// </summary>
-    private async Task<bool> RunFinishPendingAsync(Guid itemId, CancellationToken ct) =>
+    internal static async Task<bool> RunFinishPendingAsync(AutomationDbContext db, Guid itemId, CancellationToken ct) =>
         await db.Database.SqlQuery<bool>($"""
             SELECT EXISTS (
                 SELECT 1 FROM shared.outbox_messages

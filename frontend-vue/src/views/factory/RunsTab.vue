@@ -11,6 +11,7 @@ import { listProjects } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import RunStats, { type RunStatsDrill } from '@/components/factory/RunStats.vue'
+import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
@@ -53,6 +54,7 @@ const runKinds: { value: RunKind; label: string }[] = [
   { value: 'implement', label: 'Implement' },
   { value: 'refine', label: 'Refine' },
   { value: 'chat', label: 'Chat' },
+  { value: 'stage', label: 'Stage' },
 ]
 
 interface Filters {
@@ -471,6 +473,7 @@ watch(
             <span class="text-muted-foreground min-w-0 truncate text-xs">
               {{ run.playbookName ?? '-' }}
             </span>
+            <RunStageBadges :run="run" />
             <span v-if="requesterLabel(run)" class="text-muted-foreground shrink-0 text-xs italic">
               {{ requesterLabel(run) }}
             </span>

@@ -33,6 +33,8 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<ItemRefinement> Refinements => Set<ItemRefinement>();
     public DbSet<ProjectRefinementSettings> RefinementSettings => Set<ProjectRefinementSettings>();
     public DbSet<RunMention> RunMentions => Set<RunMention>();
+    public DbSet<PlaybookStage> PlaybookStages => Set<PlaybookStage>();
+    public DbSet<ChainStep> ChainSteps => Set<ChainStep>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -92,6 +94,44 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             });
         });
 
+        modelBuilder.Entity<PlaybookStage>(b =>
+        {
+            b.ToTable("playbook_stages");
+            // Deleting either playbook takes the link with it: a chain simply loses that stage.
+            b.HasOne<Playbook>().WithMany().HasForeignKey(x => x.PlaybookId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<Playbook>().WithMany().HasForeignKey(x => x.StagePlaybookId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.PlaybookId, x.StagePlaybookId }).IsUnique()
+                .HasDatabaseName("ux_playbook_stages_playbook_stage");
+            b.HasIndex(x => x.StagePlaybookId).HasDatabaseName("ix_playbook_stages_stage_playbook_id");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_playbook_stages_not_self", "playbook_id <> stage_playbook_id");
+                t.HasCheckConstraint("ck_playbook_stages_position", "position BETWEEN 0 AND 9");
+            });
+        });
+
+        modelBuilder.Entity<ChainStep>(b =>
+        {
+            b.ToTable("chain_steps");
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.ItemKey).HasMaxLength(Run.MaxItemKeyLength);
+            b.Property(x => x.DropReason).HasMaxLength(ChainStep.MaxDropReasonLength);
+            b.Property(x => x.Kind).HasConversion<short>();
+            b.Property(x => x.Status).HasConversion<short>();
+            // The replay guard: a finished run hands over once, however often its finish is retried.
+            b.HasIndex(x => x.AfterRunId).IsUnique().HasDatabaseName("ux_chain_steps_after_run");
+            b.HasIndex(x => new { x.ItemId, x.CreatedAt }).HasFilter("status = 0")
+                .HasDatabaseName("ix_chain_steps_pending");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_chain_steps_project_id");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1)");
+                t.HasCheckConstraint("ck_chain_steps_status", "status BETWEEN 0 AND 2");
+                t.HasCheckConstraint("ck_chain_steps_started", "(status = 1) = (run_id IS NOT NULL)");
+                t.HasCheckConstraint("ck_chain_steps_decided", "(status = 0) = (decided_at IS NULL)");
+            });
+        });
+
         modelBuilder.Entity<ProjectFactorySettings>(b =>
         {
             b.ToTable("project_settings");
@@ -130,6 +170,8 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.CostUsd).HasPrecision(12, 2);
             b.Property(x => x.Status).HasConversion<short>();
             b.Property(x => x.Kind).HasConversion<short>();
+            b.Property(x => x.StageVerdict).HasConversion<short?>();
+            b.Property(x => x.StageFindings).HasMaxLength(Run.MaxStageFindingsLength);
 
             b.HasIndex(x => new { x.ProjectId, x.QueuedAt }).HasDatabaseName("ix_runs_project_queued");
             b.HasIndex(x => new { x.OrganizationId, x.Status, x.QueuedAt }).HasDatabaseName("ix_runs_organization_status_queued");
@@ -152,7 +194,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_runs_status", "status BETWEEN 0 AND 6");
-                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2)");
+                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3)");
                 t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
                 t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
                 t.HasCheckConstraint("ck_runs_auto_continues", "auto_continues BETWEEN 0 AND 2");
@@ -160,11 +202,17 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                 // rules: a deleted rule must not rewrite or block the history of what it ran.
                 t.HasCheckConstraint("ck_runs_requested_by_xor_rule",
                     "(requested_by IS NOT NULL) <> (rule_id IS NOT NULL)");
-                // A comment's request carries its words; nothing else does.
+                // A comment's request carries its words, and a rework run its stage's findings;
+                // nothing else does.
                 t.HasCheckConstraint("ck_runs_trigger_instruction",
-                    "(trigger_comment_id IS NULL) = (instruction IS NULL)");
+                    "(trigger_comment_id IS NULL) = (instruction IS NULL) OR rework_of_run_id IS NOT NULL");
+                // A follow-up is a comment's, a chain stage's or a rework's - never a run's own idea.
                 t.HasCheckConstraint("ck_runs_follow_up_trigger",
-                    "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL");
+                    "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL OR kind = 3 OR rework_of_run_id IS NOT NULL");
+                // A stage run knows its chain and place in it; no other run does.
+                t.HasCheckConstraint("ck_runs_stage",
+                    "(kind = 3) = (chain_playbook_id IS NOT NULL AND stage_index IS NOT NULL)");
+                t.HasCheckConstraint("ck_runs_stage_verdict", "stage_verdict IS NULL OR (kind = 3 AND stage_verdict IN (0, 1))");
             });
         });
 

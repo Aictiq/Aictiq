@@ -39,7 +39,8 @@ public sealed class RunFinishedHandler(
         var actorId = @event.AgentId;
 
         // A refine or chat run worked on the ticket or a question, not the work: it moves nothing.
-        var movesItem = !@event.Refinement && !@event.Chat;
+        // Nor does a run that handed the item to the next step of its playbook chain.
+        var movesItem = !@event.Refinement && !@event.Chat && !@event.Chained;
         var requestedTarget = !movesItem ? null : @event.Outcome switch
         {
             RunOutcomes.Succeeded => @event.OnSuccessStateId,
@@ -89,7 +90,8 @@ public sealed class RunFinishedHandler(
 
         // Transition already cleared the claim in the terminal categories; a run that
         // changed nothing (cancelled, or a skipped transition) still lets the item go.
-        if (item.ClaimedBy is not null) item.ReleaseStaleClaim(now);
+        // A stopped chain's run let the item go long ago; a claim now is somebody else's.
+        if (item.ClaimedBy is not null && (!@event.ChainStopped || item.ClaimedBy == @event.AgentId)) item.ReleaseStaleClaim(now);
 
         if (!string.IsNullOrEmpty(@event.PullRequestUrl))
         {
@@ -112,8 +114,18 @@ public sealed class RunFinishedHandler(
             }
         }
 
-        var noun = @event.Refinement ? "Refinement run" : @event.Chat ? "Chat run" : "Run";
-        var markdown = @event.Outcome switch
+        var noun = @event.Refinement ? "Refinement run" : @event.Chat ? "Chat run"
+            : @event.StageName is { } stage ? $"Follow-up playbook {stage}: run" : "Run";
+        var markdown = @event.ChainStopped
+            ? $"Follow-up playbook chain stopped · {@event.ChainNote} · [View log](/runs/{@event.RunId})"
+            : @event.StageName is not null && @event.Outcome == RunOutcomes.Succeeded
+            ? (@event.StageVerdict switch
+            {
+                "pass" => $"{noun} {@event.RunId} passed",
+                "changes_requested" => $"{noun} {@event.RunId} requested changes",
+                _ => $"{noun} {@event.RunId} finished without a verdict",
+            }) + (string.IsNullOrWhiteSpace(@event.Summary) ? "" : $" · {@event.Summary}") + $" · [View log](/runs/{@event.RunId})"
+            : @event.Outcome switch
         {
             RunOutcomes.Succeeded => string.IsNullOrWhiteSpace(@event.Summary)
                 ? $"{noun} {@event.RunId} succeeded · [View log](/runs/{@event.RunId})"
@@ -139,6 +151,15 @@ public sealed class RunFinishedHandler(
         {
             markdown += $"\n\n_{ChatRunNote}_";
         }
+        if (!string.IsNullOrWhiteSpace(@event.StageFindings))
+        {
+            var findings = string.Join("\n", @event.StageFindings.Trim().Split('\n').Select(line => $"> {line.TrimEnd('\r')}"));
+            markdown += $"\n\n**Findings**\n\n{findings}";
+        }
+        if (!@event.ChainStopped && !string.IsNullOrWhiteSpace(@event.ChainNote))
+        {
+            markdown += $"\n\n_{@event.ChainNote}_";
+        }
         var comment = new Comment
         {
             OrganizationId = @event.OrganizationId, ItemId = item.Id, AuthorId = @event.AgentId,
@@ -151,7 +172,7 @@ public sealed class RunFinishedHandler(
         comment.Added(item, mentionedUserIds: [], threadAuthorId: thread?.AuthorId, now);
         db.Comments.Add(comment);
 
-        db.ItemHistory.Add(new ItemHistory
+        if (!@event.ChainStopped) db.ItemHistory.Add(new ItemHistory
         {
             OrganizationId = @event.OrganizationId, ItemId = item.Id, ActorId = actorId, At = now,
             Field = "run-finished", OldValue = null,

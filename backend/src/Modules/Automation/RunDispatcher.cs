@@ -39,6 +39,9 @@ public enum DispatchActorKind { User, Rule }
 /// <summary>A comment's request for a run: which comment, its words, and who wrote them.</summary>
 public sealed record MentionDispatch(Guid CommentId, string Instruction, string RequesterName);
 
+/// <summary>A follow-up playbook's request for changes: the stage run, its name, its findings and the item's rework round.</summary>
+public sealed record ReworkDispatch(Guid StageRunId, string StageName, string Findings, int Round);
+
 /// <summary>
 /// Who is asking for a run: a person, through REST or MCP, or an automation rule
 ///, through <c>Events/RuleFiringHandler</c>. Never a faked user - the run row
@@ -134,10 +137,15 @@ public sealed class RunDispatcher(
     /// <param name="harness">
     /// The harness for this run only, in place of the playbook's; null for the playbook's own.
     /// </param>
+    /// <param name="rework">
+    /// Set when a follow-up playbook of a chain requested changes (<see cref="ChainQueue"/>): the
+    /// run follows up the agent's earlier implement run like a mention does, with the stage's
+    /// findings as its request.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
         DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null,
-        MentionDispatch? mention = null, string? harness = null)
+        MentionDispatch? mention = null, string? harness = null, ReworkDispatch? rework = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
 
@@ -168,7 +176,7 @@ public sealed class RunDispatcher(
         // Refine and chat runs are never followed up: until an implement run exists, every
         // mention starts another chat run.
         var mentionedAgent = agentId ?? settings?.DefaultAgentId;
-        var previous = mention is null || mentionedAgent is null ? null : await db.Runs.AsNoTracking()
+        var previous = (mention is null && rework is null) || mentionedAgent is null ? null : await db.Runs.AsNoTracking()
             .Where(run => run.ItemId == item.Id && run.AgentUserId == mentionedAgent
                 && run.Kind == RunKind.Implement && run.RunnerId != null && run.Status >= RunStatus.Succeeded)
             .OrderByDescending(run => run.QueuedAt)
@@ -188,6 +196,10 @@ public sealed class RunDispatcher(
         }
 
         var chat = mention is not null && previous is null && refine is null;
+        if (rework is not null && previous is null)
+        {
+            return DispatchResult.NotContinuable("The builder has no earlier run on the item to rework.");
+        }
 
         var playbook = await FindPlaybookAsync(playbookId, project.Id, ct);
         if (playbook is null)
@@ -261,7 +273,9 @@ public sealed class RunDispatcher(
                     playbook.Name, content.Markdown, mentionPrompt!)
                 : RunPromptComposer.Compose(
                     agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                    branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt);
+                    branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt,
+                    rework is null ? null : new ReworkPrompt(rework.StageName, rework.StageRunId, rework.Findings,
+                        previous!.Id, await PullRequestOfAsync(item.Id, branch, ct), rework.Round, PlaybookChain.MaxReworkRounds));
         var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
 
         var now = clock.GetUtcNow();
@@ -286,8 +300,9 @@ public sealed class RunDispatcher(
             QueuedAt = now,
             ScheduledFor = scheduledFor?.ToUniversalTime(),
             TriggerCommentId = mention?.CommentId,
-            Instruction = mention?.Instruction,
+            Instruction = mention?.Instruction ?? Truncate(rework?.Findings, Run.MaxInstructionLength),
             FollowsUpRunId = previous?.Id,
+            ReworkOfRunId = rework?.StageRunId,
         };
         db.Runs.Add(run);
         try
@@ -311,6 +326,127 @@ public sealed class RunDispatcher(
 
         return DispatchResult.Created(run, agent);
     }
+
+    /// <summary>
+    /// Queues one follow-up playbook of a chain on the builder's pull request. The stage runs as
+    /// the builder's agent with the stage playbook's page, harness and time limit, on the builder
+    /// run's branch, and claims the item where it stands: the chain, not the stage, moves it.
+    /// It never resumes the builder's session - a stage looks at the work with fresh eyes - but
+    /// a runner-local project's stage goes to the builder's runner when that runner can run the
+    /// stage's harness, since its clone is where the branch is.
+    /// </summary>
+    /// <param name="builder">The builder's latest implement run: its agent, branch and requester carry over.</param>
+    public async Task<DispatchResult> DispatchStageAsync(
+        ProjectRef project, Run builder, Playbook chain, Playbook stage, int stageIndex, int stageCount,
+        CancellationToken ct)
+    {
+        var organizationId = tenant.OrganizationId!.Value;
+        if (await billing.IsReadOnlyAsync(organizationId, ct))
+        {
+            return DispatchResult.ReadOnly();
+        }
+
+        var item = (await items.FindByKeysAsync(project.Id, [builder.ItemKey], ct)).FirstOrDefault();
+        if (item is null)
+        {
+            return DispatchResult.ItemNotFound();
+        }
+
+        var agent = await agents.FindAsync(builder.AgentUserId, ct);
+        if (agent is not { IsActive: true }
+            || !(await access.ListProjectMemberIdsAsync(project.Id, ct)).Contains(builder.AgentUserId, StringComparer.Ordinal))
+        {
+            return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
+        }
+
+        // Whoever started the builder must still be able to read the stage's instructions.
+        if (stage.WikiPageId is not { } pageId
+            || (builder.RequestedBy is { } requester && !await pages.CanReadAsync(pageId, project.Id, requester, ct)))
+        {
+            return DispatchResult.PlaybookNotFound();
+        }
+        var content = await pageContent.GetMarkdownAsync(pageId, project.Id, ct);
+        if (content is null)
+        {
+            return DispatchResult.PlaybookNotFound();
+        }
+
+        var settings = await db.ProjectSettings.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
+        Guid? runnerId = settings?.RepoSource == ProjectRepositorySource.RunnerLocal
+            && builder.RunnerId is { } builderRunner
+            && await RunnerErrorAsync(builderRunner, stage.Harness, ct) is null
+                ? builderRunner
+                : null;
+
+        var claim = await claims.ClaimInPlaceAsync(item.Id, builder.AgentUserId, ct);
+        switch (claim.Outcome)
+        {
+            case WorkItemClaimOutcome.NotFound:
+                return DispatchResult.ItemNotFound();
+            case WorkItemClaimOutcome.Conflict:
+                return DispatchResult.Claimed(claim.ClaimedBy, claim.Version);
+        }
+
+        var pullRequestUrl = await PullRequestOfAsync(item.Id, builder.BranchName, ct);
+        var prompt = StagePromptComposer.Compose(
+            agent.DisplayName ?? builder.AgentUserId, item.Key, project.Key, project.Name,
+            builder.BranchName, pullRequestUrl, chain.Name, stage.Name, content.Markdown, stageIndex + 1, stageCount);
+
+        var now = clock.GetUtcNow();
+        var run = new Run
+        {
+            OrganizationId = organizationId,
+            ProjectId = project.Id,
+            ItemId = item.Id,
+            ItemKey = item.Key,
+            PlaybookId = stage.Id,
+            Kind = RunKind.Stage,
+            AgentUserId = builder.AgentUserId,
+            RequestedRunnerId = runnerId,
+            RequestedBy = builder.RequestedBy,
+            RuleId = builder.RuleId,
+            Harness = stage.Harness,
+            PromptSnapshot = prompt,
+            PlaybookRevisionId = content.RevisionId,
+            BranchName = builder.BranchName,
+            WorkOnDefaultBranch = false,
+            MaxMinutes = Math.Clamp(stage.MaxMinutes, 5, 720),
+            QueuedAt = now,
+            FollowsUpRunId = builder.Id,
+            ChainPlaybookId = chain.Id,
+            StageIndex = stageIndex,
+        };
+        db.Runs.Add(run);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return DispatchResult.InProgress();
+        }
+
+        await realtime.PublishAsync(project.Id, "run.changed", new
+        {
+            runId = run.Id, itemId = item.Id, itemKey = item.Key, status = "queued", agentId = run.AgentUserId,
+            kind = KindName(run.Kind), followsUpRunId = run.FollowsUpRunId,
+        }, ct);
+        AutomationMetrics.Started.Add(1);
+
+        return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>The pull request the item's implement runs last reported for <paramref name="branch"/>: a follow-up updates it without reporting it again.</summary>
+    private Task<string?> PullRequestOfAsync(Guid itemId, string branch, CancellationToken ct) =>
+        db.Runs.AsNoTracking()
+            .Where(run => run.ItemId == itemId && run.Kind == RunKind.Implement && run.BranchName == branch && run.PullRequestUrl != null)
+            .OrderByDescending(run => run.QueuedAt)
+            .Select(run => run.PullRequestUrl)
+            .FirstOrDefaultAsync(ct);
+
+    private static string? Truncate(string? value, int length) =>
+        value is null || value.Length <= length ? value : value[..length];
 
     /// <summary>
     /// Queues a run that resumes <paramref name="previous"/>'s harness session in the workspace
@@ -353,7 +489,7 @@ public sealed class RunDispatcher(
             }
         }
 
-        var claim = previous.Kind is RunKind.Refine or RunKind.Chat
+        var claim = previous.Kind is RunKind.Refine or RunKind.Chat or RunKind.Stage
             ? await claims.ClaimInPlaceAsync(previous.ItemId, previous.AgentUserId, ct)
             : await claims.ClaimForAsync(previous.ItemId, previous.AgentUserId, ct);
         switch (claim.Outcome)
@@ -392,6 +528,10 @@ public sealed class RunDispatcher(
             TriggerCommentId = previous.TriggerCommentId,
             Instruction = previous.Instruction,
             FollowsUpRunId = previous.FollowsUpRunId,
+            // Still the same stage of the same chain, or the same rework, so the chain goes on from it.
+            ChainPlaybookId = previous.ChainPlaybookId,
+            StageIndex = previous.StageIndex,
+            ReworkOfRunId = previous.ReworkOfRunId,
         };
         db.Runs.Add(run);
         if (refinement is not null)
@@ -475,6 +615,7 @@ public sealed class RunDispatcher(
     {
         RunKind.Refine => "refine",
         RunKind.Chat => "chat",
+        RunKind.Stage => "stage",
         _ => "implement",
     };
 

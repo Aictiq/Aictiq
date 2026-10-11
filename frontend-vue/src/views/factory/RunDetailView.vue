@@ -11,6 +11,7 @@ import KeyChip from '@/components/common/KeyChip.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import RunLog from '@/components/factory/RunLog.vue'
+import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
@@ -239,6 +240,7 @@ const tokens = computed(() => {
       <div class="border-border rounded-lg border p-4">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
           <RunStatusBadge :status="run.status" />
+          <RunStageBadges :run="run" />
           <span
             v-if="runScheduledLabel(run)"
             class="text-muted-foreground text-xs"
@@ -317,9 +319,9 @@ const tokens = computed(() => {
             <dt class="inline">Playbook&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.playbookName ?? '-' }}</dd>
           </div>
-          <div v-if="run.kind === 'chat'" data-testid="run-kind">
+          <div v-if="run.kind === 'chat' || run.kind === 'stage'" data-testid="run-kind">
             <dt class="inline">Kind&nbsp;</dt>
-            <dd class="text-foreground inline">chat</dd>
+            <dd class="text-foreground inline">{{ run.kind }}</dd>
           </div>
           <div>
             <dt class="inline">Runner&nbsp;</dt>
@@ -394,6 +396,17 @@ const tokens = computed(() => {
           <div v-if="run.branchName && !run.continuesRunId" data-testid="run-branch">
             <dt class="inline">Branch&nbsp;</dt>
             <dd class="text-foreground inline font-mono">{{ run.branchName }}</dd>
+          </div>
+          <div v-if="run.reworkOfRunId" data-testid="run-rework-of">
+            <dt class="inline">Addresses&nbsp;</dt>
+            <dd class="inline">
+              <RouterLink
+                :to="`/o/${slug}/factory/runs/${run.reworkOfRunId}`"
+                class="text-primary underline underline-offset-2"
+              >
+                the stage's findings
+              </RouterLink>
+            </dd>
           </div>
           <div v-if="run.continuesRunId" data-testid="run-continues">
             <dt class="inline">{{ run.autoContinued ? 'Auto-continues' : 'Continues' }}&nbsp;</dt>

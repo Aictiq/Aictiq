@@ -245,6 +245,18 @@ describe('applyFollowUpTarget', () => {
 })
 
 describe('follow-up prompts', () => {
+  it('tells a resumed builder which follow-up playbook asked for rework, and not to reply to a comment', () => {
+    const prompt = followUpPrompt(
+      followUp({ kind: 'rework', commentId: null, requestedByName: 'Code review', instruction: 'Handle the empty list.' }),
+      { kind: 'same', branch: Branch, onOrigin: true, pullRequest: 'open' },
+    )
+    expect(prompt).toContain('The follow-up playbook "Code review" requested changes')
+    expect(prompt).toContain('> Handle the empty list.')
+    expect(prompt).toContain(`Keep working on branch \`${Branch}\``)
+    expect(prompt).toContain('Do not transition the item')
+    expect(prompt).not.toContain('reply')
+  })
+
   it('tells a resumed session who asked, what, and where to push', () => {
     const prompt = followUpPrompt(followUp(), {
       kind: 'same',

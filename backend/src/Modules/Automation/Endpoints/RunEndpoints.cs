@@ -35,6 +35,9 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="TriggerCommentId">The comment that asked for the run by mentioning its agent, or null.</param>
 /// <param name="FollowsUpRunId">The earlier run of the agent on the item that this run follows up, or null.</param>
 /// <param name="BranchName">The branch the run delivers on.</param>
+/// <param name="StageVerdict">A follow-up playbook (stage) run's verdict: <c>pass</c> or <c>changes_requested</c>, once given.</param>
+/// <param name="StageIndex">A stage run's zero-based position in its chain.</param>
+/// <param name="ReworkOfRunId">The stage run whose requested changes this implement run addresses, or null.</param>
 /// <param name="Waiting">Why a queued run whose time has come is not running yet (run detail only, for factory operators).</param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
@@ -49,7 +52,7 @@ public sealed record RunView(
     bool Continuable = false, bool Superseded = false, IReadOnlyList<RunChainLink>? Chain = null,
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
-    RunWaitView? Waiting = null);
+    RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null);
 
 /// <summary>
 /// What a queued run waits for, so the run page can say it rather than "waiting for a runner".
@@ -729,7 +732,9 @@ public static class RunEndpoints
             run.SessionId,
             run.ContinuesRunId, null, run.AutoContinued, ScheduledFor: run.ScheduledFor,
             WorkspacePath: run.WorkspacePath,
-            TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName);
+            TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName,
+            StageVerdict: PlaybookChain.VerdictName(run.StageVerdict), StageIndex: run.StageIndex,
+            ReworkOfRunId: run.ReworkOfRunId);
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

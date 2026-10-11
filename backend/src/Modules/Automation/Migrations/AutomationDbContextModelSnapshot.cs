@@ -23,6 +23,100 @@ namespace Aictiq.Modules.Automation.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ChainStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AfterRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("after_run_id");
+
+                    b.Property<Guid>("ChainPlaybookId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("chain_playbook_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<string>("DropReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("drop_reason");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("ItemKey")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("item_key");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<Guid?>("RunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.Property<int>("StageIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("stage_index");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_chain_steps");
+
+                    b.HasIndex("AfterRunId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_chain_steps_after_run");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("ix_chain_steps_project_id");
+
+                    b.HasIndex("ItemId", "CreatedAt")
+                        .HasDatabaseName("ix_chain_steps_pending")
+                        .HasFilter("status = 0");
+
+                    b.ToTable("chain_steps", "automation", t =>
+                        {
+                            t.HasCheckConstraint("ck_chain_steps_decided", "(status = 0) = (decided_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1)");
+
+                            t.HasCheckConstraint("ck_chain_steps_started", "(status = 1) = (run_id IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_chain_steps_status", "status BETWEEN 0 AND 2");
+                        });
+                });
+
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ItemRefinement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -214,6 +308,47 @@ namespace Aictiq.Modules.Automation.Migrations
                             t.HasCheckConstraint("ck_playbooks_max_minutes", "max_minutes BETWEEN 5 AND 720");
 
                             t.HasCheckConstraint("ck_playbooks_name", "length(btrim(name)) BETWEEN 1 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.PlaybookStage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("PlaybookId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("playbook_id");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.Property<Guid>("StagePlaybookId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stage_playbook_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_playbook_stages");
+
+                    b.HasIndex("StagePlaybookId")
+                        .HasDatabaseName("ix_playbook_stages_stage_playbook_id");
+
+                    b.HasIndex("PlaybookId", "StagePlaybookId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_playbook_stages_playbook_stage");
+
+                    b.ToTable("playbook_stages", "automation", t =>
+                        {
+                            t.HasCheckConstraint("ck_playbook_stages_not_self", "playbook_id <> stage_playbook_id");
+
+                            t.HasCheckConstraint("ck_playbook_stages_position", "position BETWEEN 0 AND 9");
                         });
                 });
 
@@ -517,6 +652,10 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("cancel_requested_at");
 
+                    b.Property<Guid?>("ChainPlaybookId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("chain_playbook_id");
+
                     b.Property<Guid?>("ContinuesRunId")
                         .HasColumnType("uuid")
                         .HasColumnName("continues_run_id");
@@ -628,6 +767,10 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("requested_runner_id");
 
+                    b.Property<Guid?>("ReworkOfRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rework_of_run_id");
+
                     b.Property<Guid?>("RuleId")
                         .HasColumnType("uuid")
                         .HasColumnName("rule_id");
@@ -644,6 +787,19 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("session_id");
+
+                    b.Property<string>("StageFindings")
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)")
+                        .HasColumnName("stage_findings");
+
+                    b.Property<int?>("StageIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("stage_index");
+
+                    b.Property<short?>("StageVerdict")
+                        .HasColumnType("smallint")
+                        .HasColumnName("stage_verdict");
 
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
@@ -707,17 +863,21 @@ namespace Aictiq.Modules.Automation.Migrations
 
                             t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
 
-                            t.HasCheckConstraint("ck_runs_follow_up_trigger", "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL");
+                            t.HasCheckConstraint("ck_runs_follow_up_trigger", "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL OR kind = 3 OR rework_of_run_id IS NOT NULL");
 
-                            t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2)");
+                            t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3)");
 
                             t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
 
                             t.HasCheckConstraint("ck_runs_requested_by_xor_rule", "(requested_by IS NOT NULL) <> (rule_id IS NOT NULL)");
 
+                            t.HasCheckConstraint("ck_runs_stage", "(kind = 3) = (chain_playbook_id IS NOT NULL AND stage_index IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_runs_stage_verdict", "stage_verdict IS NULL OR (kind = 3 AND stage_verdict IN (0, 1))");
+
                             t.HasCheckConstraint("ck_runs_status", "status BETWEEN 0 AND 6");
 
-                            t.HasCheckConstraint("ck_runs_trigger_instruction", "(trigger_comment_id IS NULL) = (instruction IS NULL)");
+                            t.HasCheckConstraint("ck_runs_trigger_instruction", "(trigger_comment_id IS NULL) = (instruction IS NULL) OR rework_of_run_id IS NOT NULL");
                         });
                 });
 
@@ -1056,6 +1216,23 @@ namespace Aictiq.Modules.Automation.Migrations
                         {
                             t.ExcludeFromMigrations();
                         });
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.PlaybookStage", b =>
+                {
+                    b.HasOne("Aictiq.Modules.Automation.Domain.Playbook", null)
+                        .WithMany()
+                        .HasForeignKey("PlaybookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_playbook_stages_playbooks_playbook_id");
+
+                    b.HasOne("Aictiq.Modules.Automation.Domain.Playbook", null)
+                        .WithMany()
+                        .HasForeignKey("StagePlaybookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_playbook_stages_playbooks_stage_playbook_id");
                 });
 
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectRefinementSettings", b =>

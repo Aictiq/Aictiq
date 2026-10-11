@@ -18,7 +18,8 @@ namespace Aictiq.Modules.Automation.Workers;
 /// playbook's time limit. Both verdicts go through the same path as a runner's own
 /// finish - terminal status, token revoked, <see cref="RunFinished"/> staged - so the
 /// item's history cannot tell them apart. It also starts the mentions waiting for an item
-/// to be free (<see cref="RunMentionQueue"/>).
+/// to be free (<see cref="RunMentionQueue"/>), and the playbook chain steps waiting the same way
+/// (<see cref="ChainQueue"/>).
 /// </summary>
 /// <remarks>
 /// Per organization, not one cross-tenant query: row-level security admits
@@ -110,7 +111,9 @@ public sealed class RunSweeper(
                 await SweepReadOnlyQueuedRunsAsync(scope.ServiceProvider, cancellationToken);
                 await SweepStrandedContinuesAsync(scope.ServiceProvider, cancellationToken);
                 await SweepAutoContinuesAsync(scope.ServiceProvider, cancellationToken);
-                // Last, so a run settled above frees its item for the next mention on this tick.
+                // Last, so a run settled above frees its item for the next chain step or mention on
+                // this tick. A chain goes first: its next step carries on work already in flight.
+                await scope.ServiceProvider.GetRequiredService<ChainQueue>().SweepAsync(cancellationToken);
                 await scope.ServiceProvider.GetRequiredService<RunMentionQueue>().SweepAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

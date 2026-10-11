@@ -23,6 +23,14 @@ public enum RunKind : short
     /// message is the reply in the comment's thread.
     /// </summary>
     Chat = 2,
+
+    /// <summary>
+    /// A follow-up playbook of a builder playbook's chain (<see cref="PlaybookStage"/>): it
+    /// checks out the builder's pull request branch, may push to it, posts its findings on the
+    /// pull request and reports a <see cref="StageVerdict"/>. It leaves the item where it is;
+    /// the chain moves it once the last stage passes.
+    /// </summary>
+    Stage = 3,
 }
 
 /// <summary>Where one item's refinement stands. Only <see cref="Refining"/> has a live run behind it.</summary>

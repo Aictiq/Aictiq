@@ -231,6 +231,27 @@ describe('ItemDetail runs and the operator line', () => {
     runs.items[0] = original
   })
 
+  it('labels a stage run with its stage and verdict, and a rework run as rework', async () => {
+    const original = runs.items[0]!
+    runs.items[0] = {
+      ...original,
+      kind: 'stage',
+      playbookName: 'Code review',
+      stageVerdict: 'changes_requested',
+    } as typeof original
+    runs.items.push({ ...original, id: 'r-2', reworkOfRunId: 'r-1' } as typeof original)
+
+    const wrapper = await mountDetail(false)
+    const section = wrapper.find('[data-testid="item-runs"]')
+
+    expect(section.get('[data-testid="run-stage-badge"]').text()).toBe('Stage: Code review')
+    expect(section.get('[data-testid="run-stage-verdict"]').text()).toBe('changes requested')
+    expect(section.findAll('[data-testid="run-rework-badge"]')).toHaveLength(1)
+    expect(section.findAll('[data-testid="run-stage-badge"]')).toHaveLength(1)
+
+    runs.items.splice(0, runs.items.length, original)
+  })
+
   it('names the rule that dispatched a run with no requester', async () => {
     const original = { ...runs.items[0]! }
     runs.items[0]!.requestedBy = null as unknown as string

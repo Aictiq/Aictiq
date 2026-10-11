@@ -19,6 +19,13 @@ public enum RunStatus : short
     TimedOut = 6,
 }
 
+/// <summary>What a <see cref="RunKind.Stage"/> run decided about the pull request it checked.</summary>
+public enum StageVerdict : short
+{
+    Pass = 0,
+    ChangesRequested = 1,
+}
+
 public enum RunLogStream : short
 {
     Stdout = 0,
@@ -54,6 +61,9 @@ public sealed class Run : TenantEntity
 
     /// <summary>A comment's own limit: the instruction is the comment's whole text.</summary>
     public const int MaxInstructionLength = 20_000;
+
+    /// <summary>A stage's findings become a rework run's instruction, so they share its limit.</summary>
+    public const int MaxStageFindingsLength = MaxInstructionLength;
 
     /// <summary>
     /// The failure a follow-up run reports when the earlier run's pull request or branch is
@@ -207,8 +217,32 @@ public sealed class Run : TenantEntity
     /// </summary>
     public Guid? FollowsUpRunId { get; init; }
 
-    /// <summary>What the person asked for, verbatim; set exactly when <see cref="TriggerCommentId"/> is.</summary>
+    /// <summary>
+    /// What the person asked for, verbatim, when <see cref="TriggerCommentId"/> is set; on a
+    /// rework run, the findings of the stage that asked for it.
+    /// </summary>
     public string? Instruction { get; init; }
+
+    /// <summary>
+    /// On a <see cref="RunKind.Stage"/> run: the builder playbook whose chain it belongs to.
+    /// Its success state is where the item goes once the chain ends.
+    /// </summary>
+    public Guid? ChainPlaybookId { get; init; }
+
+    /// <summary>On a stage run: its zero-based position in the chain when it was started.</summary>
+    public int? StageIndex { get; init; }
+
+    /// <summary>
+    /// On an implement run the server started itself: the stage run whose requested changes
+    /// it addresses. Counts toward <see cref="PlaybookChain.MaxReworkRounds"/> for the item.
+    /// </summary>
+    public Guid? ReworkOfRunId { get; init; }
+
+    /// <summary>A stage run's verdict, set by its agent through <c>submit_stage_verdict</c>.</summary>
+    public StageVerdict? StageVerdict { get; set; }
+
+    /// <summary>What the stage found, as its agent reported it with the verdict.</summary>
+    public string? StageFindings { get; set; }
 
     public uint Version { get; set; }
 
@@ -241,7 +275,10 @@ public sealed class Run : TenantEntity
     /// </summary>
     public void ScheduleAutoContinue(DateTimeOffset now)
     {
-        if (Status == RunStatus.Failed && IsTransientFailure(FailureReason) && HasResumableSession
+        // A failed stage has already sent the item to human review; continuing it would run
+        // the chain on behind the person now looking at the pull request.
+        if (Kind != RunKind.Stage
+            && Status == RunStatus.Failed && IsTransientFailure(FailureReason) && HasResumableSession
             && CancelRequestedAt is null && AutoContinues < MaxAutoContinues)
         {
             AutoContinueDueAt = now + (AutoContinues == 0 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5));

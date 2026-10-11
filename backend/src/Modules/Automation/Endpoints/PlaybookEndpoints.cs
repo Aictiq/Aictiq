@@ -15,7 +15,11 @@ namespace Aictiq.Modules.Automation.Endpoints;
 public sealed record PlaybookView(
     Guid Id, Guid ProjectId, string Name, Guid? WikiPageId, string Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
-    string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false);
+    string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false,
+    IReadOnlyList<Guid>? StagePlaybookIds = null);
+
+/// <summary>A playbook's follow-up playbooks, in the order they run; empty removes them all.</summary>
+public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybookIds);
 
 /// <param name="InstructionsMarkdown">
 /// What agents should follow. Aictiq files it as a page in the wiki's Factory section, named
@@ -102,6 +106,7 @@ public static class PlaybookEndpoints
         playbooks.MapGet("/{playbookId:guid}/instructions", InstructionsAsync).RequireProjectRole(ProjectRole.Admin).RequireScope(Scopes.Read);
         playbooks.MapPatch("/{playbookId:guid}", UpdateAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapDelete("/{playbookId:guid}", DeleteAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
+        playbooks.MapPut("/{playbookId:guid}/stages", PutStagesAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
         playbooks.MapPut("/{playbookId:guid}/default", PromoteAsync).RequireProjectRole(ProjectRole.Admin).RequireProjectWritable().RequireScope(Scopes.Write);
 
         var settings = api.MapGroup("/orgs/{orgSlug}/projects/{projectKey}/factory-settings")
@@ -116,7 +121,11 @@ public static class PlaybookEndpoints
         var projectId = http.ResolvedProjectId()!.Value;
         var rows = await db.Playbooks.AsNoTracking().Where(row => row.ProjectId == projectId)
             .OrderByDescending(row => row.IsDefault).ThenBy(row => row.Name).ToListAsync(ct);
-        return Results.Ok(rows.Select(ToView).ToList());
+        var ids = rows.Select(row => row.Id).ToList();
+        var stages = (await db.PlaybookStages.AsNoTracking().Where(stage => ids.Contains(stage.PlaybookId))
+                .OrderBy(stage => stage.Position).ToListAsync(ct))
+            .ToLookup(stage => stage.PlaybookId, stage => stage.StagePlaybookId);
+        return Results.Ok(rows.Select(row => ToView(row, [.. stages[row.Id]])).ToList());
     }
 
     private static async Task<IResult> GetAsync(
@@ -125,7 +134,7 @@ public static class PlaybookEndpoints
         var projectId = http.ResolvedProjectId()!.Value;
         var row = await db.Playbooks.AsNoTracking()
             .SingleOrDefaultAsync(playbook => playbook.Id == playbookId && playbook.ProjectId == projectId, ct);
-        return row is null ? NotFound() : Results.Ok(ToView(row));
+        return row is null ? NotFound() : Results.Ok(ToView(row, await StageIdsAsync(db, row.Id, ct)));
     }
 
     private static async Task<IResult> InstructionsAsync(
@@ -240,8 +249,54 @@ public static class PlaybookEndpoints
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
         await pages.InvalidateAsync(projectId, ct);
-        return Results.Ok(ToView(row));
+        return Results.Ok(ToView(row, await StageIdsAsync(db, row.Id, ct)));
     }
+
+    /// <summary>
+    /// Replaces a playbook's follow-up playbooks with <see cref="PutPlaybookStagesRequest.StagePlaybookIds"/>,
+    /// in that order. Each must be another playbook of the same project, at most once; a stage's
+    /// own stages are allowed but never followed, so no chain can loop.
+    /// </summary>
+    private static async Task<IResult> PutStagesAsync(
+        Guid playbookId, PutPlaybookStagesRequest request, HttpContext http, AutomationDbContext db,
+        ICurrentTenant tenant, TimeProvider clock, CancellationToken ct)
+    {
+        var projectId = http.ResolvedProjectId()!.Value;
+        var row = await db.Playbooks.SingleOrDefaultAsync(
+            playbook => playbook.Id == playbookId && playbook.ProjectId == projectId, ct);
+        if (row is null) return NotFound();
+
+        var ids = request.StagePlaybookIds ?? [];
+        string? error = null;
+        if (ids.Count > PlaybookStage.MaxStages)
+            error = $"A playbook can have at most {PlaybookStage.MaxStages} follow-up playbooks.";
+        else if (ids.Contains(playbookId))
+            error = "A playbook cannot follow itself.";
+        else if (ids.Distinct().Count() != ids.Count)
+            error = "A playbook can appear only once in a chain.";
+        else if (await db.Playbooks.CountAsync(playbook => ids.Contains(playbook.Id) && playbook.ProjectId == projectId, ct) != ids.Count)
+            error = "Choose playbooks of this project.";
+        if (error is not null)
+            return Validation(new Dictionary<string, string[]> { ["stagePlaybookIds"] = [error] });
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.PlaybookStages.Where(stage => stage.PlaybookId == playbookId).ExecuteDeleteAsync(ct);
+        db.PlaybookStages.AddRange(ids.Select((stageId, position) => new PlaybookStage
+        {
+            OrganizationId = tenant.OrganizationId!.Value,
+            PlaybookId = playbookId,
+            StagePlaybookId = stageId,
+            Position = position,
+        }));
+        row.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.Ok(ToView(row, [.. ids]));
+    }
+
+    private static async Task<IReadOnlyList<Guid>> StageIdsAsync(AutomationDbContext db, Guid playbookId, CancellationToken ct) =>
+        await db.PlaybookStages.AsNoTracking().Where(stage => stage.PlaybookId == playbookId)
+            .OrderBy(stage => stage.Position).Select(stage => stage.StagePlaybookId).ToListAsync(ct);
 
     private static async Task<IResult> DeleteAsync(
         Guid playbookId, HttpContext http, AutomationDbContext db, IWikiPageAccess pages, CancellationToken ct)
@@ -294,7 +349,7 @@ public static class PlaybookEndpoints
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        return Results.Ok(ToView(row));
+        return Results.Ok(ToView(row, await StageIdsAsync(db, row.Id, ct)));
     }
 
     private static async Task<IResult> StarterAsync(
@@ -461,10 +516,12 @@ public static class PlaybookEndpoints
         return await agents.FindAsync(agentId, ct) is { IsActive: true };
     }
 
-    private static PlaybookView ToView(Playbook row) => new(
+    private static PlaybookView ToView(Playbook row) => ToView(row, []);
+
+    private static PlaybookView ToView(Playbook row, IReadOnlyList<Guid> stagePlaybookIds) => new(
         row.Id, row.ProjectId, row.Name, row.WikiPageId, row.Harness,
         row.OnSuccessStateId, row.OnFailureStateId, row.MaxMinutes, row.IsDefault,
-        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch);
+        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds);
 
     private static FactorySettingsView ToView(ProjectFactorySettings row) => new(
         row.ProjectId, (short)row.RepoSource, row.RepoFullName, row.DefaultBranch,
