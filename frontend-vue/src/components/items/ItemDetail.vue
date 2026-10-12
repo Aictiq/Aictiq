@@ -1294,7 +1294,7 @@ function logged(updated: TimeTrackingItem) {
           {{ entry }}
         </button>
       </nav>
-      <section v-if="tab === 'comments'" class="mt-4 space-y-4">
+      <section v-if="tab === 'comments'" class="mt-4 space-y-4" data-image-gallery>
         <form v-if="mayComment" class="space-y-2" @submit.prevent="addComment">
           <p
             v-if="showAgentHint"
