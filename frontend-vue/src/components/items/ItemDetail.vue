@@ -1498,23 +1498,52 @@ function logged(updated: TimeTrackingItem) {
           <X class="size-5" />
         </button>
       </div>
-      <div class="rounded-md border p-3">
-        <div class="flex items-center gap-1.5">
-          <p class="font-mono text-sm font-semibold">{{ currentItem.key }}</p>
+      <div class="flex items-start gap-2 rounded-md border p-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5">
+            <p class="font-mono text-sm font-semibold">{{ currentItem.key }}</p>
+            <button
+              type="button"
+              class="text-muted-foreground hover:text-foreground rounded p-1"
+              :aria-label="`Copy ${currentItem.key}`"
+              :title="keyCopied ? 'Copied' : 'Copy'"
+              @click="copyKey(currentItem.key)"
+            >
+              <Check v-if="keyCopied" class="size-3.5" />
+              <Copy v-else class="size-3.5" />
+            </button>
+          </div>
+          <p class="mt-1 text-sm capitalize">
+            {{ currentItem.type }} · {{ currentItem.stateCategory }}
+          </p>
+        </div>
+        <div class="flex shrink-0 gap-1">
           <button
             type="button"
-            class="text-muted-foreground hover:text-foreground rounded p-1"
-            :aria-label="`Copy ${currentItem.key}`"
-            :title="keyCopied ? 'Copied' : 'Copy'"
-            @click="copyKey(currentItem.key)"
+            class="text-muted-foreground hover:text-foreground hover:bg-muted rounded border p-1.5"
+            aria-label="Copy link"
+            title="Copy a link to this item"
+            @click="copyLink"
           >
-            <Check v-if="keyCopied" class="size-3.5" />
-            <Copy v-else class="size-3.5" />
+            <Link class="size-4" aria-hidden="true" /></button
+          ><button
+            type="button"
+            class="text-muted-foreground hover:text-foreground hover:bg-muted rounded border p-1.5"
+            aria-label="Copy branch name"
+            title="Copy a git branch name for this item"
+            @click="copyWithToast(branchName(currentItem.key, currentItem.title), 'Branch name copied')"
+          >
+            <GitBranch class="size-4" aria-hidden="true" /></button
+          ><button
+            type="button"
+            class="text-muted-foreground hover:text-foreground hover:bg-muted rounded border p-1.5"
+            aria-label="Copy commit prefix"
+            :title="`Copy a commit message prefix (${currentItem.key}: )`"
+            @click="copyWithToast(`${currentItem.key}: `, 'Commit prefix copied')"
+          >
+            <Check class="size-4" aria-hidden="true" />
           </button>
         </div>
-        <p class="mt-1 text-sm capitalize">
-          {{ currentItem.type }} · {{ currentItem.stateCategory }}
-        </p>
       </div>
       <div class="rounded-md border p-3">
         <label for="item-status" class="font-label">
@@ -1796,36 +1825,6 @@ function logged(updated: TimeTrackingItem) {
         </div>
         <p v-if="savingPlanning" class="text-muted-foreground mt-2 text-xs">Saving…</p>
         <p v-else-if="planningError" class="text-destructive mt-2 text-xs">{{ planningError }}</p>
-      </div>
-      <div class="rounded-md border p-3">
-        <p class="font-label">Copy</p>
-        <div class="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            class="border rounded p-1.5"
-            aria-label="Copy link"
-            title="Copy a link to this item"
-            @click="copyLink"
-          >
-            <Link class="size-4" aria-hidden="true" /></button
-          ><button
-            type="button"
-            class="border rounded p-1.5"
-            aria-label="Copy branch name"
-            title="Copy a git branch name for this item"
-            @click="copyWithToast(branchName(currentItem.key, currentItem.title), 'Branch name copied')"
-          >
-            <GitBranch class="size-4" aria-hidden="true" /></button
-          ><button
-            type="button"
-            class="border rounded p-1.5"
-            aria-label="Copy commit prefix"
-            :title="`Copy a commit message prefix (${currentItem.key}: )`"
-            @click="copyWithToast(`${currentItem.key}: `, 'Commit prefix copied')"
-          >
-            <Check class="size-4" aria-hidden="true" />
-          </button>
-        </div>
       </div>
       <div v-if="mayDelete" class="rounded-md border p-3">
         <button
