@@ -5,7 +5,6 @@ import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getSubscription } from '@/api/billing'
-import { getLatestGitHubRelease, getReleaseMetadata, isNewerRelease } from '@/api/meta'
 import ImageLightbox from '@/components/common/ImageLightbox.vue'
 import CreateTicketDialog from '@/components/items/CreateTicketDialog.vue'
 import ItemDetailDialog from '@/components/items/ItemDetailDialog.vue'
@@ -110,31 +109,6 @@ const subscription = useQuery({
   enabled: computed(() => billingSlug.value !== null),
   staleTime: 5 * 60_000,
   retry: false,
-})
-
-// The server has to explicitly opt in before a browser contacts GitHub. Failed checks
-// are silent: an unavailable update service must never make the application frame noisy.
-const releaseMetadata = useQuery({
-  queryKey: ['release-metadata'],
-  queryFn: getReleaseMetadata,
-  staleTime: Infinity,
-  retry: false,
-})
-const latestRelease = useQuery({
-  queryKey: computed(() => ['release-update', releaseMetadata.data.value?.updateCheck.repository]),
-  queryFn: () => getLatestGitHubRelease(releaseMetadata.data.value!.updateCheck.repository!),
-  enabled: computed(
-    () =>
-      releaseMetadata.data.value?.updateCheck.enabled === true &&
-      releaseMetadata.data.value.updateCheck.repository !== null,
-  ),
-  staleTime: 24 * 60 * 60_000,
-  retry: false,
-})
-const updateAvailable = computed(() => {
-  const current = releaseMetadata.data.value?.version
-  const latest = latestRelease.data.value?.version
-  return current !== undefined && latest !== undefined && isNewerRelease(current, latest)
 })
 
 const createTicket = useCreateTicket()
@@ -335,20 +309,6 @@ useShortcut('mod+b', toggleNavigation, { allowInInput: true })
       <main id="main-content" tabindex="-1" class="min-h-0 flex-1 overflow-y-auto">
         <slot />
       </main>
-      <footer
-        class="text-muted-foreground flex items-center justify-between gap-3 border-t px-3 py-2 text-xs sm:px-4"
-      >
-        <span>Aictiq {{ releaseMetadata.data.value?.version ?? 'development' }}</span>
-        <a
-          v-if="updateAvailable && latestRelease.data.value"
-          :href="latestRelease.data.value.url"
-          class="text-primary underline underline-offset-2"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Update available: {{ latestRelease.data.value.version }}
-        </a>
-      </footer>
     </div>
 
     <ItemDetailDialog />

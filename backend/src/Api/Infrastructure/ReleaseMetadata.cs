@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Aictiq.Api.Infrastructure;
 
 /// <summary>
-/// The small, public release contract consumed by the web footer and installation
+/// The small, public release contract consumed by the web About page and installation
 /// tooling. It deliberately has no tenant or authentication dependency.
 /// </summary>
 public sealed record ReleaseMetadata(string Version, UpdateCheckMetadata UpdateCheck)
@@ -28,7 +28,7 @@ public sealed record ReleaseMetadata(string Version, UpdateCheckMetadata UpdateC
         }
 
         // SourceRevisionId is commonly appended as SemVer build metadata. It is useful
-        // in an artifact but noisy in a footer, and has no bearing on version ordering.
+        // in an artifact but noisy in the UI, and has no bearing on version ordering.
         version = version.Split('+', 2)[0];
 
         var updatesEnabled = configuration.GetValue("Release:UpdateCheck:Enabled", false);

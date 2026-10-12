@@ -1,3 +1,4 @@
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -52,7 +53,7 @@ async function render(path: string, mobile = false) {
   await router.push(path)
   const wrapper = mount(AppSidebar, {
     props: { mobile },
-    global: { plugins: [router], stubs: { OrgSwitcher: true } },
+    global: { plugins: [router, VueQueryPlugin], stubs: { OrgSwitcher: true } },
   })
   await flushPromises()
   return { router, wrapper }

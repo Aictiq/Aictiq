@@ -3,9 +3,11 @@ import {
   Bot,
   CalendarRange,
   ChevronsLeft,
+  CircleArrowUp,
   CirclePlay,
   Factory,
   FolderOpen,
+  Info,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -34,6 +36,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { avatarUrl } from '@/api/profile'
 import { useLogout } from '@/composables/useLogout'
+import { useRelease } from '@/composables/useRelease'
 import {
   factoryPath,
   orgSettingsPath,
@@ -186,6 +189,15 @@ function openAccountSettings() {
   closeMobileNavigation()
   void router.push('/settings/profile')
 }
+
+function openAbout() {
+  closeMobileNavigation()
+  void router.push('/about')
+}
+
+// The About page carries the version and any pending update now that the frame has no
+// footer, so the menu entry is where an update gets noticed.
+const release = useRelease()
 
 // A backlog, a board and a sprint belong to a *team*, not to a project - which is what
 // teams are for. These act on the selected team the same way the project links act on the
@@ -403,6 +415,17 @@ const organization = computed<NavItem[]>(() => {
           <DropdownMenuItem @select="onboarding.startTour()">
             <CirclePlay class="size-3.5" aria-hidden="true" />
             Replay product tour
+          </DropdownMenuItem>
+          <DropdownMenuItem @select="openAbout">
+            <Info class="size-3.5" aria-hidden="true" />
+            About
+            <span
+              v-if="release.update.value"
+              class="text-primary ml-auto inline-flex items-center gap-1 text-[10.5px]"
+            >
+              <CircleArrowUp class="size-3" aria-hidden="true" />
+              Update
+            </span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem @select="logout()">

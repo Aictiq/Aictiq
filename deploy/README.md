@@ -66,8 +66,10 @@ matched release pair.
 
 ## Version and update checks
 
-`GET /api/v1/meta` reports the running version. The app footer shows it too. A release
-check is off by default; to enable it, set the following non-secret values in `.env`:
+`GET /api/v1/meta` reports the running version, and the app's About page (user menu,
+bottom of the sidebar) shows it too. A tagged release reports its tag; a source build
+reports the release line it was built from with a `-dev` suffix, such as `0.12.0-dev`.
+A release check is off by default; to enable it, set the following non-secret values in `.env`:
 
 ```dotenv
 RELEASE_UPDATE_CHECK_ENABLED=true
