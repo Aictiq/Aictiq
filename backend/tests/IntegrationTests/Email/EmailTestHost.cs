@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,10 @@ public sealed class EmailTestHost : IAsyncDisposable
         services.AddSingleton<ICurrentUser, SystemCurrentUser>();
         // Identity owns the shared outbox table, so its context must migrate first.
         services.AddModuleDbContext<IdentityDbContext>("identity");
+        // IdentityDbContext builds its model from this setting, and EF caches that model for
+        // the whole test process: left at the default, a schema-v1 model built here would
+        // break every API host that reuses it.
+        services.Configure<IdentityOptions>(options => options.Stores.SchemaVersion = IdentityModule.SchemaVersion);
         services.AddNotificationsModule();
         services.AddNotificationsWorkers(configuration);
         services.AddOutboxProcessor(typeof(SendEmailRequested).Assembly);

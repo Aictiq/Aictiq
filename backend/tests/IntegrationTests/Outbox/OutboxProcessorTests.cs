@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Aictiq.Modules.WorkItems.Contracts;
@@ -26,7 +27,9 @@ public sealed class OutboxProcessorTests(PostgresFixture postgres) : IAsyncLifet
     public async ValueTask InitializeAsync()
     {
         var connection = await postgres.CreateDatabaseAsync("outbox_tests"); _dataSource = NpgsqlDataSource.Create(connection);
-        var services = new ServiceCollection(); services.AddLogging(); services.AddSingleton(_dataSource); services.AddSharedKernel(); services.AddSingleton<ICurrentUser, SystemCurrentUser>(); services.AddModuleDbContext<IdentityDbContext>("identity"); services.AddWorkItemsModule(); services.AddWorkItemsWorkers(); var configuration = new ConfigurationBuilder().Build(); services.AddSingleton<IConfiguration>(configuration); services.AddRealtimeNotifyPublisher(configuration); services.AddScoped<IDomainEventHandler<TestExplodingEvent>, TestExplodingHandler>(); services.AddOutboxProcessor(typeof(WorkItemsDbContext).Assembly, typeof(OutboxProcessorTests).Assembly);
+        // IdentityDbContext builds its model from IdentityOptions, and EF caches that model for the
+        // whole test process: left at the default, a schema-v1 model built here breaks every API host after it.
+        var services = new ServiceCollection(); services.AddLogging(); services.AddSingleton(_dataSource); services.AddSharedKernel(); services.AddSingleton<ICurrentUser, SystemCurrentUser>(); services.AddModuleDbContext<IdentityDbContext>("identity"); services.Configure<IdentityOptions>(options => options.Stores.SchemaVersion = IdentityModule.SchemaVersion); services.AddWorkItemsModule(); services.AddWorkItemsWorkers(); var configuration = new ConfigurationBuilder().Build(); services.AddSingleton<IConfiguration>(configuration); services.AddRealtimeNotifyPublisher(configuration); services.AddScoped<IDomainEventHandler<TestExplodingEvent>, TestExplodingHandler>(); services.AddOutboxProcessor(typeof(WorkItemsDbContext).Assembly, typeof(OutboxProcessorTests).Assembly);
         _provider = services.BuildServiceProvider(); await MigrationRunner.MigrateAsync(_provider, [typeof(IdentityDbContext), typeof(WorkItemsDbContext)]);
     }
     public async ValueTask DisposeAsync() { await _provider.DisposeAsync(); await _dataSource.DisposeAsync(); }
