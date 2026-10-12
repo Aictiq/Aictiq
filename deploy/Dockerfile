@@ -20,6 +20,9 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY Directory.Build.props Directory.Packages.props ./
+# Directory.Build.props reads the release line from the CLI manifest; without it the
+# image would identify as 0.0.0-dev.
+COPY cli/package.json ./cli/
 COPY backend/ ./backend/
 
 # The API project normally invokes pnpm itself. The web build above is intentional here:

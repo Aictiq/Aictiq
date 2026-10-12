@@ -9,7 +9,8 @@
 **/obj
 **/node_modules
 frontend-vue/dist
-cli
+cli/*
+!cli/package.json
 deploy
 docs
 perf
