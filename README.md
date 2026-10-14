@@ -2,7 +2,7 @@
 
 # Aictiq
 
-**Your AI software factory.**
+**The product delivery platform.**
 
 [![backend](https://github.com/Aictiq/Aictiq/actions/workflows/backend.yml/badge.svg?branch=main&event=push)](https://github.com/Aictiq/Aictiq/actions/workflows/backend.yml)
 [![web](https://github.com/Aictiq/Aictiq/actions/workflows/web.yml/badge.svg?branch=main&event=push)](https://github.com/Aictiq/Aictiq/actions/workflows/web.yml)

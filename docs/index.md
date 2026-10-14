@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Aictiq
-  text: Your AI software factory
+  text: The product delivery platform
   tagline: Plan the work, hand a ticket to a coding agent on a machine you control, and get a pull request back.
   actions:
     - theme: brand
