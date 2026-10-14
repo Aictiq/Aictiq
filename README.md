@@ -17,9 +17,13 @@
 
 </div>
 
-Aictiq is project management for software teams **and their coding agents**: organizations,
-projects, teams, sprints, hierarchical work items, wiki and analytics - plus a factory that
-hands a ticket to an agent running on a machine you control and gets a pull request back.
+Aictiq takes work from idea to merged pull request. Plan it with your team, hand tickets to
+Claude Code, Codex, Cursor, OpenCode or Copilot running on a machine you control, and review
+every change before it lands. Stakeholders follow along on the board without seeing prompts,
+logs or other projects.
+
+Underneath is a complete tracker: projects, sprints, hierarchical work items, wiki and
+analytics, so your whole team works in Aictiq, with or without agents.
 
 Self-hosted, AGPL-3.0, one `docker compose up`.
 
