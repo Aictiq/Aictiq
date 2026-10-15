@@ -36,6 +36,25 @@ async function until(check, message) {
 async function capture(page, name) {
   screenshots.push([name, await page.screenshot({ fullPage: false, animations: 'disabled' })])
 }
+async function assertActionsAligned(comment, viewport) {
+  await comment.scrollIntoViewIfNeeded()
+  const actions = [
+    comment.getByRole('button', { name: /^Reply to / }),
+    comment.getByRole('button', { name: 'Edit', exact: true }),
+    comment.getByRole('button', { name: 'Delete', exact: true }),
+    comment.getByRole('button', { name: 'Add reaction', exact: true }),
+  ]
+  const centers = []
+  for (const action of actions) {
+    const button = await action.boundingBox()
+    const icon = await action.locator('svg').boundingBox()
+    assert.ok(button && icon, 'comment action and icon are visible')
+    centers.push(button.y + button.height / 2, icon.y + icon.height / 2)
+  }
+  const offset = Math.max(...centers) - Math.min(...centers)
+  assert.ok(offset <= 1, `${viewport} Reply/Edit/Delete/React button and SVG centers differ by ${offset}px`)
+  console.log(`PASS ${viewport} Reply/Edit/Delete/React button and SVG centers align within ${offset}px`)
+}
 try {
   await api(author, 'POST', '/auth/login', {
     email: process.env.E2E_ADMIN_EMAIL || 'admin@aictiq.local',
@@ -97,7 +116,8 @@ try {
   // fixture user's notification/project hubs do not race to create their presence.
   for (const current of [page, livePage]) {
     await current.goto('/about')
-    await current.getByRole('heading', { name: 'About Aictiq' }).waitFor()
+    // The first-run tour can mark the underlying page aria-hidden before it is dismissed.
+    await current.getByRole('heading', { name: 'About Aictiq', includeHidden: true }).waitFor()
     await until(() => realtime.get(current).handshaken, 'notification hub handshake completed')
     const skipTour = current.getByRole('button', { name: 'Skip tour', exact: true })
     try { await skipTour.waitFor({ timeout: 3000 }); await skipTour.click() } catch { /* Returning fixture admin already dismissed it. */ }
@@ -144,6 +164,12 @@ try {
   assert.ok(edited.revisions.length >= 1, 'edit retains revision history')
   await ownComment.scrollIntoViewIfNeeded()
   await capture(page, '2-edited-comment.png')
+  await assertActionsAligned(ownComment, 'desktop')
+  screenshots.push(['5-aligned-comment-actions.png', await ownComment.screenshot({ animations: 'disabled' })])
+  await page.setViewportSize({ width: 390, height: 844 })
+  await assertActionsAligned(ownComment, 'mobile')
+  await page.setViewportSize({ width: 1440, height: 1080 })
+  await ownComment.scrollIntoViewIfNeeded()
   await ownComment.getByRole('button', { name: 'Delete', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Delete your comment?' })
   await dialog.waitFor()

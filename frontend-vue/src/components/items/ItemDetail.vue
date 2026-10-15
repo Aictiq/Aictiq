@@ -1549,7 +1549,7 @@ function logged(updated: TimeTrackingItem) {
                 <button
                   v-if="!thread.root.deletedAt && mayComment"
                   type="button"
-                  class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
+                  class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
                   :aria-label="`Reply to ${entry.author.displayName}`"
                   @click="startReply(entry)"
                 >
@@ -1558,7 +1558,7 @@ function logged(updated: TimeTrackingItem) {
                 <template v-if="mayChangeComment(entry)">
                   <button
                     type="button"
-                    class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                    class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs disabled:opacity-50"
                     :disabled="editingComment !== null || savingComment || removingComment"
                     @click="startCommentEdit(entry)"
                   >
@@ -1566,7 +1566,7 @@ function logged(updated: TimeTrackingItem) {
                   </button>
                   <button
                     type="button"
-                    class="text-muted-foreground hover:text-destructive mt-1 inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                    class="text-muted-foreground hover:text-destructive inline-flex items-center gap-1 text-xs disabled:opacity-50"
                     :disabled="editingComment !== null || savingComment || removingComment"
                     @click="askToDeleteComment(entry)"
                   >

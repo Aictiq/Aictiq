@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" />
     <PackageReference Include="AWSSDK.S3" />
     <PackageReference Include="MailKit" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
 
