@@ -1,4 +1,5 @@
 using System.Net;
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Npgsql;
@@ -20,6 +21,7 @@ using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Domain;
 using Aictiq.SharedKernel.Paging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Aictiq.IntegrationTests.WorkItems;
 
@@ -37,6 +39,7 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
     private string _ownerId = null!;
     private OrganizationView _organization = null!;
     private ProjectView _project = null!;
+    private readonly RecordingPublisher _realtime = new();
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public async ValueTask InitializeAsync()
@@ -51,6 +54,7 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
                 services.AddOptions<NotificationEmailOptions>();
                 services.AddSingleton<EmailTemplateRenderer>();
                 services.AddScoped<NotificationEmailService>();
+                services.Replace(ServiceDescriptor.Singleton<IRealtimePublisher>(_realtime));
             });
         var owner = await _context.RegisterAsync($"threads-owner-{Guid.NewGuid():N}@test.local", "Olga", "Owner");
         _owner = _context.ClientFor(owner);
@@ -67,6 +71,134 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
     {
         _owner.Dispose();
         await _context.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task only_the_author_can_edit_or_delete_roots_and_replies_even_when_the_other_person_is_an_admin()
+    {
+        var (_, author) = await JoinAsync("Ana", "Author");
+        var (_, member) = await JoinAsync("Mia", "Member");
+        var (adminId, admin) = await JoinAsync("Ivan", "Admin");
+        var promote = await _owner.PutAsJsonAsync($"/api/v1/orgs/{Slug}/projects/{_project.Key}/members/{adminId}",
+            new UpdateProjectMemberRequest(ProjectRole.Admin), ApiTestContext.Json, Ct);
+        promote.EnsureSuccessStatusCode();
+        var item = await CreateItemAsync("Author controls");
+        var root = await CommentAsync(author, item.Key, "Original root");
+        var reply = await CommentAsync(author, item.Key, "Original reply", root.Id);
+
+        foreach (var comment in new[] { root, reply })
+        {
+            var path = ItemPath(item.Key, $"comments/{comment.Id}");
+            foreach (var other in new[] { member, admin, _owner })
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, (await other.PatchAsJsonAsync(path,
+                    new UpdateCommentRequest("Someone else's edit"), ApiTestContext.Json, Ct)).StatusCode);
+                Assert.Equal(HttpStatusCode.Forbidden, (await other.DeleteAsync(path, Ct)).StatusCode);
+            }
+            Assert.Empty(_realtime.Changes);
+            var unchanged = (await CommentsAsync(author, item.Key)).Items.Single(x => x.Id == comment.Id);
+            Assert.Equal(comment.BodyMarkdown, unchanged.BodyMarkdown);
+            Assert.Null(unchanged.EditedAt);
+            Assert.Null(unchanged.DeletedAt);
+            Assert.Empty(unchanged.Revisions);
+        }
+
+        foreach (var comment in new[] { root, reply })
+        {
+            var path = ItemPath(item.Key, $"comments/{comment.Id}");
+            var response = await author.PatchAsJsonAsync(path,
+                new UpdateCommentRequest("  **Edited** by the author  "), ApiTestContext.Json, Ct);
+            response.EnsureSuccessStatusCode();
+            var edited = (await response.Content.ReadFromJsonAsync<CommentView>(ApiTestContext.Json, Ct))!;
+            Assert.Equal("**Edited** by the author", edited.BodyMarkdown);
+            Assert.Contains("<strong>Edited</strong>", edited.BodyHtml);
+            Assert.NotNull(edited.EditedAt);
+            Assert.Equal(comment.ParentCommentId, edited.ParentCommentId);
+            var revision = Assert.Single(edited.Revisions);
+            Assert.Equal(comment.BodyMarkdown, revision.BodyMarkdown);
+            Assert.Equal(comment.Author.Id, revision.EditedBy);
+
+            // Repeating an unchanged edit does not add history or publish another change.
+            var same = await author.PatchAsJsonAsync(path,
+                new UpdateCommentRequest("**Edited** by the author"), ApiTestContext.Json, Ct);
+            same.EnsureSuccessStatusCode();
+            Assert.Single((await same.Content.ReadFromJsonAsync<CommentView>(ApiTestContext.Json, Ct))!.Revisions);
+            (await author.DeleteAsync(path, Ct)).EnsureSuccessStatusCode();
+            (await author.DeleteAsync(path, Ct)).EnsureSuccessStatusCode();
+            Assert.Equal(HttpStatusCode.Conflict, (await author.PatchAsJsonAsync(path,
+                new UpdateCommentRequest("Resurrected"), ApiTestContext.Json, Ct)).StatusCode);
+        }
+
+        var tombstones = (await CommentsAsync(author, item.Key)).Items;
+        Assert.All(tombstones, comment =>
+        {
+            Assert.NotNull(comment.DeletedAt);
+            Assert.Empty(comment.BodyMarkdown);
+            Assert.Empty(comment.BodyHtml);
+        });
+        Assert.Equal(root.Id, tombstones.Single(x => x.Id == reply.Id).ParentCommentId);
+        Assert.Equal([root.Id, root.Id, reply.Id, reply.Id], _realtime.Changes.Select(x => x.Payload.GetProperty("commentId").GetGuid()));
+        Assert.All(_realtime.Changes, change =>
+        {
+            Assert.Equal(_project.Id, change.ProjectId);
+            Assert.Equal(item.Id, change.Payload.GetProperty("itemId").GetGuid());
+            Assert.Equal(item.Key, change.Payload.GetProperty("itemKey").GetString());
+            Assert.Equal(3, change.Payload.EnumerateObject().Count());
+        });
+    }
+
+    [Fact]
+    public async Task editing_rejects_empty_or_oversized_text_without_changing_the_comment()
+    {
+        var item = await CreateItemAsync("Comment validation");
+        var comment = await CommentAsync(_owner, item.Key, "Keep this text");
+        foreach (var body in new[] { null, "", " \n\t ", new string('x', 20_001) })
+        {
+            var response = await _owner.PatchAsJsonAsync(ItemPath(item.Key, $"comments/{comment.Id}"),
+                new UpdateCommentRequest(body), ApiTestContext.Json, Ct);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ApiTestContext.Json, Ct);
+            Assert.True(problem.GetProperty("errors").TryGetProperty("bodyMarkdown", out _));
+        }
+        var unchanged = Assert.Single((await CommentsAsync(_owner, item.Key)).Items);
+        Assert.Equal(comment.BodyMarkdown, unchanged.BodyMarkdown);
+        Assert.Null(unchanged.EditedAt);
+        Assert.Empty(unchanged.Revisions);
+        Assert.Empty(_realtime.Changes);
+    }
+
+    [Fact]
+    public async Task edit_and_delete_reject_wrong_items_read_only_tokens_and_archived_projects()
+    {
+        var item = await CreateItemAsync("Comment access");
+        var other = await CreateItemAsync("Wrong item");
+        var comment = await CommentAsync(_owner, item.Key, "Keep this text");
+        var path = ItemPath(item.Key, $"comments/{comment.Id}");
+        var wrongPath = ItemPath(other.Key, $"comments/{comment.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, (await _owner.PatchAsJsonAsync(wrongPath,
+            new UpdateCommentRequest("Wrong item"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _owner.DeleteAsync(wrongPath, Ct)).StatusCode);
+        var stranger = _context.ClientFor(await _context.RegisterAsync($"outsider-{Guid.NewGuid():N}@test.local"));
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.PatchAsJsonAsync(path,
+            new UpdateCommentRequest("Hidden item"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.DeleteAsync(path, Ct)).StatusCode);
+        var tokenResponse = await _owner.PostAsJsonAsync("/api/v1/me/tokens",
+            new CreateAccessTokenRequest("Read only", [Scopes.Read], _organization.Id, null), ApiTestContext.Json, Ct);
+        tokenResponse.EnsureSuccessStatusCode();
+        using var reader = _context.Factory.CreateClient();
+        reader.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",
+            (await tokenResponse.Content.ReadFromJsonAsync<AccessTokenCreated>(ApiTestContext.Json, Ct))!.Secret);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PatchAsJsonAsync(path,
+            new UpdateCommentRequest("Read-only edit"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.DeleteAsync(path, Ct)).StatusCode);
+        (await _owner.PostAsync($"/api/v1/orgs/{Slug}/projects/{_project.Key}/archive", null, Ct)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, (await _owner.PatchAsJsonAsync(path,
+            new UpdateCommentRequest("Archived edit"), ApiTestContext.Json, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await _owner.DeleteAsync(path, Ct)).StatusCode);
+        Assert.Empty(_realtime.Changes);
+        var unchanged = Assert.Single((await CommentsAsync(_owner, item.Key)).Items);
+        Assert.Equal(comment.BodyMarkdown, unchanged.BodyMarkdown);
+        Assert.Null(unchanged.DeletedAt);
     }
 
     [Fact]
@@ -441,4 +573,15 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
 
     private static string ItemPath(string key, string? suffix = null) =>
         $"/api/v1/orgs/{Slug}/items/{key}{(suffix is null ? "" : $"/{suffix}")}";
+
+    private sealed class RecordingPublisher : IRealtimePublisher
+    {
+        public ConcurrentQueue<(Guid ProjectId, JsonElement Payload)> Changes { get; } = new();
+
+        public Task PublishAsync(Guid projectId, string eventName, object payload, CancellationToken cancellationToken = default)
+        {
+            if (eventName == "comment.changed") Changes.Enqueue((projectId, JsonSerializer.SerializeToElement(payload)));
+            return Task.CompletedTask;
+        }
+    }
 }

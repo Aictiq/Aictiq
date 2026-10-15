@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
-import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
+import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Pencil, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
   attachmentAccept,
   attachmentUrl,
@@ -10,7 +10,7 @@ import {
   settleAttachments,
   uploadAttachment,
 } from '@/api/attachments'
-import { createComment, listComments, type WorkItemComment } from '@/api/comments'
+import { createComment, deleteComment, listComments, updateComment, type WorkItemComment } from '@/api/comments'
 import { itemHistory } from '@/api/history'
 import {
   createItem,
@@ -157,10 +157,14 @@ const commentItems = computed(() => comments.data.value?.items ?? [])
  * still shows, as a thread of its own.
  */
 const threads = computed(() => {
-  const ids = new Set(commentItems.value.map((entry) => entry.id))
+  const entries = [...commentItems.value]
+  // Keep a draft visible if a newly added comment pushes it off this page of results.
+  const draft = editingComment.value?.entry
+  if (draft && !entries.some((entry) => entry.id === draft.id)) entries.push(draft)
+  const ids = new Set(entries.map((entry) => entry.id))
   const replies = new Map<string, WorkItemComment[]>()
   const roots: WorkItemComment[] = []
-  for (const entry of commentItems.value) {
+  for (const entry of entries) {
     if (entry.parentCommentId && ids.has(entry.parentCommentId))
       replies.set(entry.parentCommentId, [...(replies.get(entry.parentCommentId) ?? []), entry])
     else roots.push(entry)
@@ -437,7 +441,8 @@ const isDirty = computed(() => {
     title.value.trim() !== current.title ||
     description.value !== (current.descriptionMarkdown ?? '') ||
     comment.value.trim() !== '' ||
-    reply.value.trim() !== ''
+    reply.value.trim() !== '' ||
+    commentEditDirty.value
   )
 })
 // The modal closes by changing `?item=` on the same route, which is a route *update* rather
@@ -467,7 +472,16 @@ function answerLeave(leave: boolean) {
   leavePrompt.value = null
 }
 async function saveAndLeave() {
-  if (await save()) answerLeave(true)
+  if (saving.value || savingComment.value) return
+  if (commentEditDirty.value && !(await saveCommentEdit())) {
+    leaveError.value = editCommentError.value ?? 'Your comment could not be saved.'
+    return
+  }
+  const current = currentItem.value
+  const itemChanged = current && (
+    title.value.trim() !== current.title || description.value !== (current.descriptionMarkdown ?? '')
+  )
+  if (!itemChanged || await save()) answerLeave(true)
   else leaveError.value = conflict.value ? 'Someone changed this item first.' : 'Saving failed.'
 }
 function discardAndLeave() {
@@ -478,6 +492,7 @@ function discardAndLeave() {
   }
   comment.value = ''
   closeReply()
+  closeCommentEdit()
   answerLeave(true)
 }
 const titleInput = ref<HTMLTextAreaElement | null>(null)
@@ -816,6 +831,120 @@ async function addComment() {
     sending.value = false
   }
 }
+// ── Edit and delete own comments ────────────────────────────────────────────────
+const editingComment = ref<{ id: string; original: string; entry: WorkItemComment } | null>(null)
+const commentDraft = ref('')
+const editCommentError = ref<string | null>(null)
+const savingComment = ref(false)
+const editCommentEditor = ref<{ uploading: boolean } | null>(null)
+function setEditCommentEditor(editor: Element | ComponentPublicInstance | null) {
+  editCommentEditor.value = editor as { uploading: boolean } | null
+}
+const pendingEditFiles = new Set<string>()
+const commentEditDirty = computed(
+  () => editingComment.value !== null && (
+    commentDraft.value !== editingComment.value.original || !!editCommentEditor.value?.uploading
+  ),
+)
+const commentValidation = computed(() =>
+  !commentDraft.value.trim() || commentDraft.value.trim().length > 20_000
+    ? 'Comment text of 1–20,000 characters is required.'
+    : null,
+)
+const deletingComment = ref<WorkItemComment | null>(null)
+const removingComment = ref(false)
+const deleteCommentError = ref<string | null>(null)
+function mayChangeComment(entry: WorkItemComment) {
+  return mayComment.value && !entry.deletedAt && entry.author.id === session.user?.id
+}
+function startCommentEdit(entry: WorkItemComment) {
+  if (!mayChangeComment(entry) || editingComment.value || savingComment.value) return
+  editingComment.value = { id: entry.id, original: entry.bodyMarkdown, entry }
+  commentDraft.value = entry.bodyMarkdown
+  editCommentError.value = null
+}
+function closeCommentEdit() {
+  editingComment.value = null
+  commentDraft.value = ''
+  editCommentError.value = null
+  pendingEditFiles.clear()
+}
+async function uploadToCommentEdit(file: File) {
+  const target = editingComment.value
+  const slug = props.slug
+  const id = await uploadAttachment(slug, props.projectKey, file)
+  if (editingComment.value === target) pendingEditFiles.add(id)
+  return attachmentUrl(slug, id)
+}
+async function saveCommentEdit() {
+  const target = editingComment.value
+  const entry = commentItems.value.find((entry) => entry.id === target?.id) ?? target?.entry
+  if (!target || !entry || !mayChangeComment(entry) || savingComment.value || editCommentEditor.value?.uploading)
+    return false
+  if (commentValidation.value) {
+    editCommentError.value = commentValidation.value
+    return false
+  }
+  const slug = props.slug
+  const key = props.itemKey
+  const body = commentDraft.value.trim()
+  const pending = [...pendingEditFiles]
+  savingComment.value = true
+  editCommentError.value = null
+  try {
+    await updateComment(slug, key, target.id, body)
+    await settleAttachments(slug, pending, body, { commentId: target.id })
+    if (editingComment.value === target) closeCommentEdit()
+    await client.invalidateQueries({ queryKey: [slug, key, 'comments'] })
+    return true
+  } catch (error) {
+    if (editingComment.value === target) {
+      const problem = toApiError(error)
+      editCommentError.value = problem.fieldErrors.bodyMarkdown?.join(' ') ?? problem.problem?.detail ?? problem.title
+    }
+    return false
+  } finally {
+    savingComment.value = false
+  }
+}
+function askToDeleteComment(entry: WorkItemComment) {
+  if (!mayChangeComment(entry)) return
+  deleteCommentError.value = null
+  deletingComment.value = entry
+}
+async function confirmDeleteComment() {
+  const target = deletingComment.value
+  if (!target || !mayChangeComment(target) || removingComment.value) return
+  const slug = props.slug
+  const key = props.itemKey
+  removingComment.value = true
+  deleteCommentError.value = null
+  try {
+    await deleteComment(slug, key, target.id)
+    if (deletingComment.value === target) deletingComment.value = null
+    await client.invalidateQueries({ queryKey: [slug, key, 'comments'] })
+  } catch (error) {
+    if (deletingComment.value === target) {
+      const problem = toApiError(error)
+      deleteCommentError.value = problem.problem?.detail ?? problem.title
+    }
+  } finally {
+    removingComment.value = false
+  }
+}
+watch(() => [props.slug, props.itemKey], () => {
+  closeCommentEdit()
+  deletingComment.value = null
+})
+// A remote deletion or archive removes the editor along with its actions.
+watch([commentItems, mayComment], () => {
+  const editing = commentItems.value.find((entry) => entry.id === editingComment.value?.id)
+  if (editingComment.value && (!mayComment.value || (editing && !mayChangeComment(editing))))
+    closeCommentEdit()
+  if (deletingComment.value && !commentItems.value.some((entry) => entry.id === deletingComment.value?.id && mayChangeComment(entry)))
+    deletingComment.value = null
+})
+
 // ── Replies ───────────────────────────────────────────────────────────────────────
 // One reply box at a time, under the thread it answers. Replying to a reply tags that
 // reply's author, since the thread's first author is the only one told otherwise.
@@ -1377,7 +1506,40 @@ function logged(updated: TimeTrackingItem) {
               This comment was deleted.
             </p>
             <template v-else>
-              <Markdown :slug="slug" :project-key="projectKey" :source="entry.bodyMarkdown" class="mt-1" />
+              <form
+                v-if="editingComment?.id === entry.id && mayChangeComment(entry)"
+                class="mt-2 space-y-2"
+                data-testid="edit-comment-form"
+                @submit.prevent="saveCommentEdit"
+                @keydown.meta.enter.prevent="saveCommentEdit"
+                @keydown.ctrl.enter.prevent="saveCommentEdit"
+              >
+                <MarkdownEditor
+                  :ref="setEditCommentEditor"
+                  v-model="commentDraft"
+                  :slug="slug"
+                  :project-key="projectKey"
+                  link-tickets
+                  compact
+                  autofocus
+                  :disabled="savingComment"
+                  :upload="uploadToCommentEdit"
+                  :accept="acceptedFiles"
+                  :mentionables="mentionables"
+                />
+                <p v-if="commentValidation || editCommentError" class="text-destructive text-xs" role="alert">
+                  {{ commentValidation || editCommentError }}
+                </p>
+                <div class="flex justify-end gap-2">
+                  <Button type="button" variant="outline" size="sm" :disabled="savingComment || editCommentEditor?.uploading" @click="closeCommentEdit">
+                    Cancel
+                  </Button>
+                  <Button size="sm" :disabled="savingComment || editCommentEditor?.uploading || !!commentValidation">
+                    {{ savingComment ? 'Saving…' : 'Save' }}
+                  </Button>
+                </div>
+              </form>
+              <Markdown v-else :slug="slug" :project-key="projectKey" :source="entry.bodyMarkdown" class="mt-1" />
               <CommentReactions
                 :slug="slug"
                 :item-key="itemKey"
@@ -1393,6 +1555,24 @@ function logged(updated: TimeTrackingItem) {
                 >
                   <Reply class="size-3.5" aria-hidden="true" /> Reply
                 </button>
+                <template v-if="mayChangeComment(entry)">
+                  <button
+                    type="button"
+                    class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                    :disabled="editingComment !== null || savingComment || removingComment"
+                    @click="startCommentEdit(entry)"
+                  >
+                    <Pencil class="size-3.5" aria-hidden="true" /> Edit
+                  </button>
+                  <button
+                    type="button"
+                    class="text-muted-foreground hover:text-destructive mt-1 inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                    :disabled="editingComment !== null || savingComment || removingComment"
+                    @click="askToDeleteComment(entry)"
+                  >
+                    <Trash2 class="size-3.5" aria-hidden="true" /> Delete
+                  </button>
+                </template>
               </CommentReactions>
             </template>
           </article>
@@ -1891,28 +2071,45 @@ function logged(updated: TimeTrackingItem) {
         </div>
       </template>
     </DeleteConfirmDialog>
-    <Dialog :open="leavePrompt !== null" @update:open="(open) => !open && answerLeave(false)">
-      <DialogContent class="sm:max-w-md">
+    <Dialog :open="deletingComment !== null" @update:open="(open) => !open && !removingComment && (deletingComment = null)">
+      <DialogContent class="sm:max-w-md" @interact-outside="(event) => removingComment && event.preventDefault()" @escape-key-down="(event) => removingComment && event.preventDefault()">
+        <DialogHeader>
+          <DialogTitle>Delete your comment?</DialogTitle>
+          <DialogDescription>
+            Your comment will be replaced with “This comment was deleted.” Replies in the thread will stay. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <p v-if="deleteCommentError" class="text-destructive text-sm" role="alert">{{ deleteCommentError }}</p>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="removingComment" @click="deletingComment = null">Cancel</Button>
+          <Button variant="destructive" :disabled="removingComment" @click="confirmDeleteComment">
+            {{ removingComment ? 'Deleting…' : 'Delete comment' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog :open="leavePrompt !== null" @update:open="(open) => !open && !saving && !savingComment && answerLeave(false)">
+      <DialogContent class="sm:max-w-md" @interact-outside="(event) => (saving || savingComment) && event.preventDefault()" @escape-key-down="(event) => (saving || savingComment) && event.preventDefault()">
         <DialogHeader>
           <DialogTitle>Save changes to {{ currentItem.key }}?</DialogTitle>
           <DialogDescription>
             {{
-              (comment.trim() || reply.trim()) && title.trim() === currentItem.title
-                ? 'Your comment has not been sent. Discarding throws it away.'
+              (comment.trim() || reply.trim() || commentEditDirty) && title.trim() === currentItem.title
+                ? 'Your comment has unsaved changes. Discarding throws them away.'
                 : 'The title or description has changes that are not saved yet.'
             }}
           </DialogDescription>
         </DialogHeader>
         <p v-if="leaveError" class="text-destructive text-sm">{{ leaveError }}</p>
         <DialogFooter>
-          <Button type="button" variant="ghost" :disabled="saving" @click="answerLeave(false)">
+          <Button type="button" variant="ghost" :disabled="saving || savingComment" @click="answerLeave(false)">
             Keep editing
           </Button>
-          <Button type="button" variant="outline" :disabled="saving" @click="discardAndLeave">
+          <Button type="button" variant="outline" :disabled="saving || savingComment" @click="discardAndLeave">
             Discard
           </Button>
-          <Button type="button" :disabled="saving" @click="saveAndLeave">
-            {{ saving ? 'Saving…' : 'Save' }}
+          <Button type="button" :disabled="saving || savingComment || editCommentEditor?.uploading" @click="saveAndLeave">
+            {{ saving || savingComment ? 'Saving…' : 'Save' }}
           </Button>
         </DialogFooter>
       </DialogContent>

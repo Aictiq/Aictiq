@@ -104,15 +104,15 @@ public static class CommentEndpoints
     }
 
     private static async Task<IResult> Edit(string itemKey, Guid commentId, UpdateCommentRequest request,
-        WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, IUserDirectory directory, TimeProvider clock, CancellationToken ct)
+        WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, IUserDirectory directory, TimeProvider clock,
+        IRealtimePublisher realtime, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         var comment = await db.Comments.FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
         if (comment is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, comment, ct)) return Results.NotFound();
-        var role = await access.GetProjectRoleAsync(user.UserId!, item.ProjectId, ct);
-        if (comment.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
+        if (comment.AuthorId != user.UserId) return Results.Forbid();
         if (comment.DeletedAt is not null) return Results.Problem("A deleted comment cannot be edited.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
         if (Validate(request.BodyMarkdown) is { } invalid) return invalid;
         var markdown = request.BodyMarkdown!.Trim();
@@ -128,30 +128,32 @@ public static class CommentEndpoints
                 await ItemWatcherRules.AddAsync(db, item, mentionedUserId, ItemWatchReason.Mentioned, now, ct);
             comment.EditedAt = now;
             await db.SaveChangesAsync(ct);
+            await CommentChangedAsync(realtime, item, commentId, ct);
         }
         return Results.Ok((await ViewsAsync(db, directory, user.UserId!, [comment], ct))[0]);
     }
 
     private static async Task<IResult> Delete(string itemKey, Guid commentId, WorkItemsDbContext db, IProjectAccess access,
-        ICurrentUser user, IUserDirectory directory, TimeProvider clock, CancellationToken ct)
+        ICurrentUser user, IUserDirectory directory, TimeProvider clock, IRealtimePublisher realtime, CancellationToken ct)
     {
         var item = await WorkItemEndpoints.FindVisible(db, access, user, itemKey, ct);
         if (item is null) return Results.NotFound();
         if (await ArchivedAsync(access, item, ct) is { } archived) return archived;
         var visible = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId && x.ItemId == item.Id, ct);
         if (visible is null || await FactoryVisibility.HiddenAsync(access, directory, db, user.UserId!, visible, ct)) return Results.NotFound();
-        var role = await access.GetProjectRoleAsync(user.UserId!, item.ProjectId, ct);
-        if (visible.AuthorId != user.UserId && (role is not { } projectRole || !projectRole.Satisfies(ProjectRole.Admin))) return Results.Forbid();
+        if (visible.AuthorId != user.UserId) return Results.Forbid();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var comment = await LockCommentAsync(db, item, commentId, ct);
         if (comment is null) return Results.NotFound();
-        if (comment.DeletedAt is null)
+        var changed = comment.DeletedAt is null;
+        if (changed)
         {
             comment.DeletedAt = clock.GetUtcNow();
             await db.CommentReactions.Where(x => x.CommentId == commentId).ExecuteDeleteAsync(ct);
             await db.SaveChangesAsync(ct);
         }
         await transaction.CommitAsync(ct);
+        if (changed) await CommentChangedAsync(realtime, item, commentId, ct);
         return Results.NoContent();
     }
 
@@ -219,6 +221,9 @@ public static class CommentEndpoints
 
     private static Task ReactionsChangedAsync(IRealtimePublisher realtime, WorkItem item, Guid commentId, CancellationToken ct) =>
         realtime.PublishAsync(item.ProjectId, "comment.reactions.changed", new { itemKey = item.Key, commentId }, ct);
+
+    private static Task CommentChangedAsync(IRealtimePublisher realtime, WorkItem item, Guid commentId, CancellationToken ct) =>
+        realtime.PublishAsync(item.ProjectId, "comment.changed", new { itemId = item.Id, itemKey = item.Key, commentId }, ct);
 
     private static IResult InvalidEmoji() => Results.ValidationProblem(new Dictionary<string, string[]> { ["emoji"] = ["Choose 👍, 👎, ❤️, 🎉, 👀 or ✅."] });
     private static IResult DeletedComment() => Results.Problem("A deleted comment cannot be reacted to.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);

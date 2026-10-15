@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { VueQueryPlugin } from '@tanstack/vue-query'
+import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
@@ -85,5 +85,47 @@ describe('item.changed on the open item', () => {
 
     itemChanged('PROJ-2', 'user-ana')
     expect(toast).not.toHaveBeenCalled()
+  })
+})
+
+describe('comment.changed from another session', () => {
+  it.each([
+    ['edit', 'Updated from another session'],
+    ['delete', 'Comment deleted'],
+  ])('refreshes the authorized comments response after an %s', async (_, updatedBody) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+    let response = 'Original comment'
+    const fetchComments = vi.fn(async () => response)
+    const key = ['org', 'PROJ-1', 'comments']
+    const otherItem = ['org', 'PROJ-2', 'comments']
+    const otherOrganization = ['another-org', 'PROJ-1', 'comments']
+    client.setQueryData(otherItem, 'Another item comment')
+    client.setQueryData(otherOrganization, 'Another organization comment')
+
+    const harness = defineComponent({
+      setup() {
+        useProjectRealtime(() => 'org', () => 'PROJ', () => 'PROJ-1')
+        const comments = useQuery({ queryKey: key, queryFn: fetchComments })
+        return () => h('div', comments.data.value)
+      },
+    })
+    const wrapper = mount(harness, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]] } })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toBe('Original comment')
+
+      response = updatedBody
+      handlers.get('comment.changed')!({ itemKey: 'PROJ-1', commentId: 'comment-1' })
+      await flushPromises()
+
+      expect(wrapper.text()).toBe(updatedBody)
+      expect(fetchComments).toHaveBeenCalledTimes(2)
+      expect(client.getQueryState(otherItem)?.isInvalidated).toBe(false)
+      expect(client.getQueryState(otherOrganization)?.isInvalidated).toBe(false)
+      expect(toast).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      client.clear()
+    }
   })
 })
