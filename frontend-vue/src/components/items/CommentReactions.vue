@@ -52,7 +52,7 @@ async function toggle(emoji: string) {
 <template>
   <div class="mt-1 flex items-center gap-3">
     <slot />
-    <div v-if="canReact" ref="picker" class="relative" @keydown.esc="open = false">
+    <div v-if="canReact" ref="picker" class="relative flex items-center" @keydown.esc="open = false">
       <button
         type="button"
         class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs disabled:opacity-50"

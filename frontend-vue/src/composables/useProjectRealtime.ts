@@ -67,6 +67,9 @@ export function useProjectRealtime(
     connection.on('comment.reactions.changed', (event: { itemKey: string }) => {
       void client.invalidateQueries({ queryKey: [toValue(organizationSlug), event.itemKey, 'comments'] })
     })
+    connection.on('comment.changed', (event: { itemKey: string; commentId: string }) => {
+      void client.invalidateQueries({ queryKey: [toValue(organizationSlug), event.itemKey, 'comments'] })
+    })
     connection.on('board.moved', (event: ItemChanged) => { onBoardMoved?.(event); invalidate('board', event.key) })
     connection.on('sprint.changed', () => invalidate('sprint'))
     // A dispatch claims the item for its agent and a finish releases it, so the item and
