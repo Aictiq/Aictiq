@@ -14,8 +14,8 @@ export const UpdateCheckIntervalMs = 6 * 60 * 60 * 1000
  */
 export const UpdateRetryMs = 5 * 60 * 1000
 
-const RegistryTimeoutMs = 15_000
-const InstallTimeoutMs = 5 * 60 * 1000
+export const RegistryTimeoutMs = 15_000
+export const InstallTimeoutMs = 5 * 60 * 1000
 
 export type PackageManager = 'npm' | 'pnpm'
 
@@ -65,13 +65,14 @@ export function compareVersions(left: string, right: string): number {
   return a.pre.localeCompare(b.pre, 'en', { numeric: true })
 }
 
-/** The `latest` dist-tag of the CLI on the registry npm itself would use. */
+/** The `latest` dist-tag of `packageName` (the CLI) on the registry npm itself would use. */
 export async function latestVersion(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
+  packageName: string = PackageName,
 ): Promise<string> {
   const registry = (env.npm_config_registry || 'https://registry.npmjs.org/').replace(/\/+$/, '')
-  const url = `${registry}/-/package/${PackageName.replaceAll('/', '%2F')}/dist-tags`
+  const url = `${registry}/-/package/${packageName.replaceAll('/', '%2F')}/dist-tags`
   let response: Response
   try {
     response = await fetchImpl(url, {
@@ -84,10 +85,10 @@ export async function latestVersion(
     )
   }
   if (!response.ok)
-    throw new UpdateError(`${registry} answered ${response.status} for ${PackageName}`)
+    throw new UpdateError(`${registry} answered ${response.status} for ${packageName}`)
   const tags = (await response.json().catch(() => null)) as { latest?: unknown } | null
   if (typeof tags?.latest !== 'string' || compareVersions(tags.latest, '0.0.0') < 0) {
-    throw new UpdateError(`${registry} has no latest version of ${PackageName}`)
+    throw new UpdateError(`${registry} has no latest version of ${packageName}`)
   }
   return tags.latest
 }
@@ -298,7 +299,7 @@ export function cliEntryPath(argv: string[] = process.argv): string {
   return resolve(argv[1] ?? 'aictiq')
 }
 
-function isWritable(dir: string): boolean {
+export function isWritable(dir: string): boolean {
   try {
     accessSync(dir, constants.W_OK)
     return true
@@ -307,7 +308,7 @@ function isWritable(dir: string): boolean {
   }
 }
 
-function realOrSelf(path: string): string {
+export function realOrSelf(path: string): string {
   try {
     return realpathSync(path)
   } catch {
@@ -316,7 +317,7 @@ function realOrSelf(path: string): string {
 }
 
 /** npm and pnpm lead with the error code and path; the generic advice comes last. */
-function firstLines(text: string): string {
+export function firstLines(text: string): string {
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())

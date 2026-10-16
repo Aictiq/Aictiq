@@ -9,6 +9,7 @@ import { print, printJson, renderFields, renderTable } from '../output.js'
 import { promptSecret } from '../prompt.js'
 import { packageRoot, version } from '../version.js'
 import { RunnerClient, RunnerHttpError } from '../runner/client.js'
+import { CodexUpdater } from '../runner/codexUpdate.js'
 import {
   profileKey,
   profileLabel,
@@ -363,6 +364,10 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
           }
           return message
         }
+        // runner.json is read again at each check, so `"autoUpdate": false` applies without a restart.
+        const autoUpdate = () => options.autoUpdate && readRunnerConfig()?.autoUpdate !== false
+        // One for the machine too: a Codex install replaces the binary under every organization's runs.
+        const codexUpdater = new CodexUpdater({ log, autoUpdate })
         // One for the machine, however many organizations it serves: harness-limits.json is its own.
         const usage = new UsagePoller({
           claudeEnabled: () => readRunnerConfig()?.claudeUsagePoll === true,
@@ -411,7 +416,7 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                   // runner. Only this profile's: another organization's roots never apply.
                   const current = readRunnerConfig()
                   const own = current?.profiles.find((p) => p.token === profile.token) ?? profile
-                  return executeRun(run, {
+                  const start = () => executeRun(run, {
                     client,
                     hello,
                     adapters: harnesses,
@@ -431,13 +436,12 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
                       attachmentMaxBytes: (current ?? config).attachments.maxBytes,
                     },
                   })
+                  return run.harness === 'codex' ? codexUpdater.run(start) : start()
                 },
               })
             },
           })
 
-        // runner.json is read again at each check, so `"autoUpdate": false` applies without a restart.
-        const autoUpdate = () => options.autoUpdate && readRunnerConfig()?.autoUpdate !== false
         const updater = new SelfUpdater({ current: version, packageRoot, entry: cliEntry(), log })
         /** The version to install once the runs in flight are done, when a check found one. */
         let target: string | null = null

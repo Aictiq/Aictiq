@@ -273,6 +273,19 @@ Turn installing off with `--no-auto-update` or `"autoUpdate": false` in `runner.
 check and its log line still happen. `aictiq runner update` runs the same check and install
 on demand. A running `start` picks up the new version at its next check.
 
+`start` keeps Codex current too, since a new Codex release can break an older one. Before a
+Codex run, at most every 6 hours (5 minutes after a registry failure), it compares
+`codex --version` with the `latest` dist-tag of `@openai/codex`. If a newer version is out
+and `codex` is a global npm install, it runs `npm install --global @openai/codex@<latest>`
+first and logs `Updated Codex <old> → <new>`; the next heartbeat reports the new version.
+The check is skipped while another Codex run of this runner is in flight, because the
+install replaces the binary under it, and Codex runs that arrive during an install wait for
+it. Codex installed any other way (Homebrew, the standalone installer, pnpm), a global npm
+prefix this user cannot write, an unreachable registry, or a failed install is only logged:
+the run goes ahead on the installed version. With auto-update off, a newer Codex is only
+logged. Each Codex run also passes `-c check_for_update_on_startup=false`, so Codex's own
+update notice can never hold a run up. Other harnesses are not updated.
+
 ## Development
 
 ```bash
