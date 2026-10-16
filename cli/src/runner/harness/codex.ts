@@ -40,6 +40,10 @@ export const codex: HarnessAdapter = {
         // the checkout. The runner itself remains the trust boundary for those files.
         '--skip-git-repo-check',
         ...(context.resumeSessionId ? [] : ['-C', context.workspace]),
+        // Codex's own update check announces a new version and offers to install it; a run
+        // has nobody to answer. The runner keeps Codex current itself (see codexUpdate.ts).
+        '-c',
+        'check_for_update_on_startup=false',
         '-c',
         `mcp_servers.aictiq.command=${JSON.stringify(context.mcpServer.command)}`,
         '-c',
