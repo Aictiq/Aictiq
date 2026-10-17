@@ -8,6 +8,8 @@
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.1" />
     <PackageVersion Include="Aspire.Npgsql" Version="13.6.1" />
+    <!-- Override Aspire.Hosting's vulnerable transitive dependency (GHSA-qhrr-8q5h-9q3h). -->
+    <PackageVersion Include="MessagePack" Version="2.5.303" />
 
     <!-- ASP.NET Core / EF Core -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
