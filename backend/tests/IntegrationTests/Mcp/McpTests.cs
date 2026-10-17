@@ -118,6 +118,72 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
     }
 
     [Fact]
+    public async Task create_item_and_create_subtask_land_on_a_named_team_or_the_default()
+    {
+        var project = await CreateProjectAsync("TMS");
+        var other = await CreateProjectAsync("TMO");
+        var platform = await CreateTeamAsync(project, "Platform", "PLAT");
+        var foreign = await CreateTeamAsync(other, "Foreign", "FRN");
+        await using var client = await ConnectAsync();
+
+        // get_project lists the teams, default first, so an agent can choose one.
+        var teams = Json(await CallAsync(client, "get_project", new() { ["projectKey"] = project.Key })).GetProperty("teams").EnumerateArray().ToList();
+        Assert.Equal(2, teams.Count);
+        Assert.True(teams[0].GetProperty("isDefault").GetBoolean());
+        var defaultTeam = teams[0].GetProperty("id").GetGuid();
+        Assert.Contains(teams, t => t.GetProperty("key").GetString() == "PLAT" && t.GetProperty("name").GetString() == "Platform" && !t.GetProperty("isDefault").GetBoolean());
+        var listed = Json(await CallAsync(client, "list_projects", new())).EnumerateArray().Single(p => p.GetProperty("key").GetString() == project.Key);
+        Assert.Equal(2, listed.GetProperty("teams").GetArrayLength());
+
+        var unnamed = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "No team named" })).GetProperty("key").GetString()!;
+        Assert.Equal(defaultTeam, (await GetItemAsync(unnamed)).TeamId);
+        var byKey = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By key", ["team"] = "plat" })).GetProperty("key").GetString()!;
+        Assert.Equal(platform.Id, (await GetItemAsync(byKey)).TeamId);
+        var byId = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By id", ["team"] = platform.Id.ToString() })).GetProperty("key").GetString()!;
+        Assert.Equal(platform.Id, (await GetItemAsync(byId)).TeamId);
+
+        // An unknown team, or another project's, is refused and creates nothing.
+        foreach (var team in new[] { "NOPE", "FRN", foreign.Id.ToString(), Guid.NewGuid().ToString() })
+        {
+            var refused = await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Refused", ["team"] = team });
+            Assert.Contains("not found in project", Text(refused));
+            var refusedSubtask = await CallAsync(client, "create_subtask", new() { ["parentKey"] = byKey, ["title"] = "Refused", ["team"] = team });
+            Assert.Contains("not found in project", Text(refusedSubtask));
+        }
+        Assert.Equal(0L, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{project.Id}' AND title = 'Refused'"));
+
+        // A subtask follows its parent's team, falls back to the default when the parent has
+        // none, and takes the named team over either.
+        var inherited = Json(await CallAsync(client, "create_subtask", new() { ["parentKey"] = byKey, ["title"] = "Inherited" })).GetProperty("key").GetString()!;
+        Assert.Equal(platform.Id, (await GetItemAsync(inherited)).TeamId);
+        var named = Json(await CallAsync(client, "create_subtask", new() { ["parentKey"] = byKey, ["title"] = "Named", ["team"] = teams[0].GetProperty("key").GetString() })).GetProperty("key").GetString()!;
+        Assert.Equal(defaultTeam, (await GetItemAsync(named)).TeamId);
+        var orphan = await GetItemAsync(unnamed);
+        await ScalarAsync($"UPDATE work.items SET team_id = NULL WHERE id = '{orphan.Id}'");
+        var fallback = Json(await CallAsync(client, "create_subtask", new() { ["parentKey"] = unnamed, ["title"] = "Fallback" })).GetProperty("key").GetString()!;
+        Assert.Equal(defaultTeam, (await GetItemAsync(fallback)).TeamId);
+    }
+
+    private async Task<TeamView> CreateTeamAsync(ProjectView project, string name, string key)
+    {
+        var response = await _owner.PostAsJsonAsync($"/api/v1/orgs/mcp-org/projects/{project.Key}/teams/",
+            new CreateTeamRequest(name, key), ApiTestContext.Json, TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TeamView>(ApiTestContext.Json, TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task<object?> ScalarAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(_context.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        return await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+    }
+
+    private async Task<WorkItemView> GetItemAsync(string key) =>
+        (await _owner.GetFromJsonAsync<WorkItemView>($"/api/v1/orgs/mcp-org/items/{key}", ApiTestContext.Json, TestContext.Current.CancellationToken))!;
+
+    [Fact]
     public async Task every_tool_obeys_the_read_write_admin_and_non_member_matrix()
     {
         var project = await CreateProjectAsync("MAT");

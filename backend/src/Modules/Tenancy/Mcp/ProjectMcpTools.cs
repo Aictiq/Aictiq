@@ -13,7 +13,10 @@ namespace Aictiq.Modules.Tenancy.Mcp;
 public sealed record McpProjectView(
     Guid Id, string Key, string Name, string? Description, ProjectVisibility Visibility,
     bool IsArchived, ProjectRole Role, IReadOnlyList<McpProjectLabel> Labels,
-    IReadOnlyList<McpProjectTemplate> Templates);
+    IReadOnlyList<McpProjectTemplate> Templates, IReadOnlyList<McpProjectTeam> Teams);
+
+/// <summary>A team an agent can name as create_item's team; new work without one lands on the default.</summary>
+public sealed record McpProjectTeam(Guid Id, string Key, string Name, bool IsDefault);
 
 /// <summary>Read-only project context for MCP clients bound to one organization.</summary>
 [McpServerToolType]
@@ -53,16 +56,18 @@ public sealed class ProjectMcpTools(
         // One project at a time: the planning details come from a scoped DbContext, which
         // refuses concurrent queries - Task.WhenAll here failed every call with more than one
         // visible project.
+        var projectIds = visible.Select(x => x.project.Id).ToArray();
+        var teams = (await TeamsAsync(projectIds, cancellationToken)).ToLookup(t => t.ProjectId, t => t.Team);
         var views = new List<McpProjectView>(visible.Count);
         foreach (var (project, role) in visible)
         {
-            views.Add(ToView(project, role, await planning.GetAsync(project.Id, cancellationToken)));
+            views.Add(ToView(project, role, await planning.GetAsync(project.Id, cancellationToken), [.. teams[project.Id]]));
         }
         return views;
     }
 
     [McpServerTool(Name = "get_project", ReadOnly = true)]
-    [Description("Gets one visible project by its short uppercase key, such as ACME.")]
+    [Description("Gets one visible project by its short uppercase key, such as ACME, with its labels, templates and teams. The team marked isDefault is where create_item puts work when no team is named.")]
     public async Task<McpProjectView?> GetProject(
         [Description("The project key, for example ACME.")] string projectKey,
         CancellationToken cancellationToken)
@@ -94,10 +99,20 @@ public sealed class ProjectMcpTools(
         var role = ProjectAccessRules.Effective(organizationRole, project.Visibility, explicitRole);
         return role is null
             ? throw new McpAnswerException($"project '{project.Key}' not found or no access")
-            : ToView(project, role.Value, await planning.GetAsync(project.Id, cancellationToken));
+            : ToView(project, role.Value, await planning.GetAsync(project.Id, cancellationToken),
+                [.. (await TeamsAsync([project.Id], cancellationToken)).Select(t => t.Team)]);
     }
 
-    private static McpProjectView ToView(Project project, ProjectRole role, McpProjectPlanningDetails planning) => new(
+    /// <summary>Default team first, then by name, so the fallback is the first one an agent reads.</summary>
+    private async Task<List<(Guid ProjectId, McpProjectTeam Team)>> TeamsAsync(Guid[] projectIds, CancellationToken ct) =>
+        (await db.Teams.AsNoTracking()
+            .Where(t => projectIds.Contains(t.ProjectId))
+            .OrderByDescending(t => t.IsDefault).ThenBy(t => t.Name)
+            .Select(t => new { t.ProjectId, t.Id, t.Key, t.Name, t.IsDefault })
+            .ToListAsync(ct))
+        .Select(t => (t.ProjectId, new McpProjectTeam(t.Id, t.Key, t.Name, t.IsDefault))).ToList();
+
+    private static McpProjectView ToView(Project project, ProjectRole role, McpProjectPlanningDetails planning, IReadOnlyList<McpProjectTeam> teams) => new(
         project.Id, project.Key, project.Name, project.Description, project.Visibility,
-        project.ArchivedAt is not null, role, planning.Labels, planning.Templates);
+        project.ArchivedAt is not null, role, planning.Labels, planning.Templates, teams);
 }
