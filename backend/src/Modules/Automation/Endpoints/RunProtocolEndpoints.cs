@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aictiq.Modules.Automation.Auth;
 using Aictiq.Modules.Automation.Domain;
+using Aictiq.Modules.Automation.Prompts;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
@@ -29,7 +30,7 @@ public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, G
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
     string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
-    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null);
+    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null);
 
 /// <summary>
 /// Set on a continue run: the runner resumes <paramref name="SessionId"/> in the workspace it
@@ -346,10 +347,10 @@ public static partial class RunProtocolEndpoints
                 run.Id, run.ItemId, run.ItemKey, run.ProjectId,
                 RunEndpoints.ProjectKeyOf(run.ItemKey) ?? run.ItemKey,
                 organization?.Slug ?? "",
-                run.Harness, run.PromptSnapshot, run.PlaybookRevisionId, repo,
+                run.Harness, SecurityPreamble.Include(run.PromptSnapshot), run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
-                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp), false);
+                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp, SecurityPreamble.Text), false);
         }
 
         // Fleet mode: the run must want only tags this runner has, the runner must have a free
