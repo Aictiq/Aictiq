@@ -231,6 +231,13 @@ There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq
 resources, which render the same loop, the item's Markdown and a run's status and log tail
 for clients that use them.
 
+**Teams** decide which Backlog and Board an item shows on. `get_project` (and each entry of
+`list_projects`) lists the project's teams with `id`, `key`, `name` and `isDefault`.
+`create_item(project, title, team?)` and `create_subtask(parentKey, title, team?)` take a team
+key or id; a team that is not in the item's project is refused and nothing is created. Without
+`team`, `create_item` uses the project's default team, and `create_subtask` uses the parent's
+team, or the default team if the parent has none.
+
 **Delegating** is how an orchestrating agent hands a subtask to a worker the way a person
 does from the item page: `start_run(key, playbook?, agent?, runner?)` queues a factory run (the
 playbook and the agent may be named or given by id, and default to the project's factory
