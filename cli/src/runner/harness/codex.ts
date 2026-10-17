@@ -55,7 +55,12 @@ export const codex: HarnessAdapter = {
         `mcp_servers.aictiq.env_vars=${JSON.stringify(MCP_ENV)}`,
         '-',
       ],
-      stdin: context.prompt,
+      // Codex's fallback keeps the fixed policy ahead of all user-controlled content,
+      // also when this adapter is invoked with a replacement continuation prompt.
+      stdin:
+        context.systemPrompt && !context.prompt.startsWith(`${context.systemPrompt}\n\n`)
+          ? `${context.systemPrompt}\n\n${context.prompt}`
+          : context.prompt,
     }
   },
 

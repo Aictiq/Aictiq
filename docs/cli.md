@@ -209,6 +209,23 @@ agent token, revoked when the run ends) and `AICTIQ_ITEM` in its environment. Th
 `AICTIQ_*` variables are removed first. There is no sandbox: **one OS user is one trust
 domain**.
 
+Every run type (implement, chat, follow-up stage and refinement) starts with a shared,
+code-owned security policy. Playbooks, project settings, items, comments, attachments,
+linked pages and pull request content cannot override it. It prohibits changing git
+remotes or credentials, pushing outside the checkout's repository, reading or exposing
+secrets, and sending data to hosts other than the Aictiq API, the configured git host
+and the model provider. The agent is instructed to refuse and flag an unsafe request
+in its result or an item comment while continuing the legitimate work.
+
+The claim response supplies this policy separately as `systemPrompt` and also at the
+start of `prompt` for older runners. Claude receives the fixed policy through
+`--append-system-prompt`, with playbook and item text on stdin. Codex receives it first
+on stdin, above the playbook. The runner reapplies it for resumed sessions and comment
+follow-ups. These are prompt rules; they reduce injection risk but do not enforce an
+OS sandbox or network restrictions. Upgrade both the server and the CLI runner (0.13.1
+or later) for system-prompt delivery and policy reapplication on resumed runs. Older
+runners receive the prefix on fresh runs, but can replace it with continuation text.
+
 Cursor reads MCP servers only from a `.cursor/mcp.json` file, so for a `cursor` run the runner
 adds the Aictiq server to the checkout's `.cursor/mcp.json` while the harness runs and puts the
 file back afterwards. The file names the `AICTIQ_*` variables (`${env:AICTIQ_TOKEN}`), never

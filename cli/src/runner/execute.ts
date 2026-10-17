@@ -315,8 +315,18 @@ export async function executeRun(
     }
     if (stopReason) return stopped(null, [])
 
+    // Continuations and session follow-ups replace the original prompt. Reapply the
+    // server's code-owned policy before every invocation, including file-based adapters.
+    const systemPrompt = run.systemPrompt
+    if (systemPrompt && !workspace.prompt.startsWith(`${systemPrompt}\n\n`)) {
+      const prompt = `${systemPrompt}\n\n${workspace.prompt}`
+      writeFileSync(workspace.promptFile, prompt, { mode: 0o600 })
+      workspace = { ...workspace, prompt }
+    }
+
     const context: InvocationContext = {
       prompt: workspace.prompt,
+      systemPrompt,
       promptFile: workspace.promptFile,
       workspace: workspace.checkout,
       attachmentsDir: workspace.attachmentsDir,

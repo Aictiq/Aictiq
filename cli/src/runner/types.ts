@@ -126,6 +126,8 @@ export interface ClaimedRun {
   organizationSlug: string
   harness: string
   prompt: string
+  /** Code-owned security policy from the server; absent on older servers. */
+  systemPrompt?: string | null
   playbookRevisionId: string | null
   repo: RunRepo
   defaultBranch: string
@@ -250,6 +252,8 @@ export interface HarnessOutcome {
 /** Everything an adapter may need to start a harness for one run. */
 export interface InvocationContext {
   prompt: string
+  /** Code-owned security policy, separate from the playbook and item content. */
+  systemPrompt?: string | null
   promptFile: string
   /** The git checkout the harness works in (its cwd). */
   workspace: string

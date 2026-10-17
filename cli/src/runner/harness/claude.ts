@@ -33,6 +33,14 @@ export const claude: HarnessAdapter = {
   },
 
   invocation(context) {
+    const systemPrompt = context.systemPrompt
+    // Remove only an exact, leading copy of the code-owned policy. Never split on
+    // markers that a playbook, ticket or attachment could forge.
+    const prefix = systemPrompt ? `${systemPrompt}\n\n` : null
+    const prompt =
+      prefix && context.prompt.startsWith(prefix)
+        ? context.prompt.slice(prefix.length)
+        : context.prompt
     return {
       command: 'claude',
       args: [
@@ -40,6 +48,7 @@ export const claude: HarnessAdapter = {
         '--output-format',
         'stream-json',
         '--verbose',
+        ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
         '--permission-mode',
         'bypassPermissions',
         '--mcp-config',
@@ -53,7 +62,7 @@ export const claude: HarnessAdapter = {
         ...(context.resumeSessionId ? ['--resume', context.resumeSessionId] : []),
       ],
       // Claude's -p mode consumes stdin when there is no positional prompt.
-      stdin: context.prompt,
+      stdin: prompt,
     }
   },
 
