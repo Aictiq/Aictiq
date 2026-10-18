@@ -267,6 +267,28 @@ describe('RunsTab', () => {
     Object.assign(runs.items[0]!, original)
   })
 
+  it('labels a project chat run Chat, with no item link', async () => {
+    const original = { ...runs.items[0]! }
+    Object.assign(runs.items[0]!, {
+      itemId: null,
+      itemKey: null,
+      kind: 'projectChat',
+      playbookId: '00000000-0000-0000-0000-000000000000',
+      playbookName: 'Project chat',
+      pullRequestUrl: null,
+    })
+    stubFetch()
+
+    const { wrapper } = await mountTab()
+
+    const list = wrapper.find('[data-testid="runs-list"]')
+    expect(list.find('[data-testid="run-row-project-chat"]').text()).toBe('Chat')
+    expect(list.findAll('a')).toHaveLength(0)
+    expect(list.text()).toContain('Project chat')
+
+    Object.assign(runs.items[0]!, original)
+  })
+
   it('rounds a filter change out to the URL, and resets the page with it', async () => {
     stubFetch()
     const { wrapper, router } = await mountTab('?page=3')

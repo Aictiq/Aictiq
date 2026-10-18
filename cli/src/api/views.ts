@@ -227,8 +227,9 @@ export type RunStatus =
 export interface RunView {
   id: string
   projectId: string
-  itemId: string
-  itemKey: string
+  /** Null for a project-chat run, which has no item. */
+  itemId: string | null
+  itemKey: string | null
   playbookId: string
   playbookName: string | null
   agentId: string

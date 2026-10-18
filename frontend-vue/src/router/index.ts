@@ -17,6 +17,8 @@ declare module 'vue-router' {
     title?: string
     /** The screen is not built yet; PlaceholderView stands in for it. */
     soon?: boolean
+    /** A project's work screens, where the project chat button is offered. */
+    projectChat?: boolean
   }
 }
 
@@ -171,14 +173,14 @@ const routes: RouteRecordRaw[] = [
     name: 'project-items',
     component: () => import('@/views/ItemListView.vue'),
     props: (route) => ({ slug: String(route.params.slug), projectKey: String(route.params.projectKey) }),
-    meta: { requiresAuth: true, title: 'Items' },
+    meta: { requiresAuth: true, title: 'Items', projectChat: true },
   },
   {
     path: '/o/:slug/p/:projectKey/wiki/:pageId?/:wikiSlug?',
     name: 'project-wiki',
     component: () => import('@/views/WikiView.vue'),
     props: (route) => ({ slug: String(route.params.slug), projectKey: String(route.params.projectKey), pageId: route.params.pageId ? String(route.params.pageId) : undefined }),
-    meta: { requiresAuth: true, title: 'Wiki' },
+    meta: { requiresAuth: true, title: 'Wiki', projectChat: true },
   },
   {
     path: '/o/:slug/p/:projectKey/items/:itemKey',
@@ -192,7 +194,7 @@ const routes: RouteRecordRaw[] = [
     name: 'team-backlog',
     component: () => import('@/views/BacklogView.vue'),
     props: (route) => ({ slug: String(route.params.slug), projectKey: String(route.params.projectKey), teamId: String(route.params.teamId) }),
-    meta: { requiresAuth: true, title: 'Backlog' },
+    meta: { requiresAuth: true, title: 'Backlog', projectChat: true },
   },
   {
     path: '/o/:slug/p/:projectKey/teams/:teamId/sprints',
@@ -203,7 +205,7 @@ const routes: RouteRecordRaw[] = [
       projectKey: String(route.params.projectKey),
       teamId: String(route.params.teamId),
     }),
-    meta: { requiresAuth: true, title: 'Sprints' },
+    meta: { requiresAuth: true, title: 'Sprints', projectChat: true },
   },
   {
     path: '/o/:slug/p/:projectKey/teams/:teamId/sprints/:sprintId',
@@ -240,14 +242,14 @@ const routes: RouteRecordRaw[] = [
     path: '/board',
     name: 'board',
     component: () => import('@/views/BoardView.vue'),
-    meta: { requiresAuth: true, title: 'Board' },
+    meta: { requiresAuth: true, title: 'Board', projectChat: true },
   },
   {
     // Email links name the project rather than relying on the browser's last selection.
     path: '/o/:slug/p/:projectKey/board',
     name: 'project-board',
     component: () => import('@/views/BoardView.vue'),
-    meta: { requiresAuth: true, title: 'Board' },
+    meta: { requiresAuth: true, title: 'Board', projectChat: true },
   },
 
   // ── Personal settings ────────────────────────────────────────────────────────────

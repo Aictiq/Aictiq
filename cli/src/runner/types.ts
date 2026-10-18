@@ -119,8 +119,9 @@ export interface RunAttachment {
 
 export interface ClaimedRun {
   runId: string
-  itemId: string
-  itemKey: string
+  /** Null for a project-chat run, which answers a question with no item behind it. */
+  itemId: string | null
+  itemKey: string | null
   projectId: string
   projectKey: string
   organizationSlug: string
@@ -151,6 +152,11 @@ export interface ClaimedRun {
    * its workspace and decides which branch the work goes on.
    */
   followUp?: RunFollowUp | null
+}
+
+/** How the runner's own log names a run: its item, or the project for a project chat. */
+export function runLabel(run: Pick<ClaimedRun, 'itemKey' | 'projectKey'>): string {
+  return run.itemKey ?? `${run.projectKey} chat`
 }
 
 export interface RunResume {

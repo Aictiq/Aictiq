@@ -36,7 +36,8 @@ public enum RunLogStream : short
 }
 
 /// <summary>
-/// One execution of a playbook by one agent on one item - the item's factory history.
+/// One execution of a playbook by one agent on one item - the item's factory history - or,
+/// for a <see cref="RunKind.ProjectChat"/> run, on no item at all.
 /// Deliberately not <see cref="IAudited"/>: a run is written by machines on every
 /// heartbeat, and a field-level diff of that would be noise, not an audit trail. It is
 /// never deleted except with the item, project or organization it belongs to.
@@ -79,10 +80,17 @@ public sealed class Run : TenantEntity
 
     public Guid ProjectId { get; init; }
 
-    public Guid ItemId { get; init; }
+    /// <summary>The item the run works, or null for a <see cref="RunKind.ProjectChat"/> run, which has none.</summary>
+    public Guid? ItemId { get; init; }
 
-    public required string ItemKey { get; init; }
+    /// <summary>Null exactly when <see cref="ItemId"/> is (<c>ck_runs_item</c>).</summary>
+    public string? ItemKey { get; init; }
 
+    /// <summary>
+    /// The project playbook the run follows. A project-chat run follows the built-in
+    /// <see cref="ProjectChat.PlaybookName"/> playbook instead, which has no row: it carries
+    /// <see cref="Guid.Empty"/>.
+    /// </summary>
     public Guid PlaybookId { get; init; }
 
     /// <summary>An implement run delivers code; a refine run rewrites the ticket and leaves the item where it is.</summary>
@@ -283,8 +291,9 @@ public sealed class Run : TenantEntity
     public void ScheduleAutoContinue(DateTimeOffset now)
     {
         // A failed stage has already sent the item to human review; continuing it would run
-        // the chain on behind the person now looking at the pull request.
-        if (Kind != RunKind.Stage
+        // the chain on behind the person now looking at the pull request. A project chat's
+        // person sees the failure in the panel and simply asks again.
+        if (Kind is not (RunKind.Stage or RunKind.ProjectChat)
             && Status == RunStatus.Failed && IsTransientFailure(FailureReason) && HasResumableSession
             && CancelRequestedAt is null && AutoContinues < MaxAutoContinues)
         {

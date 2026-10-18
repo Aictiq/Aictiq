@@ -36,6 +36,8 @@ public sealed class AutomationProjectDeletedHandler(
             .ExecuteDeleteAsync(cancellationToken);
         await db.ChainSteps.Where(step => step.ProjectId == @event.ProjectId)
             .ExecuteDeleteAsync(cancellationToken);
+        await db.ProjectChatMessages.Where(message => message.ProjectId == @event.ProjectId)
+            .ExecuteDeleteAsync(cancellationToken);
         await db.RefinementSettings.Where(settings => settings.ProjectId == @event.ProjectId)
             .ExecuteDeleteAsync(cancellationToken);
         // Rules before playbooks: automation.rules.playbook_id is RESTRICT, and deleting

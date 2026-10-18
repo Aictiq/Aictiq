@@ -22,6 +22,9 @@ public interface ICurrentUser
 
     /// <summary>The organization the credential is bound to, when it is bound to one.</summary>
     Guid? OrganizationId { get; }
+
+    /// <summary>The personal access token the request authenticated with, or null for any other credential.</summary>
+    Guid? TokenId => null;
 }
 
 /// <summary>Identity of background processes (Workers); audit rows get UserId = null, UserName "system".</summary>

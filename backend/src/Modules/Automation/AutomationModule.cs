@@ -53,6 +53,7 @@ public static class AutomationModule
         services.AddScoped<RunMentionQueue>();
         services.AddScoped<ChainQueue>();
         services.AddScoped<IFactoryPages, AutomationFactoryPages>();
+        services.AddScoped<IProjectChatGrants, AutomationProjectChatGrants>();
         // The run tools, the aictiq://run/{id} resource: the API host discovers them from
         // this assembly exactly as it discovers WorkItems'.
         services.AddSingleton<IMcpToolProvider>(new McpToolProvider(typeof(RunMcpTools).Assembly));
@@ -85,6 +86,7 @@ public static class AutomationModule
         api.MapRunProtocolEndpoints();
         api.MapRuleEndpoints();
         api.MapRefinementEndpoints();
+        api.MapProjectChatEndpoints();
         return api;
     }
 }

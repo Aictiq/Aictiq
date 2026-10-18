@@ -55,8 +55,10 @@ export interface RunScaleUp {
 export interface Run {
   id: string
   projectId: string
-  itemId: string
-  itemKey: string
+  /** Null for a project chat run, which answers a question about the project, not an item. */
+  itemId: string | null
+  itemKey: string | null
+  /** The empty guid for a project chat run, which follows no playbook. */
   playbookId: string
   playbookName: string | null
   agentId: string
@@ -104,7 +106,8 @@ export interface Run {
   /**
    * An implement run delivers code; a refine run rewrites the ticket; a chat run answers a
    * comment; a stage run is a follow-up playbook (code review, QA...) on an implement run's
-   * pull request, and `playbookName` names that stage.
+   * pull request, and `playbookName` names that stage. A project chat run answers a
+   * question asked in a project's chat panel and has no item.
    */
   kind?: RunKind
   /** A stage run's verdict once it has one; null for every other kind. */
@@ -186,7 +189,7 @@ export interface ListRunsOptions {
   pageSize?: number
 }
 
-export type RunKind = 'implement' | 'refine' | 'chat' | 'stage'
+export type RunKind = 'implement' | 'refine' | 'chat' | 'stage' | 'projectChat'
 
 export type StageVerdict = 'pass' | 'changes_requested'
 

@@ -515,6 +515,36 @@ starts, the runner fetches `origin` and picks the branch:
 The runner asks `gh pr view` for the pull request's state. Without `gh`, or when it is not
 signed in, the runner continues on the earlier branch if it still exists.
 
+### Ask the agent about the project
+
+To ask about the project without an item, open the chat button in the lower-right corner of
+**Items**, **Wiki**, **Backlog**, **Board** or **Sprints**. Ask how something works, where code
+lives or what a change would take. The project's default agent answers on one of your runners.
+
+- **Private.** Each person has their own chat per project. Nobody else sees it, including other
+  members and admins, and the chat endpoints only ever return the caller's own messages.
+- **History.** The chat keeps your last 10 questions and answers and sends them along as context
+  with each new question. Older pairs drop off. **Clear history** empties the chat and cancels a
+  question that is still running.
+- **One at a time.** Each question is one runner run, and only one of yours runs at a time. The
+  panel shows when the question is queued or running. It also says when no runner is online,
+  and when a run failed, timed out or was cancelled.
+- **Read-only.** A chat run follows the built-in **Project chat** playbook, inside the code-owned
+  security policy. Projects cannot edit or swap it. The run works in an isolated clone of the
+  default branch and creates no branch, commit or pull request. It refuses to reveal secrets.
+  Its harness and required tags come from the project's default playbook, or Claude Code when
+  the project has none. It needs a default agent under **Factory settings**.
+- **Tickets from the chat.** Ask the agent to "make tickets for these 3 bugs", and it creates them
+  in this project, with you as the reporter, and links them in its answer. Creating items is the
+  only change the run's token allows. It has no `write` scope, so it cannot edit, transition,
+  comment on or delete items, and it can create items only in this project.
+- **Who can chat.** Project members who may operate the factory. Stakeholders and Guests see no
+  chat button, and the API answers them with 403.
+
+Chat runs appear under **Factory → Runs** with the kind **Project chat** and no item key. The run
+page opens as for any run, but for anyone other than the person who asked it hides the question,
+the answer and the log. A chat question is not continued: if it fails, ask it again.
+
 ### Resume a session by hand
 
 In ItemDetail, under **Agent runs**, each finished run with a session shows **Copy resume

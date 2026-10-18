@@ -17,6 +17,7 @@ import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
 import { useRunRealtime } from '@/composables/useRunRealtime'
 import { useToast } from '@/composables/useToast'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import {
   canCancelRun,
@@ -44,6 +45,7 @@ import SettingsSection from '@/components/settings/SettingsSection.vue'
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
+const projects = useProjectsStore()
 const toast = useToast()
 const client = useQueryClient()
 
@@ -66,7 +68,13 @@ const notFound = computed(
 )
 
 // The run's project, for the caller's role in it: a project Admin may cancel anyone's run.
-const projectKey = computed(() => (run.value ? projectKeyOf(run.value.itemKey) : ''))
+// A project chat run has no item to read the key from, so its project is looked up by id.
+const projectKey = computed(() => {
+  const current = run.value
+  if (!current) return ''
+  if (current.itemKey) return projectKeyOf(current.itemKey)
+  return projects.projects.find((p) => p.id === current.projectId)?.key ?? ''
+})
 const projectQuery = useQuery({
   queryKey: computed(() => ['projects', slug.value, projectKey.value]),
   queryFn: () => getProject(slug.value, projectKey.value),
@@ -74,10 +82,15 @@ const projectQuery = useQuery({
 })
 
 const itemPath = computed(() =>
-  run.value
+  run.value?.itemKey
     ? `/o/${slug.value}/p/${projectKeyOf(run.value.itemKey)}/items/${run.value.itemKey}`
     : '',
 )
+const kindLabel = computed(() => {
+  const kind = run.value?.kind
+  if (kind === 'projectChat') return 'project chat'
+  return kind === 'chat' || kind === 'stage' ? kind : null
+})
 
 // "4 min ago" and a running duration only move when someone asks the time again.
 const now = ref(new Date())
@@ -108,8 +121,10 @@ async function cancel() {
   } finally {
     cancelling.value = false
     await client.invalidateQueries({ queryKey: [slug.value, 'runs', current.id] })
-    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey, 'runs'] })
-    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
+    if (current.itemKey) {
+      await client.invalidateQueries({ queryKey: [slug.value, current.itemKey, 'runs'] })
+      await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
+    }
   }
 }
 
@@ -119,16 +134,19 @@ const starting = ref<'continue' | 'retry' | null>(null)
 async function startNext(how: 'continue' | 'retry') {
   const current = run.value
   if (!current || starting.value) return
+  // Neither applies to a project chat run: a new question is asked in the project's chat.
+  const itemKey = current.itemKey
+  if (!itemKey) return
   starting.value = how
   try {
     const next: Run =
       how === 'continue'
         ? await continueRun(slug.value, current.id)
-        : await dispatchRun(slug.value, current.itemKey, {
+        : await dispatchRun(slug.value, itemKey, {
             playbookId: current.playbookId,
             agentId: current.agentId,
           })
-    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
+    await client.invalidateQueries({ queryKey: [slug.value, itemKey] })
     await router.push(`/o/${slug.value}/factory/runs/${next.id}`)
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) {
@@ -194,7 +212,9 @@ async function startNow() {
   } finally {
     startingNow.value = false
     await client.invalidateQueries({ queryKey: [slug.value, 'runs', current.id] })
-    await client.invalidateQueries({ queryKey: [slug.value, current.itemKey, 'runs'] })
+    if (current.itemKey) {
+      await client.invalidateQueries({ queryKey: [slug.value, current.itemKey, 'runs'] })
+    }
   }
 }
 
@@ -248,12 +268,19 @@ const tokens = computed(() => {
             >{{ runScheduledLabel(run) }}</span
           >
           <RouterLink
+            v-if="run.itemKey"
             :to="itemPath"
             class="hover:bg-muted inline-flex items-center gap-1.5 rounded px-1 py-0.5"
             :title="`Open ${run.itemKey}`"
           >
             <KeyChip :label="run.itemKey" />
           </RouterLink>
+          <span
+            v-else
+            class="text-muted-foreground rounded border px-1.5 text-xs"
+            data-testid="run-chat-label"
+            >Chat</span
+          >
           <span class="text-muted-foreground text-xs uppercase">{{ run.harness }}</span>
           <div class="min-w-0">
             <div class="flex items-center gap-1.5">
@@ -319,9 +346,9 @@ const tokens = computed(() => {
             <dt class="inline">Playbook&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.playbookName ?? '-' }}</dd>
           </div>
-          <div v-if="run.kind === 'chat' || run.kind === 'stage'" data-testid="run-kind">
+          <div v-if="kindLabel" data-testid="run-kind">
             <dt class="inline">Kind&nbsp;</dt>
-            <dd class="text-foreground inline">{{ run.kind }}</dd>
+            <dd class="text-foreground inline">{{ kindLabel }}</dd>
           </div>
           <div>
             <dt class="inline">Runner&nbsp;</dt>
@@ -375,7 +402,7 @@ const tokens = computed(() => {
             <dt class="inline">Session&nbsp;</dt>
             <dd class="text-foreground inline font-mono">{{ run.sessionId }}</dd>
           </div>
-          <div v-if="run.triggerCommentId" data-testid="run-trigger-comment">
+          <div v-if="run.triggerCommentId && itemPath" data-testid="run-trigger-comment">
             <dt class="inline">{{ run.followsUpRunId ? 'Follows up' : 'Asked for' }}&nbsp;</dt>
             <dd class="inline">
               <template v-if="run.followsUpRunId">

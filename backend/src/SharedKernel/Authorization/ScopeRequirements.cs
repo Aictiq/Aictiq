@@ -10,6 +10,13 @@ public static class Scopes
     /// <summary>Access to the MCP endpoint. Separate so an agent token can be MCP-only.</summary>
     public const string Mcp = "mcp";
 
+    /// <summary>
+    /// A project-chat run's token: create items in that run's project, as the person who asked,
+    /// and nothing else that writes. Not in <see cref="All"/>, so no personal access token can be
+    /// minted with it; only the runner protocol issues it, beside read and mcp.
+    /// </summary>
+    public const string ProjectChat = "project-chat";
+
     public static readonly string[] All = [Read, Write, Admin, Mcp];
 }
 
