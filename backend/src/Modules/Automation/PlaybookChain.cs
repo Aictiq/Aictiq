@@ -123,7 +123,7 @@ internal static class PlaybookChain
                 "Every follow-up playbook passed, so the item goes to human review.", stageName);
         }
 
-        var rounds = await ReworkRoundsAsync(db, run.ItemId, ct);
+        var rounds = await ReworkRoundsAsync(db, run.ItemId!.Value, ct);
         if (rounds < MaxReworkRounds)
         {
             return new Decision(Step(run, chainPlaybookId, ChainStepKind.Rework, 0, now), false, null,
@@ -138,8 +138,8 @@ internal static class PlaybookChain
     {
         OrganizationId = after.OrganizationId,
         ProjectId = after.ProjectId,
-        ItemId = after.ItemId,
-        ItemKey = after.ItemKey,
+        ItemId = after.ItemId!.Value,
+        ItemKey = after.ItemKey!,
         AfterRunId = after.Id,
         ChainPlaybookId = chainPlaybookId,
         Kind = kind,

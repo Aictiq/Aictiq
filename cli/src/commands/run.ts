@@ -92,7 +92,7 @@ export function runCommand(globals: () => GlobalOptions): Command {
       print(
         renderFields([
           ['Run', started.id],
-          ['Item', started.itemKey],
+          ['Item', started.itemKey ?? undefined],
           ['Status', started.status],
           ['Agent', started.agentName ?? started.agentId],
           ['Playbook', started.playbookName ?? started.playbookId],
@@ -146,7 +146,7 @@ export function runCommand(globals: () => GlobalOptions): Command {
         print(
           renderTable(page.items, [
             { header: 'ID', value: (r) => r.id },
-            { header: 'ITEM', value: (r) => r.itemKey },
+            { header: 'ITEM', value: (r) => r.itemKey ?? '(chat)' },
             { header: 'STATUS', value: (r) => r.status },
             { header: 'AGENT', value: (r) => r.agentName ?? r.agentId },
             { header: 'PLAYBOOK', value: (r) => r.playbookName ?? r.playbookId },
@@ -184,7 +184,7 @@ export function runCommand(globals: () => GlobalOptions): Command {
       print(
         renderFields([
           ['Run', found.id],
-          ['Item', found.itemKey],
+          ['Item', found.itemKey ?? '(project chat)'],
           ['Status', found.status],
           ['Agent', found.agentName ?? found.agentId],
           ['Playbook', found.playbookName ?? found.playbookId],

@@ -31,6 +31,21 @@ describe('RunnerClient attachments', () => {
       expect((call.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${agentToken}`)
     }
   })
+
+  it('asks nothing about an item for a project-chat run, which has none', async () => {
+    const calls: string[] = []
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
+      calls.push(String(input))
+      return new Response(null, { status: 204 })
+    }) as typeof fetch
+    const client = new RunnerClient({ baseUrl: 'https://aictiq.example.com/', token: runnerToken, fetch: fetchImpl })
+    const run = { ...claimedRun(), itemId: null, itemKey: null }
+
+    expect(await client.listAttachments(run)).toEqual([])
+    await client.itemHeartbeat(run)
+
+    expect(calls).toHaveLength(0)
+  })
 })
 
 describe('RunnerClient fleet mode', () => {

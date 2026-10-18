@@ -10,8 +10,9 @@ interface ItemChanged { id: string; key: string; actorId: string; changedFields:
 interface CommentAdded { itemId: string; commentId: string; actorId: string }
 interface RunChanged {
   runId: string
-  itemId: string
-  itemKey: string
+  /** Null for a project chat run, which has no item. */
+  itemId: string | null
+  itemKey: string | null
   status?: string
   agentId?: string
   cancelRequested?: boolean
@@ -75,7 +76,7 @@ export function useProjectRealtime(
     // A dispatch claims the item for its agent and a finish releases it, so the item and
     // its lists go stale with every run change; the run's own screens refetch too.
     connection.on('run.changed', (event: RunChanged) => {
-      invalidate('items', event.itemKey)
+      invalidate('items', event.itemKey ?? undefined)
       void client.invalidateQueries({
         predicate: (query) => query.queryKey.includes('runs') || query.queryKey.includes(event.runId),
       })

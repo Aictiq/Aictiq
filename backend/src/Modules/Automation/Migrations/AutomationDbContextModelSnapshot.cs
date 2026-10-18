@@ -18,7 +18,7 @@ namespace Aictiq.Modules.Automation.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("automation")
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -438,6 +438,84 @@ namespace Aictiq.Modules.Automation.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectChatMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Answer")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("answer");
+
+                    b.Property<DateTimeOffset?>("AnsweredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("answered_at");
+
+                    b.Property<DateTimeOffset>("AskedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("asked_at");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("error");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("question");
+
+                    b.Property<Guid?>("RunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("user_id");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_project_chat_messages");
+
+                    b.HasIndex("RunId")
+                        .HasDatabaseName("ix_project_chat_messages_run");
+
+                    b.HasIndex("ProjectId", "UserId", "AskedAt")
+                        .HasDatabaseName("ix_project_chat_messages_owner");
+
+                    b.ToTable("project_chat_messages", "automation", t =>
+                        {
+                            t.HasCheckConstraint("ck_project_chat_messages_answered", "(status = 0) = (answered_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_project_chat_messages_question", "length(btrim(question)) BETWEEN 1 AND 4000");
+
+                            t.HasCheckConstraint("ck_project_chat_messages_status", "status BETWEEN 0 AND 4");
+                        });
+                });
+
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectFactorySettings", b =>
                 {
                     b.Property<Guid>("ProjectId")
@@ -790,12 +868,11 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("character varying(20000)")
                         .HasColumnName("instruction");
 
-                    b.Property<Guid>("ItemId")
+                    b.Property<Guid?>("ItemId")
                         .HasColumnType("uuid")
                         .HasColumnName("item_id");
 
                     b.Property<string>("ItemKey")
-                        .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("item_key");
@@ -947,6 +1024,10 @@ namespace Aictiq.Modules.Automation.Migrations
                     b.HasIndex(new[] { "ItemId" }, "ix_runs_item")
                         .HasDatabaseName("ix_runs_item");
 
+                    b.HasIndex(new[] { "AgentTokenId" }, "ix_runs_project_chat_token")
+                        .HasDatabaseName("ix_runs_project_chat_token")
+                        .HasFilter("kind = 4 AND agent_token_id IS NOT NULL");
+
                     b.HasIndex(new[] { "ContinuesRunId" }, "ux_runs_continues")
                         .IsUnique()
                         .HasDatabaseName("ux_runs_continues")
@@ -957,6 +1038,11 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasDatabaseName("ux_runs_item_live")
                         .HasFilter("status < 3");
 
+                    b.HasIndex(new[] { "ProjectId", "RequestedBy" }, "ux_runs_project_chat_live")
+                        .IsUnique()
+                        .HasDatabaseName("ux_runs_project_chat_live")
+                        .HasFilter("kind = 4 AND status < 3");
+
                     b.ToTable("runs", "automation", t =>
                         {
                             t.HasCheckConstraint("ck_runs_auto_continues", "auto_continues BETWEEN 0 AND 2");
@@ -965,7 +1051,9 @@ namespace Aictiq.Modules.Automation.Migrations
 
                             t.HasCheckConstraint("ck_runs_follow_up_trigger", "follows_up_run_id IS NULL OR trigger_comment_id IS NOT NULL OR kind = 3 OR rework_of_run_id IS NOT NULL");
 
-                            t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3)");
+                            t.HasCheckConstraint("ck_runs_item", "(item_id IS NULL) = (kind = 4) AND (item_id IS NULL) = (item_key IS NULL) AND (kind <> 4 OR requested_by IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3, 4)");
 
                             t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
 

@@ -23,7 +23,7 @@ public sealed class RunMcpContext(
         var run = visible.Run;
         var names = await RunMcpViews.NamesAsync(db, directory, run, cancellationToken);
         var text = new StringBuilder();
-        text.AppendLine($"# Run {run.Id} - {run.ItemKey} ({RunMcpViews.StatusName(run.Status)})");
+        text.AppendLine($"# Run {run.Id} - {run.ItemKey ?? "project chat"} ({RunMcpViews.StatusName(run.Status)})");
         text.AppendLine();
         text.AppendLine($"- Agent: {names.Agent ?? "(unknown)"} ({run.AgentUserId})");
         text.AppendLine($"- Playbook: {names.Playbook ?? "(deleted)"}, harness {run.Harness}, at most {run.MaxMinutes} minutes");
@@ -38,7 +38,7 @@ public sealed class RunMcpContext(
         if (run.ExitCode is { } exitCode) text.AppendLine($"- Exit code: {exitCode}");
         if (visible.IsOperator && run.FailureReason is { } failure) text.AppendLine($"- Failure reason: {failure}");
 
-        if (run.OutcomeSummary is { } summary)
+        if (!visible.Hidden && run.OutcomeSummary is { } summary)
         {
             text.AppendLine();
             text.AppendLine("## Outcome");

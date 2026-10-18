@@ -227,6 +227,10 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Refining | `submit_refinement` (refine runs only) |
 | Follow-up playbooks | `submit_stage_verdict` (follow-up playbook runs only) |
 
+`create_item` takes an optional `description` (Markdown). It is also the one write a
+project-chat run's token may make. That token has no `write` scope, and the item it creates
+records the person who asked the chat as its reporter.
+
 There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq://run/{id}`
 resources, which render the same loop, the item's Markdown and a run's status and log tail
 for clients that use them.

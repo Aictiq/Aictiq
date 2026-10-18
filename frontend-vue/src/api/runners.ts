@@ -135,7 +135,8 @@ export const listRunners = (slug: string) => apiFetch<Runner[]>(`/orgs/${slug}/r
 /** A run a runner holds right now. */
 export interface RunnerActiveRun {
   id: string
-  itemKey: string
+  /** Null for a project chat run, which has no item. */
+  itemKey: string | null
   playbookName: string | null
   status: RunStatus
   startedAt: string | null

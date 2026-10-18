@@ -94,9 +94,10 @@ public sealed class IdentityDbContext(
                 "length(btrim(name)) > 0"));
             // The scope set is a narrowing, so an unknown scope is not a smaller
             // permission - it is a typo that would silently widen nothing and confuse
-            // everyone reading the row.
+            // everyone reading the row. project-chat is only ever minted by the runner protocol
+            // for a project-chat run; the token endpoints offer Scopes.All, which lacks it.
             b.ToTable(t => t.HasCheckConstraint("ck_personal_access_tokens_scopes",
-                "scopes <@ ARRAY['read','write','admin','mcp']::text[]"));
+                "scopes <@ ARRAY['read','write','admin','mcp','project-chat']::text[]"));
 
             b.HasOne<ApplicationUser>()
                 .WithMany()

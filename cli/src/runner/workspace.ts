@@ -353,7 +353,7 @@ function writeKept(runDir: string, run: ClaimedRun, sessionId: string, source: s
   const kept: KeptWorkspace = {
     runId: run.runId,
     organizationSlug: run.organizationSlug,
-    itemKey: run.itemKey,
+    itemKey: run.itemKey ?? '',
     sessionId,
     source,
     keptAt: new Date().toISOString(),

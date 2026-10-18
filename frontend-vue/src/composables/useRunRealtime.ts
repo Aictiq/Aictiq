@@ -6,8 +6,9 @@ import { normalizeRunStatus } from '@/lib/runs'
 
 export interface RunChangedEvent {
   runId: string
-  itemId: string
-  itemKey: string
+  /** Null for a project chat run, which has no item. */
+  itemId: string | null
+  itemKey: string | null
   status?: string
   agentId?: string
   cancelRequested?: boolean

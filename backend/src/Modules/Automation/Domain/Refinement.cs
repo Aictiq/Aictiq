@@ -31,6 +31,13 @@ public enum RunKind : short
     /// the chain moves it once the last stage passes.
     /// </summary>
     Stage = 3,
+
+    /// <summary>
+    /// Answers a person's question in their private project chat (<see cref="ProjectChatMessage"/>).
+    /// The only run with no item: it works in an isolated clone of the default branch, never
+    /// commits, and its agent token may create items in the run's project and write nothing else.
+    /// </summary>
+    ProjectChat = 4,
 }
 
 /// <summary>Where one item's refinement stands. Only <see cref="Refining"/> has a live run behind it.</summary>

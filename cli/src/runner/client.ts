@@ -132,7 +132,9 @@ export class RunnerClient {
   }
 
   /** Lists committed attachments on an item, including attachments posted in its comments. */
-  listAttachments(run: ClaimedRun): Promise<RunAttachment[]> {
+  async listAttachments(run: ClaimedRun): Promise<RunAttachment[]> {
+    // A project-chat run has no item, so nothing is attached to it.
+    if (run.itemKey === null) return []
     return this.get<RunAttachment[]>(
       `/orgs/${encodeURIComponent(run.organizationSlug)}/items/${encodeURIComponent(run.itemKey)}/attachments?include=comments`,
       run.agentToken,
@@ -152,6 +154,8 @@ export class RunnerClient {
    * stale after `Claims:StaleAfterMinutes` and another agent may take the item mid-run.
    */
   async itemHeartbeat(run: ClaimedRun): Promise<void> {
+    // A project-chat run claims no item, so there is no claim to keep fresh.
+    if (run.itemKey === null) return
     await this.send(
       `/orgs/${encodeURIComponent(run.organizationSlug)}/items/${encodeURIComponent(run.itemKey)}/heartbeat`,
       undefined,

@@ -67,6 +67,11 @@ The two factory credentials have deliberately different reach:
   harness process environment rather than written to the workspace, revoked on
   success, failure, cancellation, timeout, or runner loss, and expires on its own
   at the playbook limit plus ten minutes if revocation cannot complete.
+- A project-chat run's PAT gets `read`, `mcp`, and `project-chat` instead, with no
+  `write`. Its only write is MCP `create_item`, and only in the run's own project
+  while the run is live. The item records the person who asked as its reporter, and
+  that person must still be a project Member. No PAT can be created with
+  `project-chat` through the token endpoints.
 
 A playbook is prompt text, not trusted code. Its Markdown comes from a versioned
 wiki page, and the page's wiki permissions are its access control for a manually

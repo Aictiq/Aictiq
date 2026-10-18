@@ -76,10 +76,10 @@ const runsPath = computed(
         :key="run.id"
         :to="factoryRunPath(slug, run.id)"
         class="font-mono underline-offset-2 hover:underline"
-        :title="run.playbookName ? `${run.itemKey} · ${run.playbookName}` : run.itemKey"
+        :title="run.playbookName ? `${run.itemKey ?? 'Chat'} · ${run.playbookName}` : (run.itemKey ?? 'Chat')"
         :data-testid="`runner-active-run-${run.id}`"
       >
-        {{ run.itemKey }}
+        {{ run.itemKey ?? 'Chat' }}
       </RouterLink>
       <RouterLink
         v-if="entry.active.length > shownRuns"

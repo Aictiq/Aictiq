@@ -226,6 +226,25 @@ describe('RunDetailView continue and retry', () => {
     )
   })
 
+  it('renders a project chat run without an item, and offers no Retry', async () => {
+    const { wrapper } = await mountRun({
+      ...failed,
+      itemId: null,
+      itemKey: null,
+      kind: 'projectChat',
+      playbookId: '00000000-0000-0000-0000-000000000000',
+      playbookName: 'Project chat',
+      continuable: false,
+      continuesRunId: null,
+      chain: null,
+    })
+
+    expect(wrapper.get('[data-testid="run-chat-label"]').text()).toBe('Chat')
+    expect(wrapper.find('a[href*="/items/"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="run-kind"]').text()).toContain('project chat')
+    expect(wrapper.find('[data-testid="run-retry"]').exists()).toBe(false)
+  })
+
   it('offers neither once the run was continued, and links the next run', async () => {
     const { wrapper } = await mountRun({ ...failed, continuable: false, continuedByRunId: 'r-3' })
 

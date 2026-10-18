@@ -1,7 +1,7 @@
 import { RunnerHttpError, RunnerNetworkError } from './client.js'
 import type { RunnerClient } from './client.js'
 import type { Floor } from './floor.js'
-import type { ClaimedRun, RunnerCapabilities, RunnerHello } from './types.js'
+import { runLabel, type ClaimedRun, type RunnerCapabilities, type RunnerHello } from './types.js'
 
 /** Every harness the CLI has an adapter for, offered when none is detected (see below). */
 export const KnownHarnesses = ['claude', 'codex', 'opencode', 'cursor', 'copilot'] as const
@@ -135,7 +135,7 @@ export class RunnerLoop {
         if (floor && !floor.enter(floorKey) && !(await this.handBack(claimed, floor, floorKey)))
           continue
 
-        local(`Claimed ${claimed.itemKey} (run ${claimed.runId}, ${claimed.harness})`)
+        local(`Claimed ${runLabel(claimed)} (run ${claimed.runId}, ${claimed.harness})`)
         const execution = this.options
           .execute(claimed, hello, this.shutdown.signal)
           .then(() => undefined)
@@ -174,7 +174,7 @@ export class RunnerLoop {
     try {
       await client.release(run.runId)
       local(
-        `Gave ${run.itemKey} back to the queue: another organization has runs executing on this machine`,
+        `Gave ${runLabel(run)} back to the queue: another organization has runs executing on this machine`,
       )
       return false
     } catch (error) {
@@ -187,7 +187,7 @@ export class RunnerLoop {
       // run is still ours (an instance without the release route): wait, then execute it.
       if (error instanceof RunnerHttpError && error.problem?.type) return false
       local(
-        `Could not give ${run.itemKey} back (${error instanceof Error ? error.message : String(error)}); it starts when the other organization's runs finish`,
+        `Could not give ${runLabel(run)} back (${error instanceof Error ? error.message : String(error)}); it starts when the other organization's runs finish`,
       )
       while (!floor.enter(key)) await floor.turn(key)
       return true

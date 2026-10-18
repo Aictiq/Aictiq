@@ -39,8 +39,9 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="StageIndex">A stage run's zero-based position in its chain.</param>
 /// <param name="ReworkOfRunId">The stage run whose requested changes this implement run addresses, or null.</param>
 /// <param name="Waiting">Why a queued run whose time has come is not running yet (run detail only, for factory operators).</param>
+/// <param name="ItemId">The item the run works; null for a project-chat run, which has none.</param>
 public sealed record RunView(
-    Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid PlaybookId, string? PlaybookName,
+    Guid Id, Guid ProjectId, Guid? ItemId, string? ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
     Guid? RunnerId, string? RunnerName, Guid? RequestedRunnerId, string? RequestedRunnerName,
     RunStatus Status, string Harness,
@@ -206,7 +207,7 @@ public static class RunEndpoints
         var names = await DisplayNamesAsync(db, runs, ct);
         var continuedBy = await ContinuedByAsync(db, runs, ct);
         return Results.Ok(new PagedResult<RunView>(
-            runs.Select(run => ToView(run, people, includeDetails: false, names)
+            runs.Select(run => ToView(run, people, includeDetails: false, names).PrivateTo(run, user.UserId)
                 with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
     }
@@ -269,7 +270,9 @@ public static class RunEndpoints
         var isOperator = await access.CanOperateFactoryAsync(userId, tenant.OrganizationId!.Value, ct);
         var people = await directory.GetAsync([run.AgentUserId], ct);
         var names = await DisplayNamesAsync(db, [run], ct);
-        var view = await WithChainAsync(db, run, ToView(run, people, includeDetails: isOperator, names), ct);
+        var view = ToView(run, people, includeDetails: isOperator, names).PrivateTo(run, userId);
+        // A project chat has no item, so no chain of continues to walk.
+        view = run.Kind == RunKind.ProjectChat ? view : await WithChainAsync(db, run, view, ct);
         // Runner names are the operators' business, like the runner list they come from.
         return Results.Ok(isOperator
             ? view with { Waiting = await WaitingAsync(db, run, await fleetMode.GetAsync(tenant.OrganizationId!.Value, ct), options.Value, clock.GetUtcNow(), ct) }
@@ -368,7 +371,15 @@ public static class RunEndpoints
                 type: ProblemTypes.InsufficientRole,
                 statusCode: StatusCodes.Status403Forbidden);
         }
-        var project = await access.FindProjectAsync(tenant.OrganizationId!.Value, ProjectKeyOf(previous.ItemKey) ?? "", ct);
+        if (previous.Kind == RunKind.ProjectChat)
+        {
+            return Results.Problem(
+                title: "This run cannot be continued.",
+                detail: "A project chat question is not continued. Ask it again in the chat.",
+                type: ProblemTypes.Conflict,
+                statusCode: StatusCodes.Status409Conflict);
+        }
+        var project = await access.FindProjectAsync(tenant.OrganizationId!.Value, ProjectKeyOf(previous.ItemKey!) ?? "", ct);
         if (project is null)
         {
             return NotFound();
@@ -430,8 +441,10 @@ public static class RunEndpoints
             return NotFound();
         }
         var run = await db.Runs.AsNoTracking().SingleOrDefaultAsync(run => run.Id == runId, ct);
-        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is null)
+        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is null
+            || run.Kind == RunKind.ProjectChat && run.RequestedBy != userId)
         {
+            // Someone else's project chat: its log is their private conversation.
             return NotFound();
         }
         // The item is theirs to see; operating - and with it the raw agent output - is not.
@@ -733,7 +746,7 @@ public static class RunEndpoints
         Run run, IReadOnlyDictionary<string, UserSummary> people, bool includeDetails,
         RunDisplayNames? names = null) =>
         new(run.Id, run.ProjectId, run.ItemId, run.ItemKey, run.PlaybookId,
-            names?.Playbooks.GetValueOrDefault(run.PlaybookId),
+            run.Kind == RunKind.ProjectChat ? ProjectChat.PlaybookName : names?.Playbooks.GetValueOrDefault(run.PlaybookId),
             run.AgentUserId,
             people.TryGetValue(run.AgentUserId, out var agent) ? agent.DisplayName : null,
             run.RequestedBy, run.RuleId,
@@ -757,6 +770,16 @@ public static class RunEndpoints
             TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName,
             StageVerdict: PlaybookChain.VerdictName(run.StageVerdict), StageIndex: run.StageIndex,
             ReworkOfRunId: run.ReworkOfRunId, RequiredTags: run.RequiredTags);
+
+    /// <summary>
+    /// Someone else's project-chat run, as the run screens show it: that it ran, when and on
+    /// what, but not the question in its prompt or the answer in its summary - those are the
+    /// asker's private chat, which no other member or admin sees.
+    /// </summary>
+    internal static RunView PrivateTo(this RunView view, Run run, string? viewerId) =>
+        run.Kind == RunKind.ProjectChat && run.RequestedBy != viewerId
+            ? view with { OutcomeSummary = null, PromptSnapshot = null, FailureReason = null }
+            : view;
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

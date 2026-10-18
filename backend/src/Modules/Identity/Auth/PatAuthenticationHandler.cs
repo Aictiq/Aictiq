@@ -115,6 +115,8 @@ public sealed class PatAuthenticationHandler(
             // The claim every rendering surface reads to label an action as an agent's.
             new(PrincipalClaims.PrincipalType,
                 user.IsAgent ? PrincipalClaims.AgentPrincipalType : PrincipalClaims.UserPrincipalType),
+            // Which token, so a grant tied to one token - a project-chat run's - can be looked up.
+            new(PrincipalClaims.Token, token.Id.ToString()),
         };
 
         if (token.OrganizationId is { } organizationId)
