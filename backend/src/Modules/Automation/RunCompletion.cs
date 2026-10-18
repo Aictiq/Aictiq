@@ -21,12 +21,21 @@ namespace Aictiq.Modules.Automation;
 /// also settles its item's refinement here: one that ends without having submitted an answer
 /// leaves it <see cref="RefinementStatus.Failed"/>, so the person waiting on it can ask again
 /// instead of watching "Refining" forever.
+///
+/// A project-chat run has no item to tell, so it stages nothing: its answer - or why there is
+/// none - goes straight onto the person's chat message, in the same transaction.
 /// </summary>
 internal static class RunCompletion
 {
     public static async Task StageAsync(AutomationDbContext db, Run run, string outcome,
         string? summary, string? pullRequestUrl, string? failureReason, CancellationToken cancellationToken)
     {
+        if (run.Kind == RunKind.ProjectChat)
+        {
+            await AnswerChatAsync(db, run, outcome, summary, failureReason, cancellationToken);
+            return;
+        }
+
         var refine = run.Kind == RunKind.Refine;
         var chat = run.Kind == RunKind.Chat;
         var playbook = refine || chat ? null : await db.Playbooks.AsNoTracking()
@@ -46,7 +55,7 @@ internal static class RunCompletion
         var onSuccess = stage ? chain?.ReviewStateId : playbook?.OnSuccessStateId;
         var onFailure = stage ? chain?.ReviewStateId : playbook?.OnFailureStateId;
         db.Set<OutboxMessage>().Add(OutboxMessage.From(new RunFinished(
-            run.OrganizationId, run.ProjectId, run.ItemId, run.ItemKey, run.Id, run.AgentUserId,
+            run.OrganizationId, run.ProjectId, run.ItemId!.Value, run.ItemKey!, run.Id, run.AgentUserId,
             outcome, onSuccess, onFailure,
             summary, pullRequestUrl, failureReason)
         {
@@ -70,4 +79,38 @@ internal static class RunCompletion
             refinement.UpdatedAt = run.FinishedAt ?? DateTimeOffset.UtcNow;
         }
     }
+
+    /// <summary>
+    /// Settles the chat message the run was answering. A message cleared from the chat while
+    /// the run worked is simply gone, and the answer with it.
+    /// </summary>
+    private static async Task AnswerChatAsync(AutomationDbContext db, Run run, string outcome, string? summary,
+        string? failureReason, CancellationToken cancellationToken)
+    {
+        var message = await db.ProjectChatMessages.SingleOrDefaultAsync(
+            row => row.RunId == run.Id && row.Status == ProjectChatMessageStatus.Pending, cancellationToken);
+        if (message is null)
+        {
+            return;
+        }
+
+        var answer = string.IsNullOrWhiteSpace(summary) ? null : summary.Trim();
+        (message.Status, message.Error) = outcome switch
+        {
+            RunOutcomes.Succeeded when answer is not null => (ProjectChatMessageStatus.Answered, (string?)null),
+            RunOutcomes.Succeeded => (ProjectChatMessageStatus.Failed, "The agent finished without an answer. Try asking again."),
+            RunOutcomes.Cancelled => (ProjectChatMessageStatus.Cancelled, "The question was cancelled before the agent answered."),
+            RunOutcomes.TimedOut => (ProjectChatMessageStatus.TimedOut,
+                $"The agent did not answer within {run.MaxMinutes} minutes. Try a narrower question."),
+            _ => (ProjectChatMessageStatus.Failed, Truncate(failureReason is null
+                ? "The agent run failed. Try asking again."
+                : $"The agent run failed: {failureReason}. Try asking again.", ProjectChat.MaxErrorLength)),
+        };
+        message.Answer = message.Status == ProjectChatMessageStatus.Answered
+            ? Truncate(answer!, ProjectChat.MaxAnswerLength)
+            : null;
+        message.AnsweredAt = run.FinishedAt ?? DateTimeOffset.UtcNow;
+    }
+
+    private static string Truncate(string value, int length) => value.Length <= length ? value : value[..length];
 }

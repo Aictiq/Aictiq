@@ -624,7 +624,7 @@ async function setActive(agent: Agent, isActive: boolean) {
                   class="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left"
                   :class="mayOperateFactory ? 'cursor-pointer hover:bg-accent/60' : ''"
                   :type="mayOperateFactory ? 'button' : undefined"
-                  :aria-label="mayOperateFactory ? `Open the run of ${run.itemKey}` : undefined"
+                  :aria-label="mayOperateFactory ? `Open the run of ${run.itemKey ?? 'the project chat'}` : undefined"
                   @click="openRun(run)"
                 >
                   <span
@@ -633,7 +633,7 @@ async function setActive(agent: Agent, isActive: boolean) {
                   >
                     {{ runStatusLabel[run.status] }}
                   </span>
-                  <span class="shrink-0 font-mono">{{ run.itemKey }}</span>
+                  <span class="shrink-0 font-mono">{{ run.itemKey ?? 'Chat' }}</span>
                   <span class="text-muted-foreground min-w-0 flex-1 truncate">
                     {{ run.playbookName ?? '' }}
                   </span>
@@ -647,7 +647,7 @@ async function setActive(agent: Agent, isActive: boolean) {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="text-muted-foreground hover:text-foreground shrink-0"
-                  :aria-label="`Pull request for ${run.itemKey}`"
+                  :aria-label="`Pull request for ${run.itemKey ?? 'the project chat'}`"
                 >
                   <GitPullRequest class="size-3.5" aria-hidden="true" />
                 </a>

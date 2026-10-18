@@ -45,4 +45,7 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor httpContextAcces
 
     public Guid? OrganizationId =>
         Guid.TryParse(Principal?.FindFirstValue(PrincipalClaims.Organization), out var id) ? id : null;
+
+    public Guid? TokenId =>
+        Guid.TryParse(Principal?.FindFirstValue(PrincipalClaims.Token), out var id) ? id : null;
 }

@@ -19,7 +19,11 @@ internal static class RunMcpViews
     /// <summary>The tail <c>get_run</c> and the resource carry; the CLI pages the rest.</summary>
     public const int LogTail = 50;
 
-    public sealed record VisibleRun(Run Run, bool IsOperator);
+    /// <param name="Hidden">
+    /// Someone else's project-chat run: its answer and log are that person's private chat, so
+    /// neither is shown - not even to an operator.
+    /// </param>
+    public sealed record VisibleRun(Run Run, bool IsOperator, bool Hidden = false);
 
     public sealed record LogLine(int Seq, DateTimeOffset At, string Stream, string Text);
 
@@ -36,7 +40,8 @@ internal static class RunMcpViews
         {
             return null;
         }
-        return new VisibleRun(run, await access.CanOperateFactoryAsync(userId, organizationId, ct));
+        var hidden = run.Kind == RunKind.ProjectChat && run.RequestedBy != userId;
+        return new VisibleRun(run, !hidden && await access.CanOperateFactoryAsync(userId, organizationId, ct), hidden);
     }
 
     /// <summary>The wire spelling of a status - <c>timedOut</c>, never <c>6</c>.</summary>
@@ -57,8 +62,10 @@ internal static class RunMcpViews
     {
         var ids = run.RequestedBy is { } requestedBy ? new[] { run.AgentUserId, requestedBy } : [run.AgentUserId];
         var people = await directory.GetAsync(ids, ct);
-        var playbook = await db.Playbooks.AsNoTracking().Where(playbook => playbook.Id == run.PlaybookId)
-            .Select(playbook => playbook.Name).FirstOrDefaultAsync(ct);
+        var playbook = run.Kind == RunKind.ProjectChat
+            ? ProjectChat.PlaybookName
+            : await db.Playbooks.AsNoTracking().Where(playbook => playbook.Id == run.PlaybookId)
+                .Select(playbook => playbook.Name).FirstOrDefaultAsync(ct);
         var runner = run.RunnerId is { } runnerId
             ? await db.Runners.AsNoTracking().Where(runner => runner.Id == runnerId).Select(runner => runner.Name).FirstOrDefaultAsync(ct)
             : null;
@@ -91,7 +98,8 @@ internal static class RunMcpViews
             run.TriggerCommentId, run.FollowsUpRunId,
             run.QueuedAt, run.ScheduledFor, run.AssignedAt, run.StartedAt, run.FinishedAt, run.LastHeartbeatAt,
             cancelRequested = run.CancelRequestedAt is not null,
-            run.OutcomeSummary, run.PullRequestUrl, run.ExitCode, run.CostUsd, run.InputTokens, run.OutputTokens,
+            outcomeSummary = visible.Hidden ? null : run.OutcomeSummary,
+            run.PullRequestUrl, run.ExitCode, run.CostUsd, run.InputTokens, run.OutputTokens,
             failureReason = visible.IsOperator ? run.FailureReason : null,
             log,
             contentEnd = McpContentBoundary.End,

@@ -23,6 +23,9 @@ public static class PrincipalClaims
     /// <summary>One claim per personal-access-token scope.</summary>
     public const string Scope = "scp";
 
+    /// <summary>The personal access token's id, on a principal that authenticated with one.</summary>
+    public const string Token = "tok";
+
     /// <summary>
     /// The refresh-token family this access token belongs to - what <c>/me/sessions</c>
     /// calls a session. Only a JWT carries it: a personal access token is not a session,

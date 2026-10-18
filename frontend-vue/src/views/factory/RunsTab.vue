@@ -54,6 +54,7 @@ const runKinds: { value: RunKind; label: string }[] = [
   { value: 'implement', label: 'Implement' },
   { value: 'refine', label: 'Refine' },
   { value: 'chat', label: 'Chat' },
+  { value: 'projectChat', label: 'Project chat' },
   { value: 'stage', label: 'Stage' },
 ]
 
@@ -255,8 +256,8 @@ const neverRan = computed(() => !hasFilters.value && everRan.data.value?.totalCo
 const playbookOptions = computed(() => stats.data.value?.playbooks ?? [])
 const runnerOptions = computed(() => stats.data.value?.runners ?? [])
 
-const itemPath = (run: { itemKey: string }) =>
-  `/o/${slug.value}/p/${projectKeyOf(run.itemKey)}/items/${run.itemKey}`
+const itemPath = (itemKey: string) =>
+  `/o/${slug.value}/p/${projectKeyOf(itemKey)}/items/${itemKey}`
 
 /** "Rule: Start implementation" when a rule dispatched the run rather than a person. */
 const requesterLabel = runRequesterLabel
@@ -463,12 +464,20 @@ watch(
           >
             <RunStatusBadge :status="run.status" />
             <RouterLink
-              :to="itemPath(run)"
+              v-if="run.itemKey"
+              :to="itemPath(run.itemKey)"
               class="text-muted-foreground font-mono text-xs underline-offset-2 hover:underline"
               @click.stop
             >
               {{ run.itemKey }}
             </RouterLink>
+            <!-- A project chat run answers a question about the project, not an item. -->
+            <span
+              v-else
+              class="text-muted-foreground rounded border px-1.5 text-xs"
+              data-testid="run-row-project-chat"
+              >Chat</span
+            >
             <span class="min-w-0 truncate text-sm font-medium">{{ run.agentName ?? 'Agent' }}</span>
             <span class="text-muted-foreground min-w-0 truncate text-xs">
               {{ run.playbookName ?? '-' }}

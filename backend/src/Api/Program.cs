@@ -305,7 +305,14 @@ var mcp = builder.Services.AddMcpServer(options =>
             // name list. A newly added mutating tool consequently defaults to write scope.
             var readOnly = (context.MatchedPrimitive as ModelContextProtocol.Server.McpServerTool)
                 ?.ProtocolTool.Annotations?.ReadOnlyHint == true;
-            var requiredScope = context.Params.Name == "whoami" ? null : readOnly ? Scopes.Read : Scopes.Write;
+            // A project-chat run's token holds project-chat instead of write: create_item, which
+            // checks that grant itself, is the one write it may call.
+            var requiredScope = context.Params.Name == "whoami" ? null
+                : readOnly ? Scopes.Read
+                : context.Params.Name == "create_item"
+                    && services.GetRequiredService<ICurrentUser>().Scopes.Contains(Scopes.ProjectChat, StringComparer.Ordinal)
+                    ? Scopes.ProjectChat
+                    : Scopes.Write;
             await McpRequestGate.AuthorizeAsync(services, requiredScope, cancellationToken);
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();

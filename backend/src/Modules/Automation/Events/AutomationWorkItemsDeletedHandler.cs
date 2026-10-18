@@ -26,10 +26,10 @@ public sealed class AutomationWorkItemsDeletedHandler(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var liveTokens = await db.Runs
-            .Where(run => @event.ItemIds.Contains(run.ItemId) && run.AgentTokenId != null)
+            .Where(run => run.ItemId != null && @event.ItemIds.Contains(run.ItemId.Value) && run.AgentTokenId != null)
             .Select(run => new { run.AgentUserId, TokenId = run.AgentTokenId!.Value })
             .ToListAsync(cancellationToken);
-        await db.Runs.Where(run => @event.ItemIds.Contains(run.ItemId))
+        await db.Runs.Where(run => run.ItemId != null && @event.ItemIds.Contains(run.ItemId.Value))
             .ExecuteDeleteAsync(cancellationToken);
         // A rule's firing rows for these items outlive nothing the item took with it - the
         // item itself is gone, so its firing history no longer names anything real.

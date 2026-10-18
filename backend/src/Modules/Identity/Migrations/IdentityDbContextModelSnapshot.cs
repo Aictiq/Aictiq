@@ -18,7 +18,7 @@ namespace Aictiq.Modules.Identity.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("identity")
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -279,7 +279,7 @@ namespace Aictiq.Modules.Identity.Migrations
                         {
                             t.HasCheckConstraint("ck_personal_access_tokens_name_not_blank", "length(btrim(name)) > 0");
 
-                            t.HasCheckConstraint("ck_personal_access_tokens_scopes", "scopes <@ ARRAY['read','write','admin','mcp']::text[]");
+                            t.HasCheckConstraint("ck_personal_access_tokens_scopes", "scopes <@ ARRAY['read','write','admin','mcp','project-chat']::text[]");
                         });
                 });
 

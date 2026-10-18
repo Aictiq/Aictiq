@@ -167,6 +167,7 @@ export function canRetryRun(
     (run.status === 'failed' || run.status === 'timedOut') &&
     run.kind !== 'refine' &&
     run.kind !== 'chat' &&
+    run.kind !== 'projectChat' &&
     // A stage reviews an implement run's pull request; the server starts it, not a person.
     run.kind !== 'stage' &&
     !run.superseded &&

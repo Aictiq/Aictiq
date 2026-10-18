@@ -56,7 +56,8 @@ public sealed record RunnerLoadEntry(
     Guid RunnerId, int Running, int Queued, int Scheduled, DateTimeOffset? NextScheduledFor,
     IReadOnlyList<RunnerActiveRun> Active);
 
-public sealed record RunnerActiveRun(Guid Id, string ItemKey, string? PlaybookName, RunStatus Status, DateTimeOffset? StartedAt);
+/// <param name="ItemKey">The item the run works; null for a project-chat run.</param>
+public sealed record RunnerActiveRun(Guid Id, string? ItemKey, string? PlaybookName, RunStatus Status, DateTimeOffset? StartedAt);
 
 /// <param name="Secret">Returned exactly once. Aictiq keeps only its hash.</param>
 public sealed record RunnerIssuedView(RunnerView Runner, string Secret);

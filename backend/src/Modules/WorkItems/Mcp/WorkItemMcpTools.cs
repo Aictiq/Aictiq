@@ -33,7 +33,7 @@ public sealed record McpItem(string Key, string Title, WorkItemType Type, string
 [McpServerToolType]
 public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenant, ICurrentUser user,
     IProjectAccess access, TenancyDbContext tenancy, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration,
-    IPlanLimits planLimits, IOptions<AttachmentsOptions> attachmentOptions)
+    IPlanLimits planLimits, IOptions<AttachmentsOptions> attachmentOptions, IProjectChatGrants chatGrants)
 {
     private const int MaxMcpTextAttachmentBytes = 64 * 1024;
     private const int MaxCommentAttachments = 20;
@@ -268,9 +268,9 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     // available to clients; richer validation remains in the matching REST endpoint.
     [McpServerTool(Name = "create_item")]
     [Description("Creates a Bug in a project. Without team it lands on the project's default team; get_project lists the teams.")]
-    public Task<object?> CreateItem(string project, string title,
+    public Task<object?> CreateItem(string project, string title, string? description = null,
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it for the project's default team.")] string? team = null,
-        CancellationToken cancellationToken = default) => CreateBasic(project, title, null, team, cancellationToken);
+        CancellationToken cancellationToken = default) => CreateBasic(project, title, null, team, cancellationToken, description);
     [McpServerTool(Name = "create_subtask")]
     [Description("Creates a Task under a parent item. Without team it takes the parent's team, or the project's default team if the parent has none.")]
     public Task<object?> CreateSubtask(string parentKey, string title,
@@ -282,14 +282,16 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     [McpServerTool(Name = "link_item")] public async Task<bool> LinkItem(string key, string url, CancellationToken cancellationToken = default) { var item = await TryWritableAsync(key, cancellationToken); if (item is null || !LinkPreviewFetcher.TryParsePublicUrl(url, out var parsed, out _)) return false; var uri = parsed!; db.ItemLinks.Add(new ItemLink { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, Kind = ItemLinkKind.Url, Provider = "url", ExternalId = uri.AbsoluteUri, Url = uri.AbsoluteUri, CreatedAt = clock.GetUtcNow() }); try { await db.SaveChangesAsync(cancellationToken); return true; } catch (DbUpdateException) { return true; } }
     [McpServerTool(Name = "bulk_update")] public async Task<int> BulkUpdate(string project, IReadOnlyList<string> keys, string? assigneeId = null, CancellationToken cancellationToken = default) { var writable = await ProjectAsync(project, write: true, cancellationToken) ?? throw new McpAnswerException($"project '{project}' not found or no access"); if (!await WorkItemEndpoints.AssignableAsync(access, writable.Id, assigneeId, cancellationToken)) throw new McpAnswerException("assigneeId must be someone who can see this project"); var numbers = keys.Select(WorkItemEndpoints.ParseKey).Where(k => k.Number is not null && k.ProjectKey == writable.Key).Select(k => k.Number!.Value).Distinct().ToArray(); var rows = numbers.Length == 0 ? [] : await db.Items.Where(x => x.ProjectId == writable.Id && numbers.Contains(x.Number)).ToListAsync(cancellationToken); foreach (var row in rows) { row.AssigneeId = assigneeId; row.UpdatedAt = clock.GetUtcNow(); } await db.SaveChangesAsync(cancellationToken); return rows.Count; }
 
-    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, CancellationToken ct)
+    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, CancellationToken ct, string? description = null)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 500) throw new McpException("title must contain 1 to 500 characters.");
+        if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer.");
         // Creating needs the Member role on the project - resolved through Tenancy, never by
         // finding some item that happens to carry the key - and a parent needs to be writable.
         WorkItem? parent = parentKey is null ? null : await WritableAsync(parentKey, ct);
         var writable = parent is null ? await ProjectAsync(project, write: true, ct) : await access.FindProjectAsync(parent.OrganizationId, parent.ProjectKey, ct);
         if (writable is null) throw new McpAnswerException($"project '{project}' not found or no access");
+        var reporter = await ChatReporterAsync(writable, ct) ?? user.UserId!;
         var projectKey = writable.Key; Guid? projectId = writable.Id;
         // As REST does: a project nobody has created an item in yet may have no workflow.
         await WorkflowEndpoints.EnsureDefaultAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
@@ -300,7 +302,21 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
             : await TeamAsync(team, projectId.Value, projectKey, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await WorkItemEndpoints.NextNumberAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = user.UserId!, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new { item.Key, item.Version };
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = reporter, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; if (!string.IsNullOrWhiteSpace(description)) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new { item.Key, item.Version };
+    }
+    /// <summary>
+    /// For a project-chat run's token, which has no write scope: the person whose question the
+    /// run answers, who becomes the reporter, once the project is the run's own and they may
+    /// still create items in it. Null for any other caller, who reports as themselves.
+    /// </summary>
+    private async Task<string?> ChatReporterAsync(ProjectRef project, CancellationToken ct)
+    {
+        if (!user.Scopes.Contains(Scopes.ProjectChat, StringComparer.Ordinal) || ScopeRequirements.IsSatisfiedBy(user.Scopes, Scopes.Write)) return null;
+        var grant = user.TokenId is { } tokenId ? await chatGrants.FindAsync(tokenId, ct) : null;
+        if (grant is null || grant.ProjectId != project.Id
+            || await access.GetProjectRoleAsync(grant.RequestedBy, project.Id, ct) is not { } role || !role.Satisfies(ProjectRole.Member))
+            throw new McpAnswerException($"project '{project.Key}' not found or no access");
+        return grant.RequestedBy;
     }
     /// <summary>A named team, by key or id; it has to be one of this project's, checked as REST checks a teamId.</summary>
     private async Task<Guid> TeamAsync(string team, Guid projectId, string projectKey, CancellationToken ct)

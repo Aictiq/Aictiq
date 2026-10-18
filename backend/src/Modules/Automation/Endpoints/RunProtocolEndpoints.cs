@@ -26,7 +26,8 @@ public sealed record RunnerClaimRequest(IReadOnlyList<string>? Harnesses, int Sl
 
 /// <param name="AgentToken">The per-run agent token's secret. Exists once, like every token secret;
 /// it is revoked when the run finishes and dies with <paramref name="MaxMinutes"/> even if the runner never reports.</param>
-public sealed record RunnerRunClaimed(Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
+/// <param name="ItemId">The item the run works; null for a project-chat run, which has none.</param>
+public sealed record RunnerRunClaimed(Guid RunId, Guid? ItemId, string? ItemKey, Guid ProjectId, string ProjectKey,
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
     string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
@@ -110,8 +111,8 @@ public static partial class RunProtocolEndpoints
         RunnerClaimRequest? request, HttpContext http, AutomationDbContext db, ICurrentTenant tenant,
         IAgentIdentities agents, IOrganizationLookup organizations, IRepositoryCredentials repoCredentials,
         IRealtimePublisher realtime, IOrganizationBillingState billing, IOptions<AutomationOptions> options,
-        IOptions<EmailOptions> email, IUserDirectory directory, FleetMode fleetMode, TimeProvider clock,
-        ILoggerFactory loggers, CancellationToken ct)
+        IOptions<EmailOptions> email, IUserDirectory directory, FleetMode fleetMode, IProjectAccess access,
+        TimeProvider clock, ILoggerFactory loggers, CancellationToken ct)
     {
         var logger = loggers.CreateLogger(typeof(RunProtocolEndpoints));
         if (ClaimErrors(request) is { Count: > 0 } errors)
@@ -253,8 +254,11 @@ public static partial class RunProtocolEndpoints
             AgentTokenIssued? issued = null;
             try
             {
+                // A project chat may read and create items, nothing else: no write scope, and
+                // create_item checks the project-chat grant this token carries instead.
                 issued = await agents.IssueTokenAsync(run.AgentUserId, organizationId, $"run:{run.Id}",
-                    [Scopes.Read, Scopes.Write, Scopes.Mcp], now.AddMinutes(run.MaxMinutes + 10), ct);
+                    run.Kind == RunKind.ProjectChat ? [Scopes.Read, Scopes.Mcp, Scopes.ProjectChat] : [Scopes.Read, Scopes.Write, Scopes.Mcp],
+                    now.AddMinutes(run.MaxMinutes + 10), ct);
                 run.AgentTokenId = issued.Token.Id;
                 await db.SaveChangesAsync(ct);
             }
@@ -345,7 +349,9 @@ public static partial class RunProtocolEndpoints
 
             return (new RunnerRunClaimed(
                 run.Id, run.ItemId, run.ItemKey, run.ProjectId,
-                RunEndpoints.ProjectKeyOf(run.ItemKey) ?? run.ItemKey,
+                run.ItemKey is { } itemKey
+                    ? RunEndpoints.ProjectKeyOf(itemKey) ?? itemKey
+                    : (await access.GetProjectAsync(run.ProjectId, ct))?.Key ?? "",
                 organization?.Slug ?? "",
                 run.Harness, SecurityPreamble.Include(run.PromptSnapshot), run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,

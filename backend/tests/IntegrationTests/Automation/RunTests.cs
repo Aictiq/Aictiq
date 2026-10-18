@@ -715,7 +715,7 @@ public sealed record DispatchRunRequest(
     IReadOnlyList<string>? RequiredTags = null);
 
 public sealed record RunView(
-    Guid Id, Guid ProjectId, Guid ItemId, string ItemKey, Guid? PlaybookId,
+    Guid Id, Guid ProjectId, Guid? ItemId, string? ItemKey, Guid? PlaybookId,
     string? AgentId, string? AgentName, string? RequestedBy, Guid? RunnerId, string Status,
     string Harness, Guid? PlaybookRevisionId, int MaxMinutes,
     DateTimeOffset QueuedAt, DateTimeOffset? AssignedAt, DateTimeOffset? StartedAt,
@@ -750,8 +750,8 @@ public sealed record RunnerClaimRequest(string[] Harnesses, int Slots);
 public sealed record RunnerRunRepo(string Source, string? RepoFullName, string? CloneToken, string? LocalPathHint);
 
 public sealed record RunnerRunClaimed(
-    Guid RunId, Guid ItemId, string ItemKey, Guid ProjectId, string ProjectKey,
-    string OrganizationSlug, string Harness, string Prompt, Guid PlaybookRevisionId,
+    Guid RunId, Guid? ItemId, string? ItemKey, Guid ProjectId, string ProjectKey,
+    string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId,
     RunnerRunRepo Repo, string DefaultBranch, string BranchName, int MaxMinutes,
     string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
     RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null);

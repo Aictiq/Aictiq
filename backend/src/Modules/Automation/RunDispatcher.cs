@@ -344,6 +344,117 @@ public sealed class RunDispatcher(
     }
 
     /// <summary>
+    /// Asks the project's default agent <paramref name="question"/> in the person's private
+    /// project chat: a <see cref="RunKind.ProjectChat"/> run with no item, on an isolated clone of
+    /// the default branch, following the built-in <see cref="ProjectChat.PlaybookName"/> playbook.
+    /// It borrows only the harness and required tags of the project's default playbook, when there
+    /// is one. The chat's earlier answered pairs go along as context, and the oldest pairs past
+    /// <see cref="ProjectChat.MaxPairs"/> are dropped in the same transaction that saves the
+    /// question. One question per person is live at a time: <c>ux_runs_project_chat_live</c>.
+    /// The door has checked the person may operate the factory in a project they are a member of.
+    /// </summary>
+    public async Task<DispatchResult> DispatchProjectChatAsync(
+        string organizationSlug, ProjectRef project, string userId, string requesterName, string question, CancellationToken ct)
+    {
+        var organizationId = tenant.OrganizationId!.Value;
+        if (await billing.IsReadOnlyAsync(organizationId, ct))
+        {
+            return DispatchResult.ReadOnly();
+        }
+
+        var settings = await db.ProjectSettings.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
+        if (settings?.DefaultAgentId is not { } agentUserId)
+        {
+            return DispatchResult.Invalid("agentId", "This project has no default agent. Set one under Factory settings.");
+        }
+        var agent = await agents.FindAsync(agentUserId, ct);
+        if (agent is not { IsActive: true }
+            || !(await access.ListProjectMemberIdsAsync(project.Id, ct)).Contains(agentUserId, StringComparer.Ordinal))
+        {
+            return DispatchResult.Invalid("agentId", "The project's default agent must be an active agent that can see this project.");
+        }
+
+        if (await db.Runs.AnyAsync(run => run.ProjectId == project.Id && run.RequestedBy == userId
+                && run.Kind == RunKind.ProjectChat && run.Status < RunStatus.Succeeded, ct))
+        {
+            return DispatchResult.InProgress();
+        }
+
+        var playbook = await FindPlaybookAsync(null, project.Id, ct);
+        var history = await db.ProjectChatMessages.AsNoTracking()
+            .Where(row => row.ProjectId == project.Id && row.UserId == userId)
+            .OrderByDescending(row => row.AskedAt)
+            .Take(ProjectChat.MaxPairs - 1)
+            .ToListAsync(ct);
+        var turns = history.Where(row => row.Status == ProjectChatMessageStatus.Answered && row.Answer is not null)
+            .OrderBy(row => row.AskedAt)
+            .Select(row => new ProjectChatTurn(row.Question, row.Answer!))
+            .ToList();
+        var prompt = ProjectChatPromptComposer.Compose(
+            agent.DisplayName ?? agentUserId, organizationSlug,
+            project.Key, project.Name, requesterName, turns, question);
+
+        var now = clock.GetUtcNow();
+        var run = new Run
+        {
+            OrganizationId = organizationId,
+            ProjectId = project.Id,
+            PlaybookId = Guid.Empty,
+            Kind = RunKind.ProjectChat,
+            AgentUserId = agentUserId,
+            RequiredTags = (await fleetMode.GetAsync(organizationId, ct)).Active ? FleetTags.Union(playbook?.RequiredTags) : [],
+            RequestedBy = userId,
+            Harness = playbook?.Harness ?? ProjectChat.DefaultHarness,
+            PromptSnapshot = prompt,
+            BranchName = settings.DefaultBranch ?? "main",
+            WorkOnDefaultBranch = true,
+            MaxMinutes = ProjectChat.MaxMinutes,
+            QueuedAt = now,
+        };
+        db.Runs.Add(run);
+        db.ProjectChatMessages.Add(new ProjectChatMessage
+        {
+            OrganizationId = organizationId,
+            ProjectId = project.Id,
+            UserId = userId,
+            Question = question,
+            Status = ProjectChatMessageStatus.Pending,
+            RunId = run.Id,
+            AskedAt = now,
+        });
+
+        var kept = history.Select(row => row.Id).ToList();
+        await using (var transaction = await db.Database.BeginTransactionAsync(ct))
+        {
+            try
+            {
+                // The new question is the newest pair; everything older than the pairs kept with it goes.
+                await db.ProjectChatMessages
+                    .Where(row => row.ProjectId == project.Id && row.UserId == userId && !kept.Contains(row.Id))
+                    .ExecuteDeleteAsync(ct);
+                await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                // Asked twice at once: the partial unique index lets one through.
+                db.ChangeTracker.Clear();
+                return DispatchResult.InProgress();
+            }
+        }
+
+        await realtime.PublishAsync(project.Id, "run.changed", new
+        {
+            runId = run.Id, itemId = (Guid?)null, itemKey = (string?)null, status = "queued", agentId = agentUserId,
+            kind = KindName(run.Kind),
+        }, ct);
+        AutomationMetrics.Started.Add(1);
+
+        return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>
     /// Queues one follow-up playbook of a chain on the builder's pull request. The stage runs as
     /// the builder's agent with the stage playbook's page, harness and time limit, on the builder
     /// run's branch, and claims the item where it stands: the chain, not the stage, moves it.
@@ -362,7 +473,7 @@ public sealed class RunDispatcher(
             return DispatchResult.ReadOnly();
         }
 
-        var item = (await items.FindByKeysAsync(project.Id, [builder.ItemKey], ct)).FirstOrDefault();
+        var item = (await items.FindByKeysAsync(project.Id, [builder.ItemKey!], ct)).FirstOrDefault();
         if (item is null)
         {
             return DispatchResult.ItemNotFound();
@@ -512,8 +623,8 @@ public sealed class RunDispatcher(
         }
 
         var claim = previous.Kind is RunKind.Refine or RunKind.Chat or RunKind.Stage
-            ? await claims.ClaimInPlaceAsync(previous.ItemId, previous.AgentUserId, ct)
-            : await claims.ClaimForAsync(previous.ItemId, previous.AgentUserId, ct);
+            ? await claims.ClaimInPlaceAsync(previous.ItemId!.Value, previous.AgentUserId, ct)
+            : await claims.ClaimForAsync(previous.ItemId!.Value, previous.AgentUserId, ct);
         switch (claim.Outcome)
         {
             case WorkItemClaimOutcome.NotFound:
@@ -593,6 +704,10 @@ public sealed class RunDispatcher(
     /// </summary>
     public async Task<string?> ContinueRefusalAsync(Run run, CancellationToken ct)
     {
+        if (run.Kind == RunKind.ProjectChat)
+        {
+            return "A project chat question is not continued. Ask it again in the chat.";
+        }
         if (run.Status is not (RunStatus.Failed or RunStatus.TimedOut))
         {
             return "Only a failed or timed-out run can be continued.";
@@ -638,6 +753,7 @@ public sealed class RunDispatcher(
     {
         RunKind.Refine => "refine",
         RunKind.Chat => "chat",
+        RunKind.ProjectChat => "projectChat",
         RunKind.Stage => "stage",
         _ => "implement",
     };

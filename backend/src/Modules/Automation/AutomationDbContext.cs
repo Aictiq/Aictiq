@@ -36,6 +36,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<PlaybookStage> PlaybookStages => Set<PlaybookStage>();
     public DbSet<ChainStep> ChainSteps => Set<ChainStep>();
     public DbSet<FleetSettings> FleetSettings => Set<FleetSettings>();
+    public DbSet<ProjectChatMessage> ProjectChatMessages => Set<ProjectChatMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -205,6 +206,13 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             // runs ever" into "no two live runs": a finished run frees the item for the next.
             b.HasIndex(x => x.ItemId, "ux_runs_item_live").IsUnique().HasFilter("status < 3")
                 .HasDatabaseName("ux_runs_item_live");
+            // A project chat has no item to hold, so its one question in flight per person is
+            // its own index: a second ask while one is live collides here.
+            b.HasIndex(x => new { x.ProjectId, x.RequestedBy }, "ux_runs_project_chat_live").IsUnique()
+                .HasFilter("kind = 4 AND status < 3").HasDatabaseName("ux_runs_project_chat_live");
+            // create_item finds a project-chat token's grant by the token: only those runs are indexed.
+            b.HasIndex(x => x.AgentTokenId, "ix_runs_project_chat_token")
+                .HasFilter("kind = 4 AND agent_token_id IS NOT NULL").HasDatabaseName("ix_runs_project_chat_token");
             // A failed run is continued at most once; a second continue is a newer run's to make.
             b.HasIndex(x => x.ContinuesRunId, "ux_runs_continues").IsUnique()
                 .HasFilter("continues_run_id IS NOT NULL").HasDatabaseName("ux_runs_continues");
@@ -217,7 +225,10 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_runs_status", "status BETWEEN 0 AND 6");
-                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3)");
+                t.HasCheckConstraint("ck_runs_kind", "kind IN (0, 1, 2, 3, 4)");
+                // Only a project-chat run has no item, and it always has a person who asked.
+                t.HasCheckConstraint("ck_runs_item",
+                    "(item_id IS NULL) = (kind = 4) AND (item_id IS NULL) = (item_key IS NULL) AND (kind <> 4 OR requested_by IS NOT NULL)");
                 t.HasCheckConstraint("ck_runs_finished_status", "(finished_at IS NOT NULL) = (status >= 3)");
                 t.HasCheckConstraint("ck_runs_max_minutes", "max_minutes BETWEEN 5 AND 720");
                 t.HasCheckConstraint("ck_runs_auto_continues", "auto_continues BETWEEN 0 AND 2");
@@ -338,6 +349,26 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                     "cardinality(answered_questions) = cardinality(answers)");
                 t.HasCheckConstraint("ck_item_refinements_confirmed",
                     "(status = 4) = (confirmed_at IS NOT NULL)");
+            });
+        });
+
+        modelBuilder.Entity<ProjectChatMessage>(b =>
+        {
+            b.ToTable("project_chat_messages");
+            b.Property(x => x.Version).IsRowVersion();
+            b.Property(x => x.UserId).HasMaxLength(Run.MaxActorLength);
+            b.Property(x => x.Question).HasMaxLength(ProjectChat.MaxQuestionLength);
+            b.Property(x => x.Answer).HasMaxLength(ProjectChat.MaxAnswerLength);
+            b.Property(x => x.Error).HasMaxLength(ProjectChat.MaxErrorLength);
+            b.Property(x => x.Status).HasConversion<short>();
+            // A person's chat, oldest first: every read and the trim to the last pairs walk it.
+            b.HasIndex(x => new { x.ProjectId, x.UserId, x.AskedAt }).HasDatabaseName("ix_project_chat_messages_owner");
+            b.HasIndex(x => x.RunId).HasDatabaseName("ix_project_chat_messages_run");
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_project_chat_messages_status", "status BETWEEN 0 AND 4");
+                t.HasCheckConstraint("ck_project_chat_messages_question", "length(btrim(question)) BETWEEN 1 AND 4000");
+                t.HasCheckConstraint("ck_project_chat_messages_answered", "(status = 0) = (answered_at IS NULL)");
             });
         });
 

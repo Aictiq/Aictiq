@@ -227,13 +227,17 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Refining | `submit_refinement` (refine runs only) |
 | Follow-up playbooks | `submit_stage_verdict` (follow-up playbook runs only) |
 
+`create_item` takes an optional `description` (Markdown). It is also the one write a
+project-chat run's token may make. That token has no `write` scope, and the item it creates
+records the person who asked the chat as its reporter.
+
 There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq://run/{id}`
 resources, which render the same loop, the item's Markdown and a run's status and log tail
 for clients that use them.
 
 **Teams** decide which Backlog and Board an item shows on. `get_project` (and each entry of
 `list_projects`) lists the project's teams with `id`, `key`, `name` and `isDefault`.
-`create_item(project, title, team?)` and `create_subtask(parentKey, title, team?)` take a team
+`create_item(project, title, description?, team?)` and `create_subtask(parentKey, title, team?)` take a team
 key or id; a team that is not in the item's project is refused and nothing is created. Without
 `team`, `create_item` uses the project's default team, and `create_subtask` uses the parent's
 team, or the default team if the parent has none.

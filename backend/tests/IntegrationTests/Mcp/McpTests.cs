@@ -137,8 +137,11 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
 
         var unnamed = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "No team named" })).GetProperty("key").GetString()!;
         Assert.Equal(defaultTeam, (await GetItemAsync(unnamed)).TeamId);
-        var byKey = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By key", ["team"] = "plat" })).GetProperty("key").GetString()!;
-        Assert.Equal(platform.Id, (await GetItemAsync(byKey)).TeamId);
+        var byKey = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By key", ["description"] = "Owned by **Platform**.", ["team"] = "plat" })).GetProperty("key").GetString()!;
+        var described = await GetItemAsync(byKey);
+        Assert.Equal(platform.Id, described.TeamId);
+        Assert.Equal("Owned by **Platform**.", described.DescriptionMarkdown);
+        Assert.Contains("<strong>Platform</strong>", described.DescriptionHtml);
         var byId = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By id", ["team"] = platform.Id.ToString() })).GetProperty("key").GetString()!;
         Assert.Equal(platform.Id, (await GetItemAsync(byId)).TeamId);
 

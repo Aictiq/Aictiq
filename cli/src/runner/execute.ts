@@ -6,7 +6,7 @@ import type { RunnerClient } from './client.js'
 import { LogStreamer } from './log.js'
 import { spawnSupervised } from './process.js'
 import type { SupervisedProcess } from './process.js'
-import { RunFailure } from './types.js'
+import { RunFailure, runLabel } from './types.js'
 import type {
   ClaimedRun,
   FinishReport,
@@ -87,7 +87,7 @@ export async function executeRun(
     secrets: [run.agentToken, options.runnerToken, run.repo.cloneToken ?? ''],
     maxBatchBytes: options.hello.maxLogBatchBytes,
     flushIntervalMs: options.flushIntervalMs ?? 1000,
-    local: (message) => local(`${run.itemKey}: ${message}`),
+    local: (message) => local(`${runLabel(run)}: ${message}`),
   })
   const event = (line: string) => log.push('event', line)
 
@@ -133,12 +133,12 @@ export async function executeRun(
     } catch (error) {
       // 409: the run was cancelled or swept between the claim and now. Nothing to execute.
       if (error instanceof RunnerHttpError && (error.status === 409 || error.status === 404)) {
-        local(`${run.itemKey}: the instance closed run ${run.runId} before it started`)
+        local(`${runLabel(run)}: the instance closed run ${run.runId} before it started`)
         return null
       }
       throw error
     }
-    event(`Runner picked up ${run.itemKey} with ${run.harness}`)
+    event(`Runner picked up ${runLabel(run)} with ${run.harness}`)
 
     // The heartbeat starts before anything slow: the item's claim was taken at dispatch and
     // goes stale if nobody refreshes it while the workspace is being cloned.
@@ -162,16 +162,16 @@ export async function executeRun(
           return
         }
         if (error instanceof RunnerHttpError && (error.status === 409 || error.status === 404)) {
-          local(`${run.itemKey}: the instance closed run ${run.runId}; stopping it here`)
+          local(`${runLabel(run)}: the instance closed run ${run.runId}; stopping it here`)
           stop('closed')
           return
         }
-        local(`${run.itemKey}: run heartbeat failed: ${message(error)}`)
+        local(`${runLabel(run)}: run heartbeat failed: ${message(error)}`)
       }
       try {
         await client.itemHeartbeat(run)
       } catch (error) {
-        local(`${run.itemKey}: item heartbeat failed: ${message(error)}`)
+        local(`${runLabel(run)}: item heartbeat failed: ${message(error)}`)
       }
     }
     const tick = () => {
@@ -344,7 +344,7 @@ export async function executeRun(
       AICTIQ_URL: run.aictiqUrl ?? client.baseUrl,
       AICTIQ_TOKEN: run.agentToken,
       AICTIQ_ORG: run.organizationSlug,
-      AICTIQ_ITEM: run.itemKey,
+      ...(run.itemKey !== null ? { AICTIQ_ITEM: run.itemKey } : {}),
       AICTIQ_RUN: run.runId,
     }
 
@@ -464,7 +464,7 @@ export async function executeRun(
   })()
     .catch((error: unknown): FinishReport | null => {
       if (error instanceof RunnerHttpError && error.revoked) throw error
-      local(`${run.itemKey}: ${message(error)}`)
+      local(`${runLabel(run)}: ${message(error)}`)
       event(`Runner error: ${message(error)}`)
       return failed('runner-error', message(error))
     })
@@ -506,7 +506,7 @@ export async function executeRun(
     // `--keep-workspaces` keeps everything for inspection; nothing is swept behind it.
     if (options.workspace.keep) return
     await (options.prune ?? pruneKeptWorkspaces)(options.workspace.root, {
-      ...(filter.item
+      ...(filter.item?.itemKey
         ? {
             item: {
               organizationSlug: filter.item.organizationSlug,
@@ -570,7 +570,7 @@ async function sendFinish(
     try {
       await client.finish(run.runId, report)
       local(
-        `${run.itemKey}: ${report.outcome}${report.failureReason ? ` (${report.failureReason})` : ''}`,
+        `${runLabel(run)}: ${report.outcome}${report.failureReason ? ` (${report.failureReason})` : ''}`,
       )
       return true
     } catch (error) {
@@ -581,7 +581,7 @@ async function sendFinish(
       if (error instanceof RunnerHttpError && error.revoked) throw error
       // 409: already finished (a sweeper got there first). Anything else: the server's
       // sweepers will close the run; looping here would only hold the slot.
-      local(`${run.itemKey}: could not report the outcome: ${message(error)}`)
+      local(`${runLabel(run)}: could not report the outcome: ${message(error)}`)
       return false
     }
   }
