@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Prompts;
 using Aictiq.Modules.Tenancy.Domain;
+using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel;
@@ -208,6 +209,10 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
     public async Task the_run_token_creates_items_in_its_project_as_the_asker_and_writes_nothing_else()
     {
         var other = await CreateProjectAsync("Ops", "ops", ProjectVisibility.Organization);
+        var teamResponse = await Owner.PostAsJsonAsync($"{ProjectBase}/teams/",
+            new CreateTeamRequest("Platform", "PLAT"), ApiTestContext.Json, Ct);
+        teamResponse.EnsureSuccessStatusCode();
+        var team = (await teamResponse.Content.ReadFromJsonAsync<TeamView>(ApiTestContext.Json, Ct))!;
         var asked = await AskAsync(Owner, "Make tickets for the two redirect bugs");
         var runId = asked.Messages[0].RunId!.Value;
         using var runner = RunnerClient(Runner.Secret);
@@ -217,13 +222,14 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         {
             var created = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
             {
-                ["project"] = Project.Key, ["title"] = "Redirect drops the query string", ["description"] = "Seen on /login?next=",
+                ["project"] = Project.Key, ["title"] = "Redirect drops the query string", ["description"] = "Seen on /login?next=", ["team"] = team.Key,
             }, cancellationToken: Ct);
             Assert.True(created.IsError != true, Text(created));
             var key = Regex.Match(Text(created), $"{Project.Key}-\\d+", RegexOptions.IgnoreCase).Value;
             var item = await ItemAsync(key);
             Assert.Equal("Redirect drops the query string", item.Title);
             Assert.Equal("Seen on /login?next=", item.DescriptionMarkdown);
+            Assert.Equal(team.Id, item.TeamId);
             // Reported by the person who asked, not the agent.
             Assert.Equal(1, await ScalarAsync($"""
                 SELECT count(*) FROM work.items WHERE id = '{item.Id}' AND created_by = '{OwnerId}'
@@ -231,13 +237,13 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
 
             var elsewhere = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
             {
-                ["project"] = other.Key, ["title"] = "Not here",
+                ["project"] = other.Key, ["title"] = "Not here", ["team"] = team.Id.ToString(),
             }, cancellationToken: Ct);
             Assert.Contains("not found or no access", Text(elsewhere), StringComparison.Ordinal);
 
             var subtask = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
             {
-                ["parentKey"] = key, ["title"] = "Nope",
+                ["parentKey"] = key, ["title"] = "Nope", ["team"] = team.Key,
             }, cancellationToken: Ct);
             Assert.True(subtask.IsError);
             Assert.Contains("requires the 'write'", Text(subtask), StringComparison.Ordinal);
