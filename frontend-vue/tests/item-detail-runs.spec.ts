@@ -1,19 +1,17 @@
-import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { VueQueryPlugin } from '@tanstack/vue-query'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { describe, expect, it, vi, afterEach, beforeAll } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 
 import ItemDetail from '@/components/items/ItemDetail.vue'
+import ClaimBanner from '@/components/common/ClaimBanner.vue'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 
-/**
- * The line drawn on the item itself: anyone who can see the item can see its
- * runs - status, agent, pull request - but the Hand to agent button, the log link and the
- * Factory area belong to factory operators. The API holds that line regardless; this is
- * about the screen not offering what the server would refuse.
- */
+vi.mock('@/composables/useProjectRealtime', () => ({ useProjectRealtime: vi.fn() }))
+
+/** Item factory history and actions are visible only to factory operators. */
 const item = {
   id: 'i1',
   key: 'PROJ-1',
@@ -73,7 +71,7 @@ const runs = {
       ruleId: null as string | null,
       ruleName: null as string | null,
       runnerId: null,
-      runnerName: null,
+      runnerName: null as string | null,
       status: 'succeeded',
       harness: 'claude',
       playbookRevisionId: null,
@@ -143,11 +141,10 @@ const organization = {
   canOperateFactory: false,
 }
 
-beforeAll(() => {
-  setActivePinia(createPinia())
-})
+const wrappers: VueWrapper[] = []
+const clients: QueryClient[] = []
 
-async function mountDetail(canOperateFactory: boolean) {
+async function mountDetail(canOperateFactory?: boolean, modal = false) {
   stubFetch()
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -163,7 +160,8 @@ async function mountDetail(canOperateFactory: boolean) {
   await router.isReady()
 
   const organizations = useOrganizationsStore()
-  organizations.organizations = [{ ...organization, canOperateFactory }]
+  organizations.organizations =
+    canOperateFactory === undefined ? [] : [{ ...organization, canOperateFactory }]
   organizations.select('acme')
   useSessionStore().set({
     id: 'u1',
@@ -177,18 +175,23 @@ async function mountDetail(canOperateFactory: boolean) {
     timeZone: null,
   })
 
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
   const wrapper = mount(ItemDetail, {
-    props: { slug: 'acme', projectKey: 'PROJ', itemKey: 'PROJ-1' },
+    props: { slug: 'acme', projectKey: 'PROJ', itemKey: 'PROJ-1', modal },
     global: {
-      plugins: [pinia, router, VueQueryPlugin],
+      plugins: [pinia, router, [VueQueryPlugin, { queryClient: client }]],
       stubs: { RouterLink: RouterLinkStub, Teleport: true },
     },
   })
+  wrappers.push(wrapper)
   await flushPromises()
   return wrapper
 }
 
 afterEach(() => {
+  wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  clients.splice(0).forEach((client) => client.clear())
   vi.unstubAllGlobals()
   setActivePinia(createPinia())
 })
@@ -203,13 +206,67 @@ describe('ItemDetail runs and the operator line', () => {
     expect(wrapper.find('[data-testid="item-runs"]').text()).toContain('Open log')
   })
 
-  it('shows a stakeholder the runs but neither the Start button nor the log link', async () => {
-    const wrapper = await mountDetail(false)
+  it.each([false, true])('hides factory details and skips the runs request for a stakeholder (modal=%s)', async (modal) => {
+    const wrapper = await mountDetail(false, modal)
 
-    expect(wrapper.find('[data-testid="item-runs"]').text()).toContain('Succeeded')
-    expect(wrapper.find('[data-testid="item-runs"]').text()).toContain('Pull request')
+    expect(wrapper.find('[data-testid="item-runs"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="start-run-button"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Agent runs')
     expect(wrapper.text()).not.toContain('Open log')
+    expect(wrapper.text()).not.toContain('Copy resume command')
+    expect(wrapper.text()).toContain('Description')
+    expect(wrapper.text()).toContain('comments')
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/runs'))).toBe(false)
+  })
+
+  it('waits for factory permission to be resolved before requesting runs', async () => {
+    const wrapper = await mountDetail()
+    expect(wrapper.find('[data-testid="item-runs"]').exists()).toBe(false)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/runs'))).toBe(false)
+
+    useOrganizationsStore().organizations = [{ ...organization, canOperateFactory: true }]
+    await flushPromises()
+    expect(wrapper.get('[data-testid="item-runs"]').text()).toContain('Succeeded')
+  })
+
+  it('hides cached runs and stops refetching when factory permission is revoked', async () => {
+    const wrapper = await mountDetail(true)
+    expect(wrapper.get('[data-testid="item-runs"]').text()).toContain('Succeeded')
+    const runRequests = () =>
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/runs')).length
+    const before = runRequests()
+
+    useOrganizationsStore().organizations[0]!.canOperateFactory = false
+    await flushPromises()
+    await clients[0]!.invalidateQueries({ queryKey: ['acme', 'PROJ-1', 'runs'] })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="item-runs"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('claude-dev')
+    expect(runRequests()).toBe(before)
+  })
+
+  it('removes cached factory details from the claim banner when permission is revoked', async () => {
+    const original = runs.items[0]!
+    runs.items[0] = { ...original, status: 'running', runnerName: 'build-box' }
+    Object.assign(item, { claimedBy: original.agentId, claimedAt: new Date().toISOString() })
+    try {
+      const wrapper = await mountDetail(true)
+      const banner = wrapper.getComponent(ClaimBanner)
+      expect(banner.props('liveRun')?.runnerName).toBe('build-box')
+      expect(banner.find('[data-testid="claim-banner-log-link"]').exists()).toBe(true)
+
+      useOrganizationsStore().organizations[0]!.canOperateFactory = false
+      await flushPromises()
+
+      expect(banner.props('liveRun')).toBeNull()
+      expect(banner.props('runLogTo')).toBeNull()
+      expect(banner.text()).not.toContain('build-box')
+      expect(banner.find('[data-testid="claim-banner-log-link"]').exists()).toBe(false)
+    } finally {
+      runs.items[0] = original
+      Object.assign(item, { claimedBy: null, claimedAt: null })
+    }
   })
 
   it('links a run a comment asked for to that comment, and says when it was a follow-up', async () => {
@@ -220,7 +277,7 @@ describe('ItemDetail runs and the operator line', () => {
       followsUpRunId: 'r-0',
     } as typeof original
 
-    const wrapper = await mountDetail(false)
+    const wrapper = await mountDetail(true)
 
     const link = wrapper
       .findAllComponents(RouterLinkStub)
@@ -241,7 +298,7 @@ describe('ItemDetail runs and the operator line', () => {
     } as typeof original
     runs.items.push({ ...original, id: 'r-2', reworkOfRunId: 'r-1' } as typeof original)
 
-    const wrapper = await mountDetail(false)
+    const wrapper = await mountDetail(true)
     const section = wrapper.find('[data-testid="item-runs"]')
 
     expect(section.get('[data-testid="run-stage-badge"]').text()).toBe('Stage: Code review')
@@ -265,7 +322,7 @@ describe('ItemDetail runs and the operator line', () => {
     Object.assign(runs.items[0]!, original)
   })
 
-  it('lets a stakeholder copy the resume command of a recent run with a kept checkout', async () => {
+  it('lets an operator copy the resume command of a recent run with a kept checkout', async () => {
     const original = { ...runs.items[0]! }
     Object.assign(runs.items[0]!, {
       runnerName: 'build-box',
@@ -276,7 +333,7 @@ describe('ItemDetail runs and the operator line', () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
 
-    const wrapper = await mountDetail(false)
+    const wrapper = await mountDetail(true)
     const section = wrapper.find('[data-testid="item-runs"]')
     expect(section.find('[data-testid="run-resume-runner"]').text()).toBe('on build-box')
     const action = section.find('[data-testid="run-resume-command"]')

@@ -297,20 +297,21 @@ const holder = computed(() => {
 const releasing = ref(false)
 
 // ── Agent runs ──────────────────────────────────────────────────────────────────────
-// A run is the item's execution history: who dispatched it, what it left behind. The
-// section shows it to everyone who can see the item; the raw log and the run page are
-// the factory operators', and the API holds that line regardless of what the
-// client draws.
+// Factory details belong to operators, including the history shown on the item.
 const organizations = useOrganizationsStore()
+const canOperateFactory = computed(() => organizations.current?.canOperateFactory === true)
 const runsQuery = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey, 'runs']),
   queryFn: () => listItemRuns(props.slug, props.itemKey),
+  enabled: canOperateFactory,
 })
-const itemRuns = computed(() => runsQuery.data.value?.items ?? [])
+const itemRuns = computed(() =>
+  canOperateFactory.value ? runsQuery.data.value?.items ?? [] : [],
+)
 const liveRun = computed(() => itemRuns.value.find((entry) => isLiveRun(entry.status)) ?? null)
 const startRun = computed(() =>
   startRunButton({
-    canOperateFactory: organizations.current?.canOperateFactory ?? false,
+    canOperateFactory: canOperateFactory.value,
     projectRole: project.data.value?.role ?? null,
     projectArchived: project.data.value?.isArchived ?? false,
     claimedBy: claimedBy.value,
@@ -330,10 +331,8 @@ const startRunOpen = ref(false)
 const claimRun = computed(() =>
   liveRun.value && liveRun.value.agentId === claimedBy.value ? liveRun.value : null,
 )
-/** The log and the run page are the operators'; everyone else sees status and PR only. */
-const mayOpenRunLog = computed(() => organizations.current?.canOperateFactory === true)
 const claimRunLogTo = computed(() =>
-  mayOpenRunLog.value && claimRun.value
+  canOperateFactory.value && claimRun.value
     ? factoryRunPath(props.slug, claimRun.value.id)
     : null,
 )
@@ -1296,7 +1295,11 @@ function logged(updated: TimeTrackingItem) {
           </Button>
         </form>
       </section>
-      <section class="border-border mt-8 rounded-md border p-3" data-testid="item-runs">
+      <section
+        v-if="canOperateFactory"
+        class="border-border mt-8 rounded-md border p-3"
+        data-testid="item-runs"
+      >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="font-label">
@@ -1403,7 +1406,6 @@ function logged(updated: TimeTrackingItem) {
                 </button>
               </template>
               <RouterLink
-                v-if="mayOpenRunLog"
                 :to="factoryRunPath(props.slug, entry.id)"
                 class="text-primary text-xs underline underline-offset-2"
                 >Open log</RouterLink
@@ -2029,6 +2031,7 @@ function logged(updated: TimeTrackingItem) {
       </div>
     </aside>
     <StartRunDialog
+      v-if="canOperateFactory"
       v-model:open="startRunOpen"
       :slug="slug"
       :project-key="projectKey"
