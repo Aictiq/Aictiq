@@ -1,6 +1,6 @@
 {
   "name": "@aictiq/cli",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Command-line client for Aictiq, including an MCP stdio bridge for coding agents.",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -18,6 +18,8 @@
   },
   "files": [
     "dist",
+    "skills",
+    "scripts/postinstall.mjs",
     "README.md"
   ],
   "publishConfig": {
@@ -33,6 +35,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gen:api": "node scripts/generate-api-types.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

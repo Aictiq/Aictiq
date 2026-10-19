@@ -6,6 +6,7 @@ import { mcpCommand } from './commands/mcp.js'
 import { projectCommand } from './commands/project.js'
 import { runCommand } from './commands/run.js'
 import { runnerCommand } from './commands/runner.js'
+import { skillsCommand } from './commands/skills.js'
 import { sprintCommand } from './commands/sprint.js'
 import { wikiCommand } from './commands/wiki.js'
 import type { GlobalOptions } from './context.js'
@@ -34,6 +35,7 @@ export function createProgram(): Command {
   program.addCommand(runCommand(globals))
   program.addCommand(mcpCommand(globals))
   program.addCommand(runnerCommand(globals))
+  program.addCommand(skillsCommand(globals))
 
   return program
 }

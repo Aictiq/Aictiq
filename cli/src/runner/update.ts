@@ -268,7 +268,53 @@ export class SelfUpdater {
         `${installation.manager} finished, but ${installation.entry} reports ${after ?? 'no version'} instead of ${version}`,
       )
     }
+    await refreshSkill(installation, this.options.log, run)
     return { from: current, to: after }
+  }
+}
+
+/**
+ * Has the CLI now on disk install its own Aictiq skill: npm 12 and pnpm skip the package's
+ * `postinstall` by default, and the running (old) CLI only has the old skill. Only logged:
+ * a skill that cannot be written never fails an upgrade.
+ */
+export async function refreshSkill(
+  installation: Installation,
+  log: (message: string) => void,
+  run: RunCommand = runCommand,
+): Promise<void> {
+  const result = await run(
+    process.execPath,
+    [installation.entry, '--json', 'skills', 'install'],
+    RegistryTimeoutMs,
+  ).catch(() => null)
+  if (result?.code === 0) {
+    const results = parseSkillResults(result.stdout)
+    for (const entry of results) {
+      if (entry.status === 'created' || entry.status === 'updated')
+        log(`Aictiq skill ${entry.status}: ${entry.path}`)
+      if (entry.status === 'edited')
+        log(`Aictiq skill at ${entry.path} was edited by hand; left alone`)
+    }
+    return
+  }
+  const detail = result ? firstLines(result.stderr || result.stdout) : ''
+  log(
+    `Could not update the Aictiq skill${detail ? `: ${detail}` : ''}; run \`aictiq skills install\``,
+  )
+}
+
+function parseSkillResults(stdout: string): { status: string; path: string }[] {
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (r): r is { status: string; path: string } =>
+            typeof r?.status === 'string' && typeof r?.path === 'string',
+        )
+      : []
+  } catch {
+    return []
   }
 }
 
