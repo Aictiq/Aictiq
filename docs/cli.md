@@ -78,6 +78,7 @@ aictiq run logs <runId> [--follow]
 aictiq run cancel <runId>
 
 aictiq mcp                            # stdio MCP server, see below
+aictiq skills install [--force]       # the Aictiq skill for coding harnesses, see cli/README.md
 ```
 
 `--labels` takes either a plain list, which **replaces** the item's labels, or `+name` /

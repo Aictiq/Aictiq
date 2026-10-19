@@ -14,6 +14,29 @@ aictiq item claim ACME-123 && aictiq item comment ACME-123 -m "starting"
 aictiq run start ACME-124 --playbook implement && aictiq run logs <runId> --follow
 ```
 
+## The Aictiq skill for coding harnesses
+
+The CLI ships an `aictiq` skill (`skills/aictiq/SKILL.md`) that tells Claude Code, Codex,
+Cursor, Copilot and OpenCode how to reach Aictiq: the `aictiq` MCP tools first, the CLI as a
+fallback, and how to set up a missing connection. It is installed into the user-level skills
+folder of each harness whose config folder exists (`~/.claude/skills/aictiq/SKILL.md`,
+`~/.codex/skills/…`, `~/.cursor/skills/…`, `~/.copilot/skills/…`,
+`~/.config/opencode/skills/…`; `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and
+`XDG_CONFIG_HOME` are honoured), never into a repository.
+
+```bash
+aictiq skills install          # install or update it now, and list the paths
+aictiq skills install --force  # also replace a copy you edited by hand
+```
+
+It also installs on its own: from the `postinstall` script of `npm install -g` (when npm runs
+install scripts), on the first command a new CLI version runs (npm 12 and pnpm skip install
+scripts by default), and after a runner self-update. The file's last line records the CLI
+version and a hash of its content, so the CLI only replaces a copy it wrote and left
+unchanged; an edited copy is left alone with a warning. A failed install is only a warning
+and never fails `npm install`. Set `AICTIQ_NO_SKILL_INSTALL=1` to turn the automatic installs
+off.
+
 ## Runners
 
 `aictiq runner` turns a machine into a worker that executes agent runs dispatched from

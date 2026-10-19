@@ -171,6 +171,49 @@ describe('SelfUpdater', () => {
     expect(npm.calls.filter(([, verb]) => verb === 'install')).toHaveLength(1)
   })
 
+  it('has the upgraded CLI install its skill, and only logs a skill it cannot write', async () => {
+    const { root, packageRoot } = npmPrefix()
+    const npm = fakeNpm(root, { installed: '0.6.0' })
+    const logs: string[] = []
+    const skillPath = '/home/u/.claude/skills/aictiq/SKILL.md'
+    const run: RunCommand = async (command, args, timeoutMs) =>
+      args.includes('skills')
+        ? ok(JSON.stringify([{ harness: 'claude', path: skillPath, status: 'updated' }]))
+        : npm.run(command, args, timeoutMs)
+    const upgrade = new SelfUpdater({
+      current: '0.6.0',
+      packageRoot,
+      entry: '/usr/bin/aictiq',
+      log: (message) => logs.push(message),
+      run,
+      fetch: (async () => new Response('{}')) as unknown as typeof fetch,
+    })
+    await expect(upgrade.install('0.7.0')).resolves.toMatchObject({ to: '0.7.0' })
+    expect(logs).toContain(`Aictiq skill updated: ${skillPath}`)
+
+    const failing = fakeNpm(root, { installed: '0.6.0' })
+    const failLogs: string[] = []
+    await expect(
+      new SelfUpdater({
+        current: '0.6.0',
+        packageRoot,
+        entry: '/usr/bin/aictiq',
+        log: (message) => failLogs.push(message),
+        run: failing.run,
+      }).install('0.7.0'),
+    ).resolves.toMatchObject({ to: '0.7.0' })
+    expect(failing.calls).toContainEqual([
+      process.execPath,
+      '/usr/bin/aictiq',
+      '--json',
+      'skills',
+      'install',
+    ])
+    expect(failLogs.at(-1)).toMatch(
+      /Could not update the Aictiq skill: unexpected; run `aictiq skills install`/,
+    )
+  })
+
   it('skips the install when the version is already on disk', async () => {
     const { root, packageRoot } = npmPrefix()
     const npm = fakeNpm(root, { installed: '0.7.0' })
