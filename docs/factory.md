@@ -222,6 +222,16 @@ clones. `repoRoots` lists directories under which a project's path hint is used 
 reports it to every organization so the web UI can show this machine once; it authorizes
 nothing. `name` is a local label, and `attachments` applies to every profile.
 
+The runner reports each profile's mapped project keys and roots on every heartbeat, and Aictiq
+uses them to route runs. A run of a Runner-local project goes only to a runner that maps the
+project or whose roots hold its path hint; a runner on a CLI older than 0.16.0, which reports
+neither, still takes any run. When no online runner has the project, the run stays queued and
+its page says which project to map. A new mapping counts from the runner's next heartbeat. If a
+runner claims a run and then finds no clone (the mapped folder was deleted, say), it hands the
+run back and is not offered it again until its mappings or roots change. A continue run, or a
+run someone sent to that runner, has no other runner to go to, so it fails with
+`no-local-repository` instead.
+
 Prefer `aictiq runner register`, `aictiq runner map` and `aictiq runner root` (with `--org`
 once there are several profiles) over editing the file. Re-registering an organization after a
 secret rotation keeps that profile's mappings and roots. A file written before profiles existed,
@@ -792,7 +802,7 @@ they are provisioned with the per-run agent token and are never added to its bra
 | Symptom or failure | Meaning | Fix |
 | --- | --- | --- |
 | `harness-unavailable` | The run asked for Claude Code, Codex, OpenCode, Cursor, or GitHub Copilot, but that executable did not work on the runner's service `PATH`. | Run `aictiq runner status` as the service user. Install and sign in to the playbook's harness, regenerate the systemd unit from the correct shell, then start a new run. |
-| `no-local-repository` | A Runner-local project has no mapping on this runner and its path hint is not inside a repository root, or the path is not a git repository. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
+| `no-local-repository` | A continue run, or a run sent to one runner, found no mapping on that runner and a path hint outside its repository roots, or the path is not a git repository. Other runs go back to the queue for a runner that has the project. | Clone the repository under a root (`aictiq runner root /parent/dir`) and set the project's path hint to it, or run `aictiq runner map PROJECT_KEY /absolute/path`. Confirm with `aictiq runner status`. |
 | `no-remote` | A direct-delivery run's Runner-local checkout has no `origin` remote. The agent works in an isolated clone that is removed after the run, so without a remote its commits would be lost. | Add the remote (`git remote add origin <url>`) in the mapped checkout, or switch the playbook's **Delivery** to **Branch and pull request**, which works in a local-only repository. |
 | `runner-lost` | The assigned runner stopped heartbeating (five minutes by default). Aictiq failed the run, revoked its token, and released the item. | Check `journalctl --user -u aictiq-runner`, network access, disk space, and whether the runner secret was disabled or rotated. Restore the runner, then start a new run; the old run does not resume. |
 | `harness-rate-limited`, `harness-transient`, `harness-crashed` | The harness hit a rate limit, the model API was overloaded or unreachable, or the harness died on its own. | Aictiq continues the run automatically up to twice. After that, use **Continue** once the limit resets, or **Retry**. |

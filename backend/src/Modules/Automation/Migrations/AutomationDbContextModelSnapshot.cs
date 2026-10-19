@@ -836,6 +836,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("numeric(12,2)")
                         .HasColumnName("cost_usd");
 
+                    b.PrimitiveCollection<Guid[]>("DeclinedRunnerIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("declined_runner_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
                     b.Property<int?>("ExitCode")
                         .HasColumnType("integer")
                         .HasColumnName("exit_code");

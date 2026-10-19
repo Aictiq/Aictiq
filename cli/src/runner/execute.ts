@@ -24,7 +24,12 @@ import {
   resolveFollowUpTarget,
 } from './followup.js'
 import type { FollowUpTarget, PullRequestStateLookup } from './followup.js'
-import { pruneKeptWorkspaces, provisionWorkspace, reattachWorkspace } from './workspace.js'
+import {
+  locateLocalRepository,
+  pruneKeptWorkspaces,
+  provisionWorkspace,
+  reattachWorkspace,
+} from './workspace.js'
 import type { Workspace, WorkspaceOptions } from './workspace.js'
 
 const MaxSummary = 4000
@@ -44,6 +49,11 @@ export interface ExecuteOptions {
   /** Runner-side messages for the operator's terminal (never sent to the instance). */
   local?: (message: string) => void
   provision?: (run: ClaimedRun, options: WorkspaceOptions) => Promise<Workspace>
+  /**
+   * Finds a runner-local run's clone before the run starts. Defaults to the real lookup, unless
+   * `provision` is replaced: a stubbed workspace needs no clone.
+   */
+  locate?: (run: ClaimedRun, options: WorkspaceOptions) => Promise<unknown>
   /** Finds the workspace an earlier run kept, for a run that continues or follows it up. */
   reattach?: (run: ClaimedRun, prompt: string, options: WorkspaceOptions) => Promise<Workspace>
   /** Removes kept workspaces past their time or limit, or stale for `item`. */
@@ -64,6 +74,46 @@ export interface ExecuteOptions {
   heartbeatMs?: number
   graceMs?: number
   flushIntervalMs?: number
+}
+
+/**
+ * True when the run went back to the queue because this machine has no clone of its project,
+ * so a runner that has one takes it instead. A continue resumes a workspace this runner kept,
+ * and a run sent to this runner stays (the instance answers 409): both run, and fail with what
+ * is missing, as before.
+ */
+/**
+ * Runs this process handed back. One that comes back anyway (an instance too old to keep it
+ * from this runner) is run and fails as before, rather than going round in a loop.
+ */
+const handedBackRuns = new Set<string>()
+
+async function handedBack(
+  run: ClaimedRun,
+  options: ExecuteOptions,
+  local: (message: string) => void,
+): Promise<boolean> {
+  const locate =
+    options.locate ?? (options.provision ? undefined : locateLocalRepository)
+  if (!locate || run.repo.source !== 'local' || run.resume || handedBackRuns.has(run.runId))
+    return false
+  try {
+    await locate(run, options.workspace as WorkspaceOptions)
+    return false
+  } catch (error) {
+    if (!(error instanceof RunFailure) || error.reason !== 'no-local-repository') return false
+    try {
+      await options.client.release(run.runId, 'no-local-repository')
+    } catch (releaseError) {
+      if (releaseError instanceof RunnerHttpError && releaseError.revoked) throw releaseError
+      // 409: the run is this runner's alone; 404: it is gone. Either way it is not handed back.
+      return false
+    }
+    if (handedBackRuns.size >= 1000) handedBackRuns.clear()
+    handedBackRuns.add(run.runId)
+    local(`${runLabel(run)}: ${error.message} Handed run ${run.runId} back for a runner that has it.`)
+    return true
+  }
 }
 
 /**
@@ -128,6 +178,7 @@ export async function executeRun(
   let deadline: NodeJS.Timeout | undefined
 
   const report = await (async (): Promise<FinishReport | null> => {
+    if (await handedBack(run, options, local)) return null
     try {
       await client.started(run.runId)
     } catch (error) {

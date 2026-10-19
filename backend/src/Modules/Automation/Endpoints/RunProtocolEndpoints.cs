@@ -24,6 +24,13 @@ namespace Aictiq.Modules.Automation.Endpoints;
 
 public sealed record RunnerClaimRequest(IReadOnlyList<string>? Harnesses, int Slots = 1);
 
+/// <param name="Reason">
+/// Why the run goes back. <c>no-local-repository</c>: this runner found no clone of the project, so
+/// it is not offered the run again until its mappings or roots change. Absent: it only cannot take
+/// the run now (another organization holds the machine).
+/// </param>
+public sealed record RunnerReleaseRequest(string? Reason);
+
 /// <param name="AgentToken">The per-run agent token's secret. Exists once, like every token secret;
 /// it is revoked when the run finishes and dies with <paramref name="MaxMinutes"/> even if the runner never reports.</param>
 /// <param name="ItemId">The item the run works; null for a project-chat run, which has none.</param>
@@ -138,6 +145,13 @@ public static partial class RunProtocolEndpoints
         // Asked once per poll, not per second: a plan change takes effect on the runner's next poll.
         var fleet = await fleetMode.GetAsync(organizationId, ct);
         var deadline = clock.GetUtcNow() + TimeSpan.FromSeconds(options.Value.PollTimeoutSeconds);
+        // What this runner last reported it maps, read once per poll like fleet mode: a new
+        // mapping counts from the heartbeat after `aictiq runner map`, and the poll after that.
+        var reported = await db.Runners.AsNoTracking()
+            .Where(r => r.Id == runnerId)
+            .Select(r => r.Capabilities)
+            .SingleOrDefaultAsync(ct);
+        var servable = new Dictionary<Guid, bool>();
 
         while (true)
         {
@@ -192,10 +206,11 @@ public static partial class RunProtocolEndpoints
             // of waiting on this one. A scheduled run is nobody's until its time comes, and is
             // then ordered by that time rather than by when it was asked for. Raw SQL because
             // EF would bury the locking clause in a subquery, where Postgres ignores it.
+            var projects = await ServableProjectsAsync();
             Guid? claimedRunId;
             if (fleet.Active)
             {
-                claimedRunId = await FleetCandidateAsync(transaction);
+                claimedRunId = await FleetCandidateAsync(transaction, projects);
             }
             else
             {
@@ -214,6 +229,7 @@ public static partial class RunProtocolEndpoints
                 command.Parameters.AddWithValue("harnesses", harnesses);
                 command.Parameters.AddWithValue("runnerId", runnerId);
                 command.Parameters.AddWithValue("now", clock.GetUtcNow());
+                AddProjectParameters(command, projects);
                 claimedRunId = await command.ExecuteScalarAsync(ct) as Guid?;
             }
 
@@ -359,13 +375,42 @@ public static partial class RunProtocolEndpoints
                 options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp, SecurityPreamble.Text), false);
         }
 
+        // The projects this runner may claim runs of, among those with runs queued: every project
+        // cloned from GitHub, and each runner-local one it maps or whose path hint is under one of
+        // its roots. Null while it reports no mappings at all (an older CLI): every project, as before.
+        async Task<Guid[]?> ServableProjectsAsync()
+        {
+            if (!RunnerProjects.ReportsProjects(reported))
+            {
+                return null;
+            }
+
+            var queued = await db.Runs.AsNoTracking()
+                .Where(r => r.Status == RunStatus.Queued)
+                .Select(r => r.ProjectId)
+                .Distinct()
+                .ToListAsync(ct);
+            var unknown = queued.Where(id => !servable.ContainsKey(id)).ToArray();
+            if (unknown.Length > 0)
+            {
+                foreach (var (projectId, serving) in await ProjectServingAsync(unknown))
+                {
+                    servable[projectId] = serving.Serves(reported);
+                }
+            }
+            return queued.Where(id => servable[id]).ToArray();
+        }
+
+        Task<Dictionary<Guid, ProjectServing>> ProjectServingAsync(Guid[] projectIds) =>
+            ProjectServing.LoadAsync(db, access, projectIds, ct);
+
         // Fleet mode: the run must want only tags this runner has, the runner must have a free
         // slot of its maxParallel, and among the online runners that could take it the one with
         // the most free slots should. A busier runner leaves a run to a freer one for a few
         // seconds (FleetBalanceGraceSeconds), long enough for that runner's next poll; past
         // that it takes it anyway, so a runner that is online but not polling strands nothing.
         // A run sent to this runner is its own, whatever it requires.
-        async Task<Guid?> FleetCandidateAsync(IDbContextTransaction transaction)
+        async Task<Guid?> FleetCandidateAsync(IDbContextTransaction transaction, Guid[]? projects)
         {
             var now = clock.GetUtcNow();
             var runners = await db.Runners.AsNoTracking()
@@ -407,6 +452,7 @@ public static partial class RunProtocolEndpoints
                 command.Parameters.AddWithValue("runnerId", runnerId);
                 command.Parameters.AddWithValue("now", now);
                 command.Parameters.AddWithValue("tags", myTags);
+                AddProjectParameters(command, projects);
                 await using var reader = await command.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
@@ -420,12 +466,21 @@ public static partial class RunProtocolEndpoints
                 .Where(r => r.Id != runnerId && RunnerEndpoints.IsOnline(r, options.Value, now) && FreeSlots(r) > mine)
                 .Select(r => (Runner: r, Tags: FleetTags.Effective(r)))
                 .ToList();
+            // A freer runner only waits its turn on a run it could serve.
+            var candidateIds = candidates.Select(c => c.Id).ToArray();
+            var projectOf = await db.Runs.AsNoTracking()
+                .Where(r => candidateIds.Contains(r.Id))
+                .Select(r => new { r.Id, r.ProjectId, r.DeclinedRunnerIds })
+                .ToDictionaryAsync(r => r.Id, ct);
+            var serving = await ProjectServingAsync(projectOf.Values.Select(r => r.ProjectId).Distinct().ToArray());
             var grace = TimeSpan.FromSeconds(options.Value.FleetBalanceGraceSeconds);
             var eligible = candidates
                 .Where(run => run.Requested == runnerId
                     || now - run.Turn >= grace
                     || !others.Any(other => FleetTags.Satisfies(other.Tags, run.Required)
-                        && (other.Runner.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)))
+                        && (other.Runner.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)
+                        && !projectOf[run.Id].DeclinedRunnerIds.Contains(other.Runner.Id)
+                        && serving[projectOf[run.Id].ProjectId].Serves(other.Runner.Capabilities)))
                 .Select(run => run.Id)
                 .ToArray();
             if (eligible.Length == 0)
@@ -461,7 +516,19 @@ public static partial class RunProtocolEndpoints
                OR NOT EXISTS (SELECT 1 FROM automation.runners r
                               WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
           AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
+          AND NOT (@runnerId = ANY(declined_runner_ids))
+          AND (continues_run_id IS NOT NULL OR @anyProject OR project_id = ANY(@projects))
         """;
+
+    /// <summary>
+    /// Binds <see cref="ClaimablePredicate"/>'s project filter. A continue run is exempt: it goes
+    /// back to the machine that holds its workspace whatever that machine now maps.
+    /// </summary>
+    private static void AddProjectParameters(NpgsqlCommand command, Guid[]? projects)
+    {
+        command.Parameters.AddWithValue("anyProject", projects is null);
+        command.Parameters.AddWithValue("projects", projects ?? []);
+    }
 
     /// <summary>
     /// Hands a claimed run back before it starts. A machine that serves several
@@ -470,7 +537,7 @@ public static partial class RunProtocolEndpoints
     /// take now goes back to the head of the queue for the next poll, its token revoked.
     /// </summary>
     private static async Task<IResult> ReleaseAsync(
-        Guid runId, HttpContext http, AutomationDbContext db, IAgentIdentities agents,
+        Guid runId, RunnerReleaseRequest? request, HttpContext http, AutomationDbContext db, IAgentIdentities agents,
         IRealtimePublisher realtime, ILoggerFactory loggers, CancellationToken ct)
     {
         var runnerId = RunnerId(http);
@@ -480,11 +547,32 @@ public static partial class RunProtocolEndpoints
             return NotFound();
         }
 
+        var declined = request?.Reason switch
+        {
+            null => false,
+            NoLocalRepository => true,
+            _ => (bool?)null,
+        };
+        if (declined is null)
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]> { ["reason"] = [$"Leave it out, or {NoLocalRepository}."] },
+                type: ProblemTypes.Validation);
+        }
+        // No other runner may take a continue or a run a person sent here, so handing it back
+        // would leave it queued for good: the runner runs it and reports what it is missing.
+        if (declined == true && (run.ContinuesRunId is not null || run.RequestedRunnerId == runnerId))
+        {
+            return Conflict("This run was sent to this runner. Run it and report the failure.");
+        }
+
         // The predicate is the guard: only this runner's run, only while nothing has started.
         // A run that started, finished or was swept in between is a 409, never a requeue.
         var released = await db.Database.ExecuteSqlAsync($"""
             UPDATE automation.runs
-            SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL
+            SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL,
+                declined_runner_ids = CASE WHEN {declined == true} AND NOT ({runnerId} = ANY(declined_runner_ids))
+                    THEN array_append(declined_runner_ids, {runnerId}) ELSE declined_runner_ids END
             WHERE id = {runId} AND status = {(short)RunStatus.Assigned} AND runner_id = {runnerId}
             """, ct);
         if (released == 0)
@@ -512,6 +600,9 @@ public static partial class RunProtocolEndpoints
         }, ct);
         return Results.NoContent();
     }
+
+    /// <summary>The failure reason, and release reason, of a runner that has no clone of the run's project.</summary>
+    internal const string NoLocalRepository = "no-local-repository";
 
     private static async Task<IResult> StartedAsync(
         Guid runId, HttpContext http, AutomationDbContext db, IRealtimePublisher realtime,

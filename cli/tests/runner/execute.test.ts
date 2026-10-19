@@ -373,11 +373,45 @@ describe('executeRun', () => {
     expect(instance.to('/finish')).toHaveLength(0)
   })
 
-  it('fails with no-local-repository when the project has no mapped clone', async () => {
+  it('hands a run back, before starting it, when the project has no mapped clone', async () => {
     delete options.provision
     options.adapters.fake = scriptAdapter(`console.log('never')`)
-    const report = await executeRun(claimedRun(), options)
+    const run = claimedRun({ runId: '5d1c2e9a-0000-4000-8000-000000000001' })
+    expect(await executeRun(run, options)).toBeNull()
+    expect(instance.requests.map((r) => r.path)).toEqual([`/api/v1/runner/runs/${run.runId}/release`])
+    expect(instance.to('/release')[0]!.body).toEqual({ reason: 'no-local-repository' })
+
+    // The same run back again (an instance that does not keep it from this runner) fails as before.
+    const again = await executeRun(run, options)
+    expect(again).toMatchObject({ outcome: 'failed', failureReason: 'no-local-repository' })
+    expect(instance.to('/release')).toHaveLength(1)
+  })
+
+  it('fails with no-local-repository when the instance keeps the run on this runner', async () => {
+    delete options.provision
+    instance.on((r) =>
+      r.path.endsWith('/release') ? { status: 409, body: { detail: 'This run was sent to this runner.' } } : undefined,
+    )
+    options.adapters.fake = scriptAdapter(`console.log('never')`)
+    const run = claimedRun({ runId: '5d1c2e9a-0000-4000-8000-000000000002' })
+    const report = await executeRun(run, options)
     expect(report).toMatchObject({ outcome: 'failed', failureReason: 'no-local-repository' })
+    expect(instance.to('/started')).toHaveLength(1)
+  })
+
+  it('runs a continue without asking for its clone first', async () => {
+    delete options.provision
+    options.reattach = async () => {
+      throw new RunFailure('session-unavailable', 'gone')
+    }
+    options.adapters.fake = scriptAdapter(`console.log('never')`)
+    const run = claimedRun({
+      runId: '5d1c2e9a-0000-4000-8000-000000000003',
+      resume: { continuesRunId: '5d1c2e9a-0000-4000-8000-000000000004', sessionId: 's', failureReason: null },
+    })
+    await executeRun(run, options)
+    expect(instance.to('/release')).toHaveLength(0)
+    expect(instance.to('/started')).toHaveLength(1)
   })
 
   it('provisions a real worktree from a mapped local repository', async () => {

@@ -129,6 +129,12 @@ public sealed class Run : TenantEntity
     /// </summary>
     public string[] RequiredTags { get; init; } = [];
 
+    /// <summary>
+    /// Runners that claimed the run and handed it back because they found no local repository for
+    /// its project. None of them claims it again until its mappings or roots change.
+    /// </summary>
+    public Guid[] DeclinedRunnerIds { get; set; } = [];
+
     public RunStatus Status { get; set; }
 
     public required string Harness { get; init; }

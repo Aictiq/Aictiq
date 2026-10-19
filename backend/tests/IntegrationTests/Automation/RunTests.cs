@@ -733,7 +733,7 @@ public sealed record RunView(
     IReadOnlyList<string>? RequiredTags = null);
 
 public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
-    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null);
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null);
 
 public sealed record RunScaleUpView(DateTimeOffset? LastCalledAt, string? Error, int AfterSeconds);
 

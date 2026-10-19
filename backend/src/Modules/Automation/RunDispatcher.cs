@@ -227,7 +227,7 @@ public sealed class RunDispatcher(
 
         var runHarness = harness ?? playbook.Harness;
         if (previous is null && runnerId is { } requestedRunner
-            && await RunnerErrorAsync(requestedRunner, runHarness, ct) is { } runnerError)
+            && await RunnerErrorAsync(requestedRunner, runHarness, project.Key, settings, ct) is { } runnerError)
         {
             return DispatchResult.Invalid("runnerId", runnerError);
         }
@@ -486,7 +486,7 @@ public sealed class RunDispatcher(
             .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
         Guid? runnerId = settings?.RepoSource == ProjectRepositorySource.RunnerLocal
             && builder.RunnerId is { } builderRunner
-            && await RunnerErrorAsync(builderRunner, stage.Harness, ct) is null
+            && await RunnerErrorAsync(builderRunner, stage.Harness, project.Key, settings, ct) is null
                 ? builderRunner
                 : null;
 
@@ -713,7 +713,8 @@ public sealed class RunDispatcher(
     /// reported its capabilities - able to run the playbook's harness. Being offline is fine:
     /// the run waits for it, as a run waits today when no runner is online.
     /// </summary>
-    private async Task<string?> RunnerErrorAsync(Guid runnerId, string harness, CancellationToken ct)
+    private async Task<string?> RunnerErrorAsync(
+        Guid runnerId, string harness, string projectKey, ProjectFactorySettings? settings, CancellationToken ct)
     {
         var runner = await db.Runners.AsNoTracking()
             .SingleOrDefaultAsync(r => r.Id == runnerId && r.DeletedAt == null, ct);
@@ -729,6 +730,11 @@ public sealed class RunDispatcher(
             && !capabilities.Harnesses.Any(h => string.Equals(h.Name, harness, StringComparison.Ordinal)))
         {
             return $"{runner.Name} does not report {harness}, which this run uses.";
+        }
+        if (!new ProjectServing(projectKey, settings?.LocalPathHint, RunnerProjects.NeedsLocalRepository(settings))
+                .Serves(runner.Capabilities))
+        {
+            return $"{runner.Name} has no local repository for {projectKey}: map it there with `aictiq runner map {projectKey} <path>`, or choose another runner.";
         }
         return null;
     }

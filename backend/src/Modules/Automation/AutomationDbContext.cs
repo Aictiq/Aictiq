@@ -196,6 +196,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.StageVerdict).HasConversion<short?>();
             b.Property(x => x.StageFindings).HasMaxLength(Run.MaxStageFindingsLength);
             b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
+            b.Property(x => x.DeclinedRunnerIds).HasDefaultValueSql("'{}'::uuid[]");
 
             b.HasIndex(x => new { x.ProjectId, x.QueuedAt }).HasDatabaseName("ix_runs_project_queued");
             b.HasIndex(x => new { x.OrganizationId, x.Status, x.QueuedAt }).HasDatabaseName("ix_runs_organization_status_queued");

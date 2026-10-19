@@ -69,13 +69,18 @@ public sealed record RunView(
 /// <c>runner-free</c>: a runner that offers it has a free slot and should take it within seconds.
 /// <c>no-matching-runner</c> (fleet mode): no online runner offers the harness and has every one of
 /// <paramref name="RequiredTags"/>.
+/// <c>no-runner-for-project</c>: online runners offer the harness, but none has a local repository
+/// for <paramref name="ProjectKey"/> (mapped, or under a repository root).
+/// <c>runner-missing-project</c>: the run was sent to one runner, which has no local repository for
+/// <paramref name="ProjectKey"/>.
 /// </param>
 /// <param name="Runners">The runners the reason is about, by name.</param>
 /// <param name="Ahead">Runs queued before this one that the same runners may take first.</param>
 /// <param name="RequiredTags">Fleet mode: the tags the run requires, while they decide which runners count.</param>
 /// <param name="ScaleUp">Fleet mode: what the scale-from-zero webhook last did, when one is set up.</param>
+/// <param name="ProjectKey">The project a runner needs a local repository for, when that is what the run waits on.</param>
 public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
-    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null);
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null);
 
 /// <param name="LastCalledAt">When the webhook was last called, or null when it has not been yet.</param>
 /// <param name="Error">Why that call failed, or null when it succeeded.</param>
@@ -275,35 +280,45 @@ public static class RunEndpoints
         view = run.Kind == RunKind.ProjectChat ? view : await WithChainAsync(db, run, view, ct);
         // Runner names are the operators' business, like the runner list they come from.
         return Results.Ok(isOperator
-            ? view with { Waiting = await WaitingAsync(db, run, await fleetMode.GetAsync(tenant.OrganizationId!.Value, ct), options.Value, clock.GetUtcNow(), ct) }
+            ? view with { Waiting = await WaitingAsync(db, access, run, await fleetMode.GetAsync(tenant.OrganizationId!.Value, ct), options.Value, clock.GetUtcNow(), ct) }
             : view);
     }
 
     /// <summary>
     /// Why a queued run is not running yet, judged the way <c>/runner/runs/claim</c> hands runs
     /// out: the runner it was sent to while that one is enabled, otherwise any runner that offers
-    /// its harness - and, in fleet mode, has every tag it requires. Null for a run that is not
+    /// its harness, has a local repository for the project when it needs one, and has not handed
+    /// the run back - and, in fleet mode, has every tag it requires. Null for a run that is not
     /// queued, or still waits for its start time.
     /// </summary>
     private static async Task<RunWaitView?> WaitingAsync(
-        AutomationDbContext db, Run run, FleetState fleet, AutomationOptions options, DateTimeOffset now, CancellationToken ct)
+        AutomationDbContext db, IProjectAccess access, Run run, FleetState fleet, AutomationOptions options, DateTimeOffset now, CancellationToken ct)
     {
         if (run.Status != RunStatus.Queued || run.ScheduledFor > now)
         {
             return null;
         }
 
-        var runners = (await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null && r.DisabledAt == null)
+        var offering = (await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null && r.DisabledAt == null)
                 .ToListAsync(ct))
             .Where(r => r.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)
             .Where(r => !fleet.Active || FleetTags.Satisfies(FleetTags.Effective(r), run.RequiredTags))
             .ToList();
+        // A continue run goes back to its workspace whatever its runner now maps.
+        var project = (await ProjectServing.LoadAsync(db, access, [run.ProjectId], ct))[run.ProjectId];
+        bool Serves(Runner runner) => run.ContinuesRunId is not null
+            || (!run.DeclinedRunnerIds.Contains(runner.Id) && project.Serves(runner.Capabilities));
+        var runners = offering.Where(Serves).ToList();
         var requested = run.RequestedRunnerId is { } requestedId
             ? await db.Runners.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestedId, ct)
             : null;
         // A continue run never moves; any other run sent to a runner that is gone may go anywhere.
         var pinned = requested is not null && (requested.IsUsable || run.ContinuesRunId is not null);
         var candidates = pinned ? [requested!] : runners;
+        if (pinned && !Serves(requested!))
+        {
+            return new RunWaitView("runner-missing-project", [requested!.Name], 0, ProjectKey: project.Key);
+        }
 
         var taken = await db.Runs.AsNoTracking()
             .Where(r => (r.Status == RunStatus.Assigned || r.Status == RunStatus.Running) && r.RunnerId != null)
@@ -318,6 +333,7 @@ public static class RunEndpoints
         {
             (true, 0, _) => ("runner-offline", candidates),
             (true, _, 0) => ("runner-busy", online),
+            (false, 0, _) when offering.Any(r => RunnerEndpoints.IsOnline(r, options, now)) => ("no-runner-for-project", []),
             (false, 0, _) => (fleet.Active && run.RequiredTags.Length > 0 ? "no-matching-runner" : "no-runner", []),
             (false, _, 0) => ("runners-busy", online),
             _ => ("runner-free", free),
@@ -341,7 +357,8 @@ public static class RunEndpoints
         }
 
         return new RunWaitView(reason, named.Select(r => r.Name).Order(StringComparer.Ordinal).ToList(), ahead,
-            fleet.Active && run.RequiredTags.Length > 0 ? run.RequiredTags : null, scaleUp);
+            fleet.Active && run.RequiredTags.Length > 0 ? run.RequiredTags : null, scaleUp,
+            reason == "no-runner-for-project" ? project.Key : null);
     }
 
     /// <summary>
