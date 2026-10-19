@@ -254,6 +254,10 @@ export function runWaitingMessage(
     }
     case 'runners-busy':
       return `Every runner that offers ${run.harness} is busy (${names}). It starts when one of them finishes.${ahead}${scale}`
+    case 'no-runner-for-project':
+      return `Waiting for a runner that has project ${waiting.projectKey} mapped. No online runner that offers ${run.harness} has a local repository for it: run aictiq runner map ${waiting.projectKey} <path> on one, or add a repository root that holds the project's path hint. It starts after that runner's next heartbeat.`
+    case 'runner-missing-project':
+      return `Waiting for ${names}, which has no local repository for project ${waiting.projectKey}. Run aictiq runner map ${waiting.projectKey} <path> on it.`
     case 'runner-free':
       return `${names} ${waiting.runners.length === 1 ? 'has' : 'have'} a free slot and should pick it up within seconds.${ahead} If nothing happens, the machine may be finishing another organization's run first.`
   }

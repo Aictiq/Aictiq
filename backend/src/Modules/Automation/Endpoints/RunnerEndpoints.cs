@@ -466,6 +466,9 @@ public static partial class RunnerEndpoints
 
         var now = clock.GetUtcNow();
         var capabilities = Serialize(request?.Capabilities);
+        // A runner that starts again may have its clones back: every run it handed back for want
+        // of one is offered to it again.
+        await ForgetDeclinesAsync(db, runnerId, capabilities, onlyIfMappingsChanged: false, cancellationToken);
         // Unthrottled: a hello is rare, and it is the moment the roster should turn green.
         // `aictiq runner status` says hello from a terminal without knowing how the running
         // runner was started, so a hello that leaves `service` out keeps the last one reported.
@@ -503,6 +506,7 @@ public static partial class RunnerEndpoints
         var now = clock.GetUtcNow();
         var cutoff = now - options.Value.LastSeenThrottle;
         var capabilities = Serialize(request?.Capabilities);
+        await ForgetDeclinesAsync(db, runnerId, capabilities, onlyIfMappingsChanged: true, cancellationToken);
         // The throttle is in the WHERE clause, not an if: concurrent heartbeats from one runner
         // must not each decide to write. Changed capabilities always get through.
         await db.Database.ExecuteSqlAsync($"""
@@ -516,6 +520,25 @@ public static partial class RunnerEndpoints
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Offers this runner again the queued runs it handed back for want of a local repository
+    /// (<see cref="Run.DeclinedRunnerIds"/>). A heartbeat does it only when the runner reports
+    /// mappings or roots other than the stored ones, read before the heartbeat overwrites them.
+    /// </summary>
+    private static Task<int> ForgetDeclinesAsync(
+        AutomationDbContext db, Guid runnerId, string? capabilities, bool onlyIfMappingsChanged,
+        CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlAsync($"""
+            UPDATE automation.runs
+            SET declined_runner_ids = array_remove(declined_runner_ids, {runnerId})
+            WHERE status = {(short)RunStatus.Queued} AND {runnerId} = ANY(declined_runner_ids)
+              AND (NOT {onlyIfMappingsChanged} OR EXISTS (
+                  SELECT 1 FROM automation.runners r
+                  WHERE r.id = {runnerId} AND {capabilities}::jsonb IS NOT NULL
+                    AND (r.capabilities -> 'workspaces' IS DISTINCT FROM {capabilities}::jsonb -> 'workspaces'
+                         OR r.capabilities -> 'repoRoots' IS DISTINCT FROM {capabilities}::jsonb -> 'repoRoots')))
+            """, cancellationToken);
 
     internal static RunnerView ToView(
         Runner runner, IReadOnlyDictionary<string, UserSummary> people, AutomationOptions options, DateTimeOffset now) =>

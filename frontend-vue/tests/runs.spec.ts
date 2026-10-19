@@ -376,6 +376,24 @@ describe('lib/runs', () => {
       expect(runWaitingMessage(queued)).toBe('Waiting for a runner that offers codex…')
     })
 
+    it('names the project when no runner has a local repository for it', () => {
+      const queued = { status: 'queued' as const, harness: 'claude' as const }
+      expect(
+        runWaitingMessage({
+          ...queued,
+          waiting: { reason: 'no-runner-for-project', runners: [], ahead: 0, projectKey: 'IDA' },
+        }),
+      ).toMatch(/^Waiting for a runner that has project IDA mapped\. .*aictiq runner map IDA <path>/)
+      expect(
+        runWaitingMessage({
+          ...queued,
+          waiting: { reason: 'runner-missing-project', runners: ['hetzner'], ahead: 0, projectKey: 'IDA' },
+        }),
+      ).toBe(
+        'Waiting for hetzner, which has no local repository for project IDA. Run aictiq runner map IDA <path> on it.',
+      )
+    })
+
     it('names the required tags when no runner in the fleet has them all', () => {
       const queued = { status: 'queued' as const, harness: 'claude' as const }
       const waiting = (extra: Partial<NonNullable<Run['waiting']>> = {}) =>

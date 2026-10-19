@@ -23,7 +23,9 @@ export type RunStatus =
  * What a queued run waits for. `runner-offline`/`runner-busy`: the one runner it was sent to;
  * `no-runner`: no online runner offers its harness; `no-matching-runner` (fleet mode): none
  * offers its harness and has every required tag; `runners-busy`: every one that does has
- * every slot taken; `runner-free`: one has a free slot and should take it within seconds.
+ * every slot taken; `runner-free`: one has a free slot and should take it within seconds;
+ * `no-runner-for-project`: runners offer its harness, but none has a local repository for
+ * `projectKey`; `runner-missing-project`: the one runner it was sent to has none.
  */
 export interface RunWaiting {
   reason:
@@ -33,6 +35,8 @@ export interface RunWaiting {
     | 'no-matching-runner'
     | 'runners-busy'
     | 'runner-free'
+    | 'no-runner-for-project'
+    | 'runner-missing-project'
   runners: string[]
   /** Runs queued before this one that the same runners may take first. */
   ahead: number
@@ -40,6 +44,8 @@ export interface RunWaiting {
   requiredTags?: string[] | null
   /** Fleet mode: what scale from zero did about it; present when a scale webhook is set. */
   scaleUp?: RunScaleUp | null
+  /** The project a runner needs a local repository for, when that is what the run waits on. */
+  projectKey?: string | null
 }
 
 /** The scale webhook, as far as one waiting run is concerned. */

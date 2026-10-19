@@ -471,7 +471,7 @@ function formatBytes(value: number): string {
  */
 function resolveLocalRepository(
   run: ClaimedRun,
-  options: WorkspaceOptions,
+  options: Pick<WorkspaceOptions, 'repositories' | 'repoRoots'>,
 ): { path: string; root: string | null } {
   const mapped = options.repositories[run.projectKey]
   if (mapped !== undefined) return { path: mapped, root: null }
@@ -528,12 +528,16 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function provisionLocal(
+/**
+ * The top level of the clone a runner-local run works from, or a `no-local-repository`
+ * RunFailure. The runner asks before it starts the run, so a machine without the clone hands
+ * the run back for another runner instead of failing it.
+ */
+export async function locateLocalRepository(
   run: ClaimedRun,
-  checkout: string,
-  options: WorkspaceOptions,
-  env: NodeJS.ProcessEnv,
-): Promise<{ source: string | null; createdBranch: boolean }> {
+  options: Pick<WorkspaceOptions, 'repositories' | 'repoRoots' | 'signal'>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ repo: string; origin: string }> {
   const { path: mapped, root } = resolveLocalRepository(run, options)
   const origin = root === null ? 'mapped for project' : 'the path hint for project'
 
@@ -556,7 +560,16 @@ async function provisionLocal(
       `${mapped}, the path hint for project ${run.projectKey}, is not a git repository under ${root}.`,
     )
   }
-  const repo = toplevel.trim()
+  return { repo: toplevel.trim(), origin }
+}
+
+async function provisionLocal(
+  run: ClaimedRun,
+  checkout: string,
+  options: WorkspaceOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<{ source: string | null; createdBranch: boolean }> {
+  const { repo, origin } = await locateLocalRepository(run, options, env)
   const call = (args: string[]) => gitStep(args, { cwd: repo, env, signal: options.signal })
 
   const hasOrigin = await git(['remote', 'get-url', 'origin'], {

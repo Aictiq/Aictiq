@@ -94,9 +94,13 @@ export class RunnerClient {
     return (await this.send<ClaimedRun>('/runner/runs/claim', { harnesses, slots }, signal)) ?? null
   }
 
-  /** Hands a claimed run back before it starts; the instance queues it again and revokes its token. */
-  async release(runId: string): Promise<void> {
-    await this.send(`/runner/runs/${runId}/release`)
+  /**
+   * Hands a claimed run back before it starts; the instance queues it again and revokes its token.
+   * With `no-local-repository` the instance stops offering it to this runner until the runner's
+   * mappings or roots change, and answers 409 for a run no other runner may take.
+   */
+  async release(runId: string, reason?: 'no-local-repository'): Promise<void> {
+    await this.send(`/runner/runs/${runId}/release`, reason ? { reason } : undefined)
   }
 
   async started(runId: string): Promise<void> {
