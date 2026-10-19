@@ -1,7 +1,7 @@
 namespace Aictiq.SharedKernel.Contracts;
 
 /// <summary>Just enough of an organization to route a request to it.</summary>
-public sealed record OrganizationRef(Guid Id, string Slug, string Name);
+public sealed record OrganizationRef(Guid Id, string Slug, string Name, string? DefaultAgentId = null);
 
 /// <summary>
 /// Implemented by the Tenancy module. Lives here because the tenant middleware

@@ -2585,6 +2585,12 @@
               "null",
               "boolean"
             ]
+          },
+          "isDefault": {
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         },
         "required": [

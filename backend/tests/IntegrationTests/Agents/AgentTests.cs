@@ -36,7 +36,7 @@ public sealed class AgentTests(PostgresFixture postgres, GarageFixture garage) :
     public async ValueTask InitializeAsync()
     {
         var ct = TestContext.Current.CancellationToken;
-        _context = await ApiTestContext.CreateAsync(postgres, garage, "agents");
+        _context = await ApiTestContext.CreateAsync(postgres, garage, "agents", appRole: true);
 
         var alice = await _context.RegisterAsync("alice@test.local", "Alice", "Anderson");
         _owner = _context.ClientFor(alice);
@@ -63,6 +63,74 @@ public sealed class AgentTests(PostgresFixture postgres, GarageFixture garage) :
         _admin.Dispose();
         _member.Dispose();
         await _context.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task managers_can_set_switch_and_clear_one_organization_default()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var first = await CreateAsync(_owner, "first", ct: ct);
+        var second = await CreateAsync(_owner, "second", ct: ct);
+        var url = $"/api/v1/orgs/{Acme}/agents/";
+        Assert.False(first.IsDefault);
+        (await _admin.PatchAsJsonAsync(url + first.UserId, new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        Assert.True((await ListAsync(_owner, ct)).Single(a => a.UserId == first.UserId).IsDefault);
+        var organization = await _owner.GetFromJsonAsync<OrganizationView>($"/api/v1/orgs/{Acme}", ApiTestContext.Json, ct);
+        Assert.Equal(first.UserId, organization!.DefaultAgentId);
+
+        (await _owner.PatchAsJsonAsync(url + second.UserId, new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        Assert.Equal(second.UserId, Assert.Single(await ListAsync(_owner, ct), a => a.IsDefault).UserId);
+        (await _owner.PatchAsJsonAsync(url + first.UserId, new UpdateAgentRequest(null, null, false), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        Assert.Equal(second.UserId, Assert.Single(await ListAsync(_owner, ct), a => a.IsDefault).UserId);
+        (await _owner.PatchAsJsonAsync(url + second.UserId, new UpdateAgentRequest(null, null, false), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        Assert.DoesNotContain(await ListAsync(_owner, ct), a => a.IsDefault);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task disabling_the_default_clears_it_and_it_cannot_be_promoted_while_disabled(bool delete)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var agent = await CreateAsync(_owner, "default-agent", ct: ct);
+        var url = $"/api/v1/orgs/{Acme}/agents/{agent.UserId}";
+        (await _owner.PatchAsJsonAsync(url, new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        var disable = delete
+            ? await _owner.DeleteAsync(url, ct)
+            : await _owner.PatchAsJsonAsync(url, new UpdateAgentRequest(null, false), ApiTestContext.Json, ct);
+        disable.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(await ListAsync(_owner, ct), a => a.IsDefault);
+        Assert.Null((await _owner.GetFromJsonAsync<OrganizationView>($"/api/v1/orgs/{Acme}", ApiTestContext.Json, ct))!.DefaultAgentId);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await _owner.PatchAsJsonAsync(url, new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task promoting_and_disabling_concurrently_cannot_leave_an_inactive_default()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var agent = await CreateAsync(_owner, "racing-agent", ct: ct);
+        var url = $"/api/v1/orgs/{Acme}/agents/{agent.UserId}";
+        var promotion = _owner.PatchAsJsonAsync(url, new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct);
+        var disable = _admin.DeleteAsync(url, ct);
+        await Task.WhenAll(promotion, disable);
+        (await disable).EnsureSuccessStatusCode();
+        Assert.Contains((await promotion).StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest });
+        Assert.False((await ListAsync(_owner, ct)).Single(a => a.UserId == agent.UserId).IsActive);
+        Assert.DoesNotContain(await ListAsync(_owner, ct), a => a.IsDefault);
+    }
+
+    [Fact]
+    public async Task members_cannot_set_a_default_and_agents_from_another_organization_are_not_found()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var agent = await CreateAsync(_owner, "builder", ct: ct);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _member.PatchAsJsonAsync(
+            $"/api/v1/orgs/{Acme}/agents/{agent.UserId}", new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).StatusCode);
+        (await _owner.PostAsJsonAsync("/api/v1/orgs", new CreateOrganizationRequest("Elsewhere", "elsewhere", null, null), ApiTestContext.Json, ct)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NotFound, (await _owner.PatchAsJsonAsync(
+            $"/api/v1/orgs/elsewhere/agents/{agent.UserId}", new UpdateAgentRequest(null, null, true), ApiTestContext.Json, ct)).StatusCode);
+        Assert.DoesNotContain(await ListAsync(_owner, ct), a => a.IsDefault);
     }
 
     // -------------------------------------------------------------------------- creating

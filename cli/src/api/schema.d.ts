@@ -4539,6 +4539,7 @@ export interface components {
         UpdateAgentRequest: {
             displayName: null | string;
             isActive: null | boolean;
+            isDefault?: null | boolean;
         };
         UpdateBoardRequest: {
             cardFields: null | string[];

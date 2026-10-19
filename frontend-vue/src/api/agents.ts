@@ -21,6 +21,8 @@ export interface Agent {
   ownerName: string
   role: OrgRole
   isActive: boolean
+  /** Organization fallback when a project has no default agent. */
+  isDefault: boolean
   createdAt: string
   /** When one of its tokens was last used, which is what "active" means for an agent. */
   lastActiveAt: string | null
@@ -56,7 +58,7 @@ export const createAgent = (slug: string, body: CreateAgentBody) =>
 export const updateAgent = (
   slug: string,
   agentId: string,
-  body: { displayName?: string; isActive?: boolean },
+  body: { displayName?: string; isActive?: boolean; isDefault?: boolean },
 ) => apiFetch<Agent>(`/orgs/${slug}/agents/${agentId}`, { method: 'PATCH', body })
 
 /** Disables it and revokes every token. Never a delete - its id is in everything it touched. */

@@ -5,6 +5,8 @@ import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { getFactorySettings, type FactorySettings } from '@/api/playbooks'
+import { listAgents, type Agent } from '@/api/agents'
+import { listProjectMembers, type ProjectMember } from '@/api/projects'
 import RefinementSettingsForm from '@/components/settings/RefinementSettingsForm.vue'
 import { projectScopeKey } from '@/composables/useSettingsScope'
 import { useOrganizationsStore } from '@/stores/organizations'
@@ -34,6 +36,75 @@ const wrappers: ReturnType<typeof mount>[] = []
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getFactorySettings).mockResolvedValue(settings)
+  vi.mocked(listAgents).mockResolvedValue([])
+  vi.mocked(listProjectMembers).mockResolvedValue([])
+})
+
+describe('automatic agent hint', () => {
+  function roster(
+    rows: {
+      userId: string
+      displayName: string
+      isActive?: boolean
+      isDefault?: boolean
+      accessible?: boolean
+    }[],
+  ) {
+    vi.mocked(listAgents).mockResolvedValue(
+      rows.map((row) => ({
+        ...row,
+        isActive: row.isActive ?? true,
+        isDefault: row.isDefault ?? false,
+      })) as Agent[],
+    )
+    vi.mocked(listProjectMembers).mockResolvedValue(
+      rows
+        .filter((row) => row.accessible !== false)
+        .map((row) => ({ userId: row.userId, isAgent: true })) as ProjectMember[],
+    )
+  }
+
+  it('names the eligible organization default ahead of other eligible agents', async () => {
+    roster([
+      { userId: 'a1', displayName: 'Alpha' },
+      { userId: 'a2', displayName: 'Beta', isDefault: true },
+    ])
+    const { wrapper } = await mountFactory('')
+
+    expect(wrapper.get('[data-testid="automatic-agent-hint"]').text()).toBe(
+      'Runs use Beta, the organization default, when no agent is chosen.',
+    )
+    expect((wrapper.get('#factory-default-agent').element as HTMLSelectElement).value).toBe('')
+  })
+
+  it.each([{ isActive: false }, { accessible: false }])(
+    'skips an ineligible organization default and names the sole eligible fallback %o',
+    async (ineligible) => {
+      roster([
+        { userId: 'a1', displayName: 'Alpha' },
+        { userId: 'a2', displayName: 'Beta', isDefault: true, ...ineligible },
+      ])
+      const { wrapper } = await mountFactory('')
+
+      expect(wrapper.get('[data-testid="automatic-agent-hint"]').text()).toBe(
+        'Runs use Alpha, the only eligible agent, when no agent is chosen.',
+      )
+    },
+  )
+
+  it('asks for a choice when several agents have no eligible organization default', async () => {
+    roster([
+      { userId: 'a1', displayName: 'Alpha' },
+      { userId: 'a2', displayName: 'Beta' },
+    ])
+    const { wrapper } = await mountFactory('')
+
+    expect(wrapper.get('[data-testid="automatic-agent-hint"]').text()).toContain(
+      'Choose an agent when starting a run',
+    )
+    await wrapper.get('#factory-default-agent').setValue('a1')
+    expect(wrapper.find('[data-testid="automatic-agent-hint"]').exists()).toBe(false)
+  })
 })
 
 afterEach(() => {

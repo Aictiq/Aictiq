@@ -298,16 +298,36 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
     }
 
     [Fact]
-    public async Task a_project_without_a_default_agent_explains_itself()
+    public async Task a_project_with_multiple_agents_and_no_default_explains_itself()
     {
         await ExecuteSqlAsync($"UPDATE automation.project_settings SET default_agent_id = NULL WHERE project_id = '{Project.Id}'");
+        await CreateAgentAsync("another-agent");
         var response = await Owner.PostAsJsonAsync(ChatUrl, new { question = "Hello?" }, ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("no default agent", await response.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        Assert.Contains("Multiple active agents", await response.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
         Assert.Empty((await ChatAsync(Owner)).Messages);
 
         var blank = await Owner.PostAsJsonAsync(ChatUrl, new { question = "   " }, ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task project_chat_inherits_the_organization_default_or_the_only_eligible_agent(bool organizationDefault)
+    {
+        await ExecuteSqlAsync($"UPDATE automation.project_settings SET default_agent_id = NULL WHERE project_id = '{Project.Id}'");
+        var expectedAgent = AgentId;
+        if (organizationDefault)
+        {
+            var preferred = await CreateAgentAsync("preferred-chat-agent");
+            expectedAgent = preferred.UserId;
+            (await Owner.PatchAsJsonAsync($"/api/v1/orgs/{Slug}/agents/{expectedAgent}",
+                new UpdateAgentRequest(null, null, true), ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+        }
+        var chat = await AskAsync(Owner, "Explain this project");
+        var run = await RunAsync(Assert.Single(chat.Messages).RunId!.Value);
+        Assert.Equal(expectedAgent, run.AgentId);
     }
 
     private sealed record ChatView(IReadOnlyList<ChatMessageView> Messages, bool RunnerOnline);

@@ -1,7 +1,7 @@
 import { apiFetch } from '@/utils/api'
 
 /**
- * Project chat: a factory operator asks the project's default agent a question without
+ * Project chat: a factory operator asks the project's resolved agent a question without
  * filing a ticket. Each question is answered by a project chat run, an ordinary factory
  * run with no item; the answer comes back as Markdown and may link items the agent created.
  * One question is in progress at a time, and only the last few are kept.
@@ -37,7 +37,7 @@ const chatPath = (slug: string, projectKey: string) =>
 export const getProjectChat = (slug: string, projectKey: string) =>
   apiFetch<ProjectChatView>(chatPath(slug, projectKey))
 
-/** 409 while another question is in progress; 422 when the project has no default agent. */
+/** 409 while another question is in progress; 400 when no eligible agent can be resolved. */
 export const askProjectChat = (slug: string, projectKey: string, question: string) =>
   apiFetch<ProjectChatView>(chatPath(slug, projectKey), { method: 'POST', body: { question } })
 

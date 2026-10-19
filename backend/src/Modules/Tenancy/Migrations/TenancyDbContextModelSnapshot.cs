@@ -18,7 +18,7 @@ namespace Aictiq.Modules.Tenancy.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("tenancy")
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -135,6 +135,11 @@ namespace Aictiq.Modules.Tenancy.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("created_by");
+
+                    b.Property<string>("DefaultAgentId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("default_agent_id");
 
                     b.Property<string>("Name")
                         .IsRequired()

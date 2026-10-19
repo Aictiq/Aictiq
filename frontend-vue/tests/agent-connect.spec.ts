@@ -82,6 +82,7 @@ describe('AgentConnectSheet', () => {
       ownerName: 'Alice',
       role: 'member',
       isActive: true,
+      isDefault: false,
       createdAt: '2026-09-19T00:00:00Z',
       lastActiveAt: null,
       tokenCount: 1,

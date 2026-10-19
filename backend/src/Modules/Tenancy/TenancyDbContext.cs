@@ -43,6 +43,7 @@ public sealed class TenancyDbContext(
             b.Property(o => o.Slug).HasMaxLength(Slug.MaxLength);
             b.Property(o => o.Name).HasMaxLength(200);
             b.Property(o => o.Plan).HasMaxLength(50).HasDefaultValue(OrganizationPlans.SelfHosted);
+            b.Property(o => o.DefaultAgentId).HasMaxLength(64);
             b.Property(o => o.CreatedBy).HasMaxLength(64);
 
             // One jsonb column rather than a scalar per preference: read as a unit, never

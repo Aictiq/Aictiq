@@ -206,10 +206,11 @@ watch(
         settings?.defaultAgentId && assignable.value.some((a) => a.userId === settings.defaultAgentId)
           ? settings.defaultAgentId
           : null
+      const organizationDefaultAgent = assignable.value.find((agent) => agent.isDefault)?.userId
       agentId.value =
         remembered?.agentId && assignable.value.some((a) => a.userId === remembered.agentId)
           ? remembered.agentId
-          : (defaultAgent ?? assignable.value[0]?.userId ?? null)
+          : (defaultAgent ?? organizationDefaultAgent ?? assignable.value[0]?.userId ?? null)
       const rememberedRunner = runnerChoices.find((runner) => runner.id === remembered?.runnerId)
       runnerId.value = rememberedRunner && runnerCanRun(rememberedRunner, playbookHarness.value) ? rememberedRunner.id : null
     } catch {
