@@ -26,6 +26,9 @@ public sealed class Organization : EntityBase, IAudited
     /// <summary>Billing plan. Self-hosted installations stay on the default.</summary>
     public string Plan { get; set; } = OrganizationPlans.SelfHosted;
 
+    /// <summary>The preferred agent when a project has no default of its own.</summary>
+    public string? DefaultAgentId { get; set; }
+
     public OrganizationSettings Settings { get; set; } = OrganizationSettings.Default;
 
     /// <summary>The user who created it - kept even after they leave, for support.</summary>

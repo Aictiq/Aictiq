@@ -162,6 +162,50 @@ describe('StartRunDialog', () => {
     expect((selects[1]!.element as HTMLSelectElement).value).toBe('a1')
   })
 
+  it('keeps the remembered and project choices ahead of the organization default', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents.map((agent) => ({ ...agent, isDefault: agent.userId === 'a1' })),
+      '/factory-settings': { defaultAgentId: 'a2' },
+      '/members': members,
+    })
+
+    const projectChoice = await mountDialog()
+    expect((projectChoice.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a2')
+    projectChoice.unmount()
+
+    storage.set('aictiq.run.PROJ', JSON.stringify({ playbookId: 'p2', agentId: 'a2' }))
+    const rememberedChoice = await mountDialog()
+    expect((rememberedChoice.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a2')
+    rememberedChoice.unmount()
+  })
+
+  it('preselects an eligible organization default before the alphabetical fallback', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents.map((agent) => ({ ...agent, isDefault: agent.userId === 'a2' })),
+      '/factory-settings': { defaultAgentId: null },
+      '/members': members,
+    })
+
+    const wrapper = await mountDialog()
+    expect((wrapper.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a2')
+    wrapper.unmount()
+  })
+
+  it.each(['disabled', 'outside-project'])('ignores an organization default that is %s', async (reason) => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents.map((agent) => ({ ...agent, isDefault: agent.userId === (reason === 'disabled' ? 'a3' : 'a2') })),
+      '/factory-settings': { defaultAgentId: null },
+      '/members': reason === 'outside-project' ? [members[0]] : members,
+    })
+
+    const wrapper = await mountDialog()
+    expect((wrapper.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a1')
+    wrapper.unmount()
+  })
+
   it('forgets a remembered choice that names something gone', async () => {
     stubFetch({
       '/playbooks': playbooks,

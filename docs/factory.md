@@ -50,6 +50,19 @@ Before touching the VPS:
 An item must be visible to the selected agent and must not already be claimed. The database
 allows at most one queued, assigned, or running run for an item.
 
+When a run does not name an agent, Aictiq uses the project's **Default agent**, then the
+organization's default, then the only active agent with access to the project. This applies
+to refinement, project chat, automation rules, scheduled runs and MCP `start_run` as well as
+item runs. Set an organization default under **Settings → Agents**, using an active agent's
+**⋯ → Set as organization default** action. Setting another replaces it; **Clear organization default** removes it,
+and disabling the default agent clears it too.
+
+A configured project default that is disabled or loses project access must be fixed in
+**Project settings → Factory**. An organization default without project access is skipped.
+If several eligible agents remain, choose a default or name an agent for the run. The
+**Choose at run time** hint in Factory settings names the automatic choice when there is one;
+the automatic choice is never saved as the project's default.
+
 ## 2. Prepare a dedicated VPS
 
 A runner has **no sandbox**. The harness can execute commands, read files available to its
@@ -519,7 +532,7 @@ signed in, the runner continues on the earlier branch if it still exists.
 
 To ask about the project without an item, open the chat button in the lower-right corner of
 **Items**, **Wiki**, **Backlog**, **Board** or **Sprints**. Ask how something works, where code
-lives or what a change would take. The project's default agent answers on one of your runners.
+lives or what a change would take. The automatically selected agent answers on one of your runners.
 
 - **Private.** Each person has their own chat per project. Nobody else sees it, including other
   members and admins, and the chat endpoints only ever return the caller's own messages.
@@ -533,7 +546,8 @@ lives or what a change would take. The project's default agent answers on one of
   security policy. Projects cannot edit or swap it. The run works in an isolated clone of the
   default branch and creates no branch, commit or pull request. It refuses to reveal secrets.
   Its harness and required tags come from the project's default playbook, or Claude Code when
-  the project has none. It needs a default agent under **Factory settings**.
+  the project has none. Agent selection follows the project, organization and single-agent
+  fallback described above.
 - **Tickets from the chat.** Ask the agent to "make tickets for these 3 bugs", and it creates them
   in this project, with you as the reporter, and links them in its answer. Creating items is the
   only change the run's token allows. It has no `write` scope, so it cannot edit, transition,
@@ -623,7 +637,8 @@ holds the project context every refine run receives in front of its prompt:
 | Supported platforms and devices | So a bug report names the platform, or the agent asks for it. |
 | Refined tickets go to | The workflow state, and so the board column, a confirmed ticket moves to. |
 
-Refine runs execute as the chosen agent, or the project's default agent. A refine run is meant
+Refine runs execute as the chosen agent, or use the same automatic selection described above.
+A refine run is meant
 to be short: Aictiq's own prompt tells the agent to work from the item and its attachments and
 to open the checkout only for what the ticket's wording depends on, so the person who asked is
 not left waiting through a full reading of the codebase. If you edit the playbook, keep its

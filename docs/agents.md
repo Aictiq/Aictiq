@@ -25,6 +25,13 @@ Add `read` and `write` for an agent that will claim and update work; leave it at
 only reports. Do not give an agent `admin`: that scope is what mints further tokens and
 changes credentials.
 
+Organization admins and owners can choose **⋯ → Set as organization default** on an active agent in
+**Settings → Agents**. The **Default** badge identifies the organization's one default;
+**Clear organization default** removes the choice, and disabling that agent clears it automatically.
+When no agent is named for a run, the project's default wins, followed by this organization
+default if it can see the project, then the only active agent with project access. See
+[Factory setup](factory.md#1-prepare-the-project-and-agent) for the full selection rules.
+
 ## 2. Point a client at it
 
 ### Claude Code, over HTTP

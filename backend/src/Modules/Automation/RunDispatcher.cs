@@ -102,12 +102,12 @@ public sealed class RunDispatcher(
     AutomationDbContext db, ICurrentTenant tenant, IWorkItemLookup items, IProjectAccess access,
     IAgentIdentities agents, IWikiPageAccess pages, IWikiPageContent pageContent,
     IWorkItemClaims claims, IRealtimePublisher realtime, IOrganizationBillingState billing,
-    FleetMode fleetMode, TimeProvider clock)
+    FleetMode fleetMode, TimeProvider clock, IOrganizationLookup organizations)
 {
     /// <param name="project">The item's project, already resolved and checked by the door.</param>
     /// <param name="itemKey">The item to hand over.</param>
     /// <param name="playbookId">A playbook of the project, or null for its default.</param>
-    /// <param name="agentId">The agent to run as, or null for the project's default agent.</param>
+    /// <param name="agentId">The agent to run as, or null to use the project default, organization default or sole eligible agent.</param>
     /// <param name="runnerId">
     /// The runner that must take the run, or null for whichever free runner claims it first.
     /// </param>
@@ -184,11 +184,16 @@ public sealed class RunDispatcher(
         var settings = await db.ProjectSettings.AsNoTracking()
             .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
 
+        var (agent, agentError) = await ResolveAgentAsync(project.Id, agentId, settings?.DefaultAgentId, ct);
+        if (agent is null)
+        {
+            return DispatchResult.Invalid("agentId", agentError!);
+        }
+        var agentUserId = agent.Id;
         // Refine and chat runs are never followed up: until an implement run exists, every
         // mention starts another chat run.
-        var mentionedAgent = agentId ?? settings?.DefaultAgentId;
-        var previous = (mention is null && rework is null) || mentionedAgent is null ? null : await db.Runs.AsNoTracking()
-            .Where(run => run.ItemId == item.Id && run.AgentUserId == mentionedAgent
+        var previous = mention is null && rework is null ? null : await db.Runs.AsNoTracking()
+            .Where(run => run.ItemId == item.Id && run.AgentUserId == agentUserId
                 && run.Kind == RunKind.Implement && run.RunnerId != null && run.Status >= RunStatus.Succeeded)
             .OrderByDescending(run => run.QueuedAt)
             .FirstOrDefaultAsync(ct);
@@ -218,23 +223,6 @@ public sealed class RunDispatcher(
             return playbookId is null
                 ? DispatchResult.Invalid("playbookId", "This project has no default playbook. Set one under Factory settings.")
                 : DispatchResult.PlaybookNotFound();
-        }
-
-        var agentUserId = agentId ?? settings?.DefaultAgentId;
-        if (agentUserId is null)
-        {
-            return DispatchResult.Invalid("agentId", "No agent was named and this project has no default agent.");
-        }
-        if (agentUserId.Length > Run.MaxActorLength)
-        {
-            return DispatchResult.Invalid("agentId", "Use 64 characters or fewer.");
-        }
-
-        var agent = await agents.FindAsync(agentUserId, ct);
-        if (agent is not { IsActive: true }
-            || !(await access.ListProjectMemberIdsAsync(project.Id, ct)).Contains(agentUserId, StringComparer.Ordinal))
-        {
-            return DispatchResult.Invalid("agentId", "The agent must be an active agent that can see this project.");
         }
 
         var runHarness = harness ?? playbook.Harness;
@@ -344,7 +332,7 @@ public sealed class RunDispatcher(
     }
 
     /// <summary>
-    /// Asks the project's default agent <paramref name="question"/> in the person's private
+    /// Asks the resolved agent <paramref name="question"/> in the person's private
     /// project chat: a <see cref="RunKind.ProjectChat"/> run with no item, on an isolated clone of
     /// the default branch, following the built-in <see cref="ProjectChat.PlaybookName"/> playbook.
     /// It borrows only the harness and required tags of the project's default playbook, when there
@@ -364,16 +352,12 @@ public sealed class RunDispatcher(
 
         var settings = await db.ProjectSettings.AsNoTracking()
             .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
-        if (settings?.DefaultAgentId is not { } agentUserId)
+        var (agent, agentError) = await ResolveAgentAsync(project.Id, null, settings?.DefaultAgentId, ct);
+        if (agent is null)
         {
-            return DispatchResult.Invalid("agentId", "This project has no default agent. Set one under Factory settings.");
+            return DispatchResult.Invalid("agentId", agentError!);
         }
-        var agent = await agents.FindAsync(agentUserId, ct);
-        if (agent is not { IsActive: true }
-            || !(await access.ListProjectMemberIdsAsync(project.Id, ct)).Contains(agentUserId, StringComparer.Ordinal))
-        {
-            return DispatchResult.Invalid("agentId", "The project's default agent must be an active agent that can see this project.");
-        }
+        var agentUserId = agent.Id;
 
         if (await db.Runs.AnyAsync(run => run.ProjectId == project.Id && run.RequestedBy == userId
                 && run.Kind == RunKind.ProjectChat && run.Status < RunStatus.Succeeded, ct))
@@ -407,7 +391,7 @@ public sealed class RunDispatcher(
             RequestedBy = userId,
             Harness = playbook?.Harness ?? ProjectChat.DefaultHarness,
             PromptSnapshot = prompt,
-            BranchName = settings.DefaultBranch ?? "main",
+            BranchName = settings?.DefaultBranch ?? "main",
             WorkOnDefaultBranch = true,
             MaxMinutes = ProjectChat.MaxMinutes,
             QueuedAt = now,
@@ -757,6 +741,42 @@ public sealed class RunDispatcher(
         RunKind.Stage => "stage",
         _ => "implement",
     };
+
+    /// <summary>
+    /// Explicit and project defaults are authoritative and must still be valid. An organization
+    /// preference applies only where that agent can work; otherwise exactly one eligible agent
+    /// may be chosen without guessing between several agents.
+    /// </summary>
+    private async Task<(AgentIdentity? Agent, string? Error)> ResolveAgentAsync(
+        Guid projectId, string? requestedAgentId, string? projectDefaultAgentId, CancellationToken ct)
+    {
+        var memberIds = await access.ListProjectMemberIdsAsync(projectId, ct);
+        var selectedId = requestedAgentId ?? projectDefaultAgentId;
+        if (selectedId is not null)
+        {
+            if (selectedId.Length > Run.MaxActorLength)
+            {
+                return (null, "Use 64 characters or fewer.");
+            }
+            var selected = await agents.FindAsync(selectedId, ct);
+            return selected is { IsActive: true } && memberIds.Contains(selectedId, StringComparer.Ordinal)
+                ? (selected, null)
+                : (null, "The agent must be an active agent that can see this project.");
+        }
+
+        var eligible = (await agents.GetAsync(memberIds, ct)).Values.Where(agent => agent.IsActive).ToList();
+        var organization = await organizations.FindByIdAsync(tenant.OrganizationId!.Value, ct);
+        if (organization?.DefaultAgentId is { } organizationDefault
+            && eligible.FirstOrDefault(agent => agent.Id == organizationDefault) is { } preferred)
+        {
+            return (preferred, null);
+        }
+        return eligible.Count == 1
+            ? (eligible[0], null)
+            : (null, eligible.Count == 0
+                ? "No active agent can see this project. Add an agent under Organization settings → Agents."
+                : "Multiple active agents can see this project. Choose an agent or set a default under Factory settings or Organization settings → Agents.");
+    }
 
     private async Task<Playbook?> FindPlaybookAsync(Guid? playbookId, Guid projectId, CancellationToken ct)
     {

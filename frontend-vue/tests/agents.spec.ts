@@ -93,6 +93,18 @@ describe('the agent endpoints', () => {
     expect(init!.method).toBe('DELETE')
   })
 
+  it('sets and clears the organization default through the agent patch', async () => {
+    const fetchMock = stubFetch({ userId: 'agent-1', isDefault: true })
+
+    await updateAgent('acme', 'agent-1', { isDefault: true })
+    await updateAgent('acme', 'agent-1', { isDefault: false })
+
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/v1/orgs/acme/agents/agent-1')
+    expect(fetchMock.mock.calls[0]![1]!.method).toBe('PATCH')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({ isDefault: true })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toEqual({ isDefault: false })
+  })
+
   it('issues and revokes a token against the agent, not the caller', async () => {
     const fetchMock = stubFetch({ token: {}, secret: 'aiq_x' })
 

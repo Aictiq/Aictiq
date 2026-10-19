@@ -30,7 +30,7 @@ public sealed record OrganizationCreationPolicy(bool CanCreateOrganization);
 public sealed record OrganizationView(
     Guid Id, string Slug, string Name, string Plan, string TimeZone, DayOfWeek WeekStart,
     bool MembersCanCreateProjects, OrgRole Role, DateTimeOffset CreatedAt, uint Version,
-    bool CanOperateFactory);
+    bool CanOperateFactory, string? DefaultAgentId = null);
 
 /// <param name="Slug">Optional - derived from the name, uniquified, when omitted.</param>
 public sealed record CreateOrganizationRequest(
@@ -439,5 +439,5 @@ public static class OrganizationEndpoints
         organization.Id, organization.Slug, organization.Name, organization.Plan,
         organization.Settings.TimeZone, organization.Settings.WeekStart,
         organization.Settings.MembersCanCreateProjects, role,
-        organization.CreatedAt, organization.Version, canOperateFactory);
+        organization.CreatedAt, organization.Version, canOperateFactory, organization.DefaultAgentId);
 }

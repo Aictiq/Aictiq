@@ -58,6 +58,16 @@ const repoFullName = ref('')
 const defaultBranch = ref('main')
 const localPathHint = ref('')
 const defaultAgentId = ref('')
+const automaticAgentHint = computed(() => {
+  const organizationDefault = agents.value.find((agent) => agent.isDefault)
+  if (organizationDefault) {
+    return `Runs use ${organizationDefault.displayName}, the organization default, when no agent is chosen.`
+  }
+  if (agents.value.length === 1) {
+    return `Runs use ${agents.value[0]!.displayName}, the only eligible agent, when no agent is chosen.`
+  }
+  return 'Choose an agent when starting a run, or set a project or organization default.'
+})
 
 const record = computed(() => project.record.value)
 const mayRead = computed(() => record.value?.role !== 'guest')
@@ -329,6 +339,13 @@ async function save() {
         </select>
         <p class="text-muted-foreground text-xs">
           Only active agents that can open this project are available.
+        </p>
+        <p
+          v-if="!defaultAgentId"
+          class="text-muted-foreground text-xs"
+          data-testid="automatic-agent-hint"
+        >
+          {{ automaticAgentHint }}
         </p>
       </div>
 

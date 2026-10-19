@@ -360,6 +360,24 @@ async function setActive(agent: Agent, isActive: boolean) {
     busyId.value = null
   }
 }
+
+async function setDefault(agent: Agent, isDefault: boolean) {
+  if (!mayManage.value || (isDefault && !agent.isActive)) return
+  busyId.value = agent.userId
+  try {
+    await updateAgent(slug.value, agent.userId, { isDefault })
+    agents.value = await listAgents(slug.value)
+    toast.saved(
+      isDefault
+        ? `${agent.displayName} is the organization default.`
+        : 'Organization default agent cleared.',
+    )
+  } catch (error) {
+    toast.error(error)
+  } finally {
+    busyId.value = null
+  }
+}
 </script>
 
 <template>
@@ -452,6 +470,12 @@ async function setActive(agent: Agent, isActive: boolean) {
                 class="min-w-0 flex-1"
                 @commit="(name: string) => rename(agent, name)"
               />
+              <span
+                v-if="agent.isDefault"
+                class="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[11px] font-medium"
+              >
+                Default
+              </span>
               <span v-if="!agent.isActive" class="text-muted-foreground text-sm">· disabled</span>
             </div>
             <div class="text-muted-foreground truncate text-[11px]">
@@ -488,6 +512,14 @@ async function setActive(agent: Agent, isActive: boolean) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="w-56">
+                <DropdownMenuItem
+                  :disabled="!agent.isActive && !agent.isDefault"
+                  @select="setDefault(agent, !agent.isDefault)"
+                >
+                  {{
+                    agent.isDefault ? 'Clear organization default' : 'Set as organization default'
+                  }}
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   v-if="agent.isActive"
                   variant="destructive"

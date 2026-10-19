@@ -20,11 +20,11 @@ namespace Aictiq.Modules.Tenancy.Endpoints;
 public sealed record AgentView(
     string UserId, string DisplayName, string Email, string OwnerUserId, string OwnerName,
     OrgRole Role, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastActiveAt,
-    int TokenCount);
+    int TokenCount, bool IsDefault = false);
 
 public sealed record CreateAgentRequest(string? DisplayName, IReadOnlyList<Guid>? ProjectIds);
 
-public sealed record UpdateAgentRequest(string? DisplayName, bool? IsActive);
+public sealed record UpdateAgentRequest(string? DisplayName, bool? IsActive, bool? IsDefault = null);
 
 public sealed record CreateAgentTokenRequest(
     string? Name, IReadOnlyList<string>? Scopes, int? ExpiresInDays);
@@ -60,10 +60,13 @@ public static class AgentEndpoints
     {
         group.MapGet("/", async (
             TenancyDbContext db,
+            ICurrentTenant tenant,
             IAgentIdentities agents,
             IUserDirectory directory,
             CancellationToken cancellationToken) =>
         {
+            var defaultAgentId = await db.Organizations.Where(o => o.Id == tenant.OrganizationId)
+                .Select(o => o.DefaultAgentId).SingleOrDefaultAsync(cancellationToken);
             var memberships = await db.Members
                 .AsNoTracking()
                 .Select(m => new { m.UserId, m.Role, m.JoinedAt })
@@ -85,7 +88,7 @@ public static class AgentEndpoints
             {
                 var agent = found[membership.UserId];
                 var tokens = await agents.ListTokensAsync(agent.Id, cancellationToken);
-                views.Add(ToView(agent, membership.Role, owners, tokens));
+                views.Add(ToView(agent, membership.Role, owners, tokens, agent.Id == defaultAgentId));
             }
 
             return Results.Ok(views.OrderBy(v => v.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList());
@@ -176,11 +179,22 @@ public static class AgentEndpoints
         group.MapPatch("/{agentId}", async (
             string agentId,
             UpdateAgentRequest request,
+            string orgSlug,
+            ICurrentTenant tenant,
+            HybridCache cache,
+            NpgsqlDataSource dataSource,
+            TimeProvider clock,
             TenancyDbContext db,
             IAgentIdentities agents,
             IUserDirectory directory,
             CancellationToken cancellationToken) =>
         {
+            // Serialize default changes with disabling: an inactive agent must never win
+            // a race with a concurrent request that promotes it to organization default.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var organization = await db.Organizations.FromSqlInterpolated(
+                $"SELECT *, xmin FROM tenancy.organizations WHERE id = {tenant.OrganizationId!.Value} FOR UPDATE")
+                .SingleAsync(cancellationToken);
             var membership = await FindMembershipAsync(db, agentId, cancellationToken);
             if (membership is null || await agents.FindAsync(agentId, cancellationToken) is null)
             {
@@ -195,13 +209,40 @@ public static class AgentEndpoints
                     type: ProblemTypes.Validation);
             }
 
+            var agent = (await agents.FindAsync(agentId, cancellationToken))!;
+            if (request.IsDefault == true && !(request.IsActive ?? agent.IsActive))
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]> { ["isDefault"] = ["The default agent must be active."] },
+                    type: ProblemTypes.Validation);
+            }
+
             await agents.UpdateAsync(agentId, displayName, request.IsActive, cancellationToken);
+            var previousDefault = organization.DefaultAgentId;
+            if (request.IsDefault == true)
+            {
+                organization.DefaultAgentId = agentId;
+            }
+            else if ((request.IsDefault == false || request.IsActive == false) && organization.DefaultAgentId == agentId)
+            {
+                organization.DefaultAgentId = null;
+            }
+            if (organization.DefaultAgentId != previousDefault)
+            {
+                organization.UpdatedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            await transaction.CommitAsync(cancellationToken);
+            if (organization.DefaultAgentId != previousDefault)
+            {
+                await TenancyCache.InvalidateAsync(cache, dataSource, organization.Id, orgSlug, cancellationToken);
+            }
 
             var updated = (await agents.FindAsync(agentId, cancellationToken))!;
             var owners = await directory.GetAsync([updated.OwnerUserId], cancellationToken);
             var tokens = await agents.ListTokensAsync(agentId, cancellationToken);
 
-            return Results.Ok(ToView(updated, membership.Role, owners, tokens));
+            return Results.Ok(ToView(updated, membership.Role, owners, tokens, organization.DefaultAgentId == agentId));
         })
         .RequireOrgRole(OrgRole.Admin)
         .RequireScope(Scopes.Admin);
@@ -211,14 +252,38 @@ public static class AgentEndpoints
     {
         group.MapDelete("/{agentId}", async (
             string agentId,
+            string orgSlug,
+            ICurrentTenant tenant,
+            HybridCache cache,
+            NpgsqlDataSource dataSource,
+            TimeProvider clock,
             TenancyDbContext db,
             IAgentIdentities agents,
             CancellationToken cancellationToken) =>
         {
+            // Serialize default changes with disabling: an inactive agent must never win
+            // a race with a concurrent request that promotes it to organization default.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var organization = await db.Organizations.FromSqlInterpolated(
+                $"SELECT *, xmin FROM tenancy.organizations WHERE id = {tenant.OrganizationId!.Value} FOR UPDATE")
+                .SingleAsync(cancellationToken);
             var membership = await FindMembershipAsync(db, agentId, cancellationToken);
             if (membership is null || !await agents.DisableAsync(agentId, cancellationToken))
             {
                 return TenancyResults.NotFound();
+            }
+
+            var wasDefault = organization.DefaultAgentId == agentId;
+            if (wasDefault)
+            {
+                organization.DefaultAgentId = null;
+                organization.UpdatedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            await transaction.CommitAsync(cancellationToken);
+            if (wasDefault)
+            {
+                await TenancyCache.InvalidateAsync(cache, dataSource, organization.Id, orgSlug, cancellationToken);
             }
 
             // Disabled and its tokens revoked - never deleted. The agent's id is written
@@ -387,7 +452,7 @@ public static class AgentEndpoints
 
     private static AgentView ToView(
         AgentIdentity agent, OrgRole role, IReadOnlyDictionary<string, UserSummary> owners,
-        IReadOnlyList<AgentTokenSummary> tokens) =>
+        IReadOnlyList<AgentTokenSummary> tokens, bool isDefault = false) =>
         new(agent.Id,
             agent.DisplayName,
             agent.Email,
@@ -398,5 +463,5 @@ public static class AgentEndpoints
             agent.CreatedAt,
             // What "last active" means for an agent: when one of its tokens was last used.
             tokens.Select(t => t.LastUsedAt).Where(t => t is not null).DefaultIfEmpty(null).Max(),
-            tokens.Count);
+            tokens.Count, isDefault);
 }

@@ -29,7 +29,7 @@ public sealed class OrganizationLookup(TenancyDbContext db, HybridCache cache) :
             static async (state, ct) => await state.db.Organizations
                 .AsNoTracking()
                 .Where(o => o.Slug == state.normalized)
-                .Select(o => new OrganizationRef(o.Id, o.Slug, o.Name))
+                .Select(o => new OrganizationRef(o.Id, o.Slug, o.Name, o.DefaultAgentId))
                 .FirstOrDefaultAsync(ct),
             TenancyCache.Entry,
             tags: [TenancyCache.SlugTag(normalized)],
@@ -44,7 +44,7 @@ public sealed class OrganizationLookup(TenancyDbContext db, HybridCache cache) :
             static async (state, ct) => await state.db.Organizations
                 .AsNoTracking()
                 .Where(o => o.Id == state.organizationId)
-                .Select(o => new OrganizationRef(o.Id, o.Slug, o.Name))
+                .Select(o => new OrganizationRef(o.Id, o.Slug, o.Name, o.DefaultAgentId))
                 .FirstOrDefaultAsync(ct),
             TenancyCache.Entry,
             tags: [TenancyCache.OrgTag(organizationId)],
