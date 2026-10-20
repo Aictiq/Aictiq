@@ -46,6 +46,12 @@ public sealed record CommentAdded(
     public Guid? ParentCommentId { get; init; }
     /// <summary>Who started that thread: the one person a reply is addressed to.</summary>
     public string? ThreadAuthorId { get; init; }
+    /// <summary>
+    /// Everyone the comment and its thread's first comment were written by or tag. An agent
+    /// among them hides the comment from whoever may not operate the factory, so they are not
+    /// told about it either. Empty on an outbox row written before it existed.
+    /// </summary>
+    public IReadOnlyList<string> InvolvedUserIds { get; init; } = [];
     public string? ProjectKey { get; init; }
     public string? ItemKey { get; init; }
     public string? ItemTitle { get; init; }
@@ -57,6 +63,12 @@ public sealed record CommentMentionsAdded(
     Guid OrganizationId, Guid ProjectId, Guid ItemId, Guid CommentId,
     string AuthorId, IReadOnlyList<string> MentionedUserIds) : DomainEvent, IIntegrationEvent
 {
+    /// <summary>
+    /// Everyone the comment and its thread's first comment were written by or tag. An agent
+    /// among them hides the comment from whoever may not operate the factory, so they are not
+    /// told about it either. Empty on an outbox row written before it existed.
+    /// </summary>
+    public IReadOnlyList<string> InvolvedUserIds { get; init; } = [];
     public string? ProjectKey { get; init; }
     public string? ItemKey { get; init; }
     public string? ItemTitle { get; init; }

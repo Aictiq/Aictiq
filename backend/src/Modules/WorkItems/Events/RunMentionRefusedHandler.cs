@@ -34,7 +34,7 @@ public sealed class RunMentionRefusedHandler(
             BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown),
             MentionedUserIds = [], CreatedAt = now, EventId = @event.EventId,
         };
-        comment.Added(item, mentionedUserIds: [], threadAuthorId: thread?.AuthorId, now);
+        comment.Added(item, mentionedUserIds: [], thread: thread, now);
         db.Comments.Add(comment);
 
         try { await db.SaveChangesAsync(cancellationToken); }

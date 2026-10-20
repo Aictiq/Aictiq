@@ -221,7 +221,7 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     private async Task<IQueryable<Comment>> VisibleCommentsAsync(WorkItem item, CancellationToken cancellationToken)
     {
         var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
-        return onItem.WithoutFactory(db, await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, cancellationToken));
+        return onItem.WithoutFactory(db, await FactoryVisibility.HiddenAgentsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, cancellationToken));
     }
 
     /// <summary>

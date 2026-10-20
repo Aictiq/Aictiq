@@ -88,11 +88,17 @@ provide(orgScopeKey, scope)
 
 const fleet = useFleetStatus(slug)
 
+// A stakeholder or Guest gets no hub at all: its agents, its people and its settings are the
+// factory's side of the organization (Owners and Admins always operate).
+const refused = computed(() => record.value !== null && !record.value.canOperateFactory)
+
 // Fleet is an Admin's tab, and none at all where the instance does not offer fleet mode.
 const links = computed(() =>
-  orgSettingsLinks(slug.value, {
-    fleet: hasOrgRole(record.value?.role, 'admin') && !fleet.hidden.value,
-  }),
+  refused.value
+    ? []
+    : orgSettingsLinks(slug.value, {
+        fleet: hasOrgRole(record.value?.role, 'admin') && !fleet.hidden.value,
+      }),
 )
 </script>
 
@@ -113,6 +119,16 @@ const links = computed(() =>
       v-else-if="notFound"
       title="Organization not found"
       description="It does not exist, or you are not a member of it. Those look the same from here on purpose."
+      icon="◇"
+    >
+      <Button variant="secondary" @click="$router.push('/')">Back to my work</Button>
+    </EmptyState>
+
+    <!-- The sidebar hides the way in; this is what a pasted link gets. -->
+    <EmptyState
+      v-else-if="refused"
+      title="Organization settings are not available to you"
+      description="An administrator manages this organization's agents, members and settings."
       icon="◇"
     >
       <Button variant="secondary" @click="$router.push('/')">Back to my work</Button>

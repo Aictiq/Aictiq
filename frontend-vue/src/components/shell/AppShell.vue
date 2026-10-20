@@ -206,7 +206,7 @@ useCommands(() => [
     label: 'Organization settings',
     icon: '⚙',
     keywords: 'members invitations agents billing audit',
-    when: () => organizations.currentSlug !== null,
+    when: () => organizations.currentSlug !== null && organizations.current?.canOperateFactory === true,
     run: () => void router.push(orgSettingsPath(organizations.currentSlug!)),
   },
   {
@@ -215,7 +215,7 @@ useCommands(() => [
     label: 'Members',
     icon: '☰',
     keywords: 'people roster roles invite',
-    when: () => organizations.currentSlug !== null,
+    when: () => organizations.currentSlug !== null && organizations.current?.canOperateFactory === true,
     run: () => void router.push(orgSettingsPath(organizations.currentSlug!, 'members')),
   },
   {

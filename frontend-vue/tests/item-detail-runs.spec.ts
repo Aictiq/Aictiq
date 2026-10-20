@@ -6,6 +6,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 
 import ItemDetail from '@/components/items/ItemDetail.vue'
 import ClaimBanner from '@/components/common/ClaimBanner.vue'
+import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
+import type { Mentionable } from '@/lib/mentions'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
 
@@ -98,6 +100,11 @@ const runs = {
   totalCount: 1,
 }
 
+const members = [
+  { userId: 'u2', displayName: 'Ana Horvat', avatarKey: null, role: 'member', isAgent: false },
+  { userId: 'a9', displayName: 'builder-bot', avatarKey: null, role: 'member', isAgent: true },
+]
+
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
@@ -113,7 +120,7 @@ function stubFetch() {
         [/\/items\/PROJ-1\/watchers$/, []],
         [/\/items\/PROJ-1\/children$/, []],
         [/\/workflows$/, []],
-        [/\/projects\/PROJ\/members$/, []],
+        [/\/projects\/PROJ\/members$/, members],
         [/\/projects\/PROJ$/, project],
         [/\/github/, []],
       ]
@@ -194,6 +201,25 @@ afterEach(() => {
   clients.splice(0).forEach((client) => client.clear())
   vi.unstubAllGlobals()
   setActivePinia(createPinia())
+})
+
+describe('ItemDetail comment mentions', () => {
+  const suggested = (wrapper: VueWrapper) =>
+    (wrapper.findAllComponents(MarkdownEditor).at(-1)!.props('mentionables') as Mentionable[]).map(
+      (person) => person.name,
+    )
+
+  it('offers an operator both people and agents', async () => {
+    const wrapper = await mountDetail(true)
+
+    expect(suggested(wrapper)).toEqual(['Ana Horvat', 'builder-bot'])
+  })
+
+  it.each([false, undefined])('offers only people when the caller may not operate the factory (%s)', async (canOperate) => {
+    const wrapper = await mountDetail(canOperate)
+
+    expect(suggested(wrapper)).toEqual(['Ana Horvat'])
+  })
 })
 
 describe('ItemDetail runs and the operator line', () => {

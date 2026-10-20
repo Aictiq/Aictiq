@@ -33,25 +33,31 @@ public sealed class Comment : TenantEntity
     /// <summary>Database-generated full-text document; it is never set by application code.</summary>
     public NpgsqlTsVector Search { get; private set; } = null!;
 
-    public void Added(WorkItem item, IReadOnlyList<string> mentionedUserIds, string? threadAuthorId, DateTimeOffset now)
+    /// <param name="thread">The thread's first comment, when this one replies to it.</param>
+    public void Added(WorkItem item, IReadOnlyList<string> mentionedUserIds, Comment? thread, DateTimeOffset now)
     {
         Raise(new CommentAdded(OrganizationId, item.ProjectId, ItemId, Id, AuthorId, mentionedUserIds)
         {
-            OccurredAt = now, ParentCommentId = ParentCommentId, ThreadAuthorId = threadAuthorId,
+            OccurredAt = now, ParentCommentId = ParentCommentId, ThreadAuthorId = thread?.AuthorId, InvolvedUserIds = Involved(thread),
             ProjectKey = item.ProjectKey, ItemKey = item.Key, ItemTitle = item.Title, Excerpt = Excerpt(BodyMarkdown)
         });
         Raise(new RealtimeCommentAdded(item.ProjectId, ItemId, Id, AuthorId) { OccurredAt = now });
     }
 
     /// <summary>People an edit tagged who were not tagged before; only they hear about it.</summary>
-    public void Mentioned(WorkItem item, IReadOnlyList<string> newlyMentionedUserIds, DateTimeOffset now)
+    /// <remarks>Call it once <see cref="MentionedUserIds"/> holds the edit's tags.</remarks>
+    public void Mentioned(WorkItem item, IReadOnlyList<string> newlyMentionedUserIds, Comment? thread, DateTimeOffset now)
     {
         if (newlyMentionedUserIds.Count == 0) return;
         Raise(new CommentMentionsAdded(OrganizationId, item.ProjectId, ItemId, Id, AuthorId, newlyMentionedUserIds)
         {
-            OccurredAt = now, ProjectKey = item.ProjectKey, ItemKey = item.Key, ItemTitle = item.Title, Excerpt = Excerpt(BodyMarkdown)
+            OccurredAt = now, InvolvedUserIds = Involved(thread), ProjectKey = item.ProjectKey, ItemKey = item.Key, ItemTitle = item.Title, Excerpt = Excerpt(BodyMarkdown)
         });
     }
+
+    private string[] Involved(Comment? thread) =>
+        [.. new[] { AuthorId }.Concat(MentionedUserIds)
+            .Concat(thread is null ? [] : [thread.AuthorId, .. thread.MentionedUserIds]).Distinct(StringComparer.Ordinal)];
 
     private static readonly MarkdownPipeline PlainText = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
 

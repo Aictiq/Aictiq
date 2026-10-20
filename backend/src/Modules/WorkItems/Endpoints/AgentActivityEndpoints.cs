@@ -70,7 +70,7 @@ public static class AgentActivityEndpoints
         var visibleComments = db.Comments.AsNoTracking().Where(c => db.Items.Any(i => i.Id == c.ItemId && projectIds.Contains(i.ProjectId)));
         visibleComments = visibleComments.WithoutFactory(db, operates
             ? null
-            : await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, tenant.OrganizationId!.Value, visibleComments, ct));
+            : await FactoryVisibility.HiddenAgentsAsync(access, directory, user.UserId!, tenant.OrganizationId!.Value, visibleComments, ct));
         var comments = visibleComments
             .Join(db.Items.AsNoTracking(), c => c.ItemId, i => i.Id, (c, i) => new { c.AuthorId, c.CreatedAt, c.BodyMarkdown, c.DeletedAt, i.Key, i.Title, i.ProjectId })
             .Where(x => x.DeletedAt == null && projectIds.Contains(x.ProjectId));

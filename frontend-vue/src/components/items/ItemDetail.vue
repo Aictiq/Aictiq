@@ -264,9 +264,11 @@ const projectMembers = useQuery({
   queryFn: () => listProjectMembers(props.slug, props.projectKey),
 })
 // Everyone who can see the project can be tagged; the API resolves tags against the same set.
+// Agents only by someone who may operate the factory: the API drops anyone else's agent tag.
 const mentionables = computed<Mentionable[]>(() =>
   (projectMembers.data.value ?? [])
     .filter((member) => member.userId !== session.user?.id)
+    .filter((member) => !member.isAgent || canOperateFactory.value)
     .map((member) => ({
       id: member.userId,
       name: member.displayName,

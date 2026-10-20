@@ -27,7 +27,7 @@ public sealed class CommentNotificationHandler(NotificationsDbContext db, IItemW
             e.MentionedUserIds.Contains(recipient) ? NotificationKind.Mentioned
             : recipient == e.ThreadAuthorId ? NotificationKind.Replied
             : NotificationKind.Commented;
-        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId, .. e.ThreadAuthorId is null ? [] : new[] { e.ThreadAuthorId }], cancellationToken);
+        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId, .. e.MentionedUserIds, .. e.InvolvedUserIds, .. e.ThreadAuthorId is null ? [] : new[] { e.ThreadAuthorId }], cancellationToken);
         await NotifyAsync(e.EventId, e.OrganizationId, e.ProjectId, e.ItemId, e.ItemKey, recipients, KindFor,
             new CommentEmail(e.OrganizationId, e.CommentId, e.AuthorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt), cancellationToken);
     }
@@ -42,7 +42,7 @@ public sealed class CommentMentionsNotificationHandler(NotificationsDbContext db
     {
         using var scope = tenant.Use(e.OrganizationId);
         var recipients = e.MentionedUserIds.Where(x => x != e.AuthorId).Distinct().ToArray();
-        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId], cancellationToken);
+        recipients = await WithoutStakeholdersAsync(e.OrganizationId, recipients, [e.AuthorId, .. e.MentionedUserIds, .. e.InvolvedUserIds], cancellationToken);
         await NotifyAsync(e.EventId, e.OrganizationId, e.ProjectId, e.ItemId, e.ItemKey, recipients, _ => NotificationKind.Mentioned,
             new CommentEmail(e.OrganizationId, e.CommentId, e.AuthorId, e.ProjectKey, e.ItemKey, e.ItemTitle, e.Excerpt), cancellationToken);
     }
@@ -53,14 +53,14 @@ public abstract class CommentNotifier(NotificationsDbContext db, IUserRealtimePu
     NotificationEmailService email, ChatNotificationService chat, IProjectAccess access, IUserDirectory directory, TimeProvider clock)
 {
     /// <summary>
-    /// A comment an agent wrote, or one in a thread an agent started, is the factory at work,
+    /// A comment an agent wrote or one tagging an agent, or one in a thread either started, is the factory at work,
     /// and whoever may not operate the factory never sees it on the item. They are not told
     /// about it either: a notification would point at a comment that is not there for them.
     /// </summary>
     protected async Task<string[]> WithoutStakeholdersAsync(Guid organizationId, string[] recipients,
-        string[] factoryAuthors, CancellationToken cancellationToken)
+        string[] involved, CancellationToken cancellationToken)
     {
-        if (recipients.Length == 0 || (await directory.FilterAgentsAsync(factoryAuthors, cancellationToken)).Count == 0) return recipients;
+        if (recipients.Length == 0 || (await directory.FilterAgentsAsync(involved.Distinct().ToArray(), cancellationToken)).Count == 0) return recipients;
         var operators = new List<string>(recipients.Length);
         // One at a time: the contract is served by a single scoped DbContext.
         foreach (var recipient in recipients)

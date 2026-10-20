@@ -7,7 +7,8 @@ namespace Aictiq.Modules.WorkItems.Endpoints;
 /// <summary>
 /// What of the AI factory's working a caller may see on an item. Someone who may not operate
 /// the factory - a stakeholder, a Guest - sees the work and none of the machinery: no agent's
-/// comments, no thread an agent started, and no history row a run wrote about itself.
+/// comments, no comment that asks an agent something, no thread either of those started, and
+/// no history row a run wrote about itself.
 ///
 /// The rule is <see cref="IProjectAccess.CanOperateFactoryAsync"/>, the same door runs and
 /// their logs already stand behind, so the two can never disagree about who is let in.
@@ -15,35 +16,43 @@ namespace Aictiq.Modules.WorkItems.Endpoints;
 public static class FactoryVisibility
 {
     /// <summary>
-    /// The agents whose comments this caller may not see, or null when they may see
-    /// everything. Resolved from the authors of <paramref name="candidates"/>, which must
-    /// include the thread roots of any comment later filtered with it.
+    /// The agents whose comments, and the comments mentioning them, this caller may not see,
+    /// or null when they may see everything. Resolved from the authors and mentions of
+    /// <paramref name="candidates"/>, which must include the thread roots of any comment later
+    /// filtered with it.
     /// </summary>
-    public static async Task<string[]?> HiddenAuthorsAsync(IProjectAccess access, IUserDirectory directory,
+    public static async Task<string[]?> HiddenAgentsAsync(IProjectAccess access, IUserDirectory directory,
         string userId, Guid organizationId, IQueryable<Comment> candidates, CancellationToken ct)
     {
         if (await access.CanOperateFactoryAsync(userId, organizationId, ct)) return null;
         var authors = await candidates.Select(x => x.AuthorId).Distinct().ToListAsync(ct);
-        return [.. await directory.FilterAgentsAsync(authors, ct)];
+        var mentioned = await candidates.SelectMany(x => x.MentionedUserIds).Distinct().ToListAsync(ct);
+        var people = authors.Union(mentioned, StringComparer.Ordinal).ToArray();
+        return [.. await directory.FilterAgentsAsync(people, ct)];
     }
 
-    /// <summary>Drops agents' comments and every reply in a thread an agent started.</summary>
-    public static IQueryable<Comment> WithoutFactory(this IQueryable<Comment> comments, WorkItemsDbContext db, string[]? hiddenAuthors) =>
-        hiddenAuthors is null or []
+    /// <summary>
+    /// Drops agents' comments and comments mentioning one, and every reply in a thread either
+    /// of those started.
+    /// </summary>
+    public static IQueryable<Comment> WithoutFactory(this IQueryable<Comment> comments, WorkItemsDbContext db, string[]? hiddenAgents) =>
+        hiddenAgents is null or []
             ? comments
-            : comments.Where(x => !hiddenAuthors.Contains(x.AuthorId)
-                && (x.ParentCommentId == null || !db.Comments.Any(root => root.Id == x.ParentCommentId && hiddenAuthors.Contains(root.AuthorId))));
+            : comments.Where(x => !hiddenAgents.Contains(x.AuthorId) && !x.MentionedUserIds.Any(m => hiddenAgents.Contains(m))
+                && (x.ParentCommentId == null || !db.Comments.Any(root => root.Id == x.ParentCommentId
+                    && (hiddenAgents.Contains(root.AuthorId) || root.MentionedUserIds.Any(m => hiddenAgents.Contains(m))))));
 
     /// <summary>Whether one comment is hidden from a caller who may not operate the factory.</summary>
     public static async Task<bool> HiddenAsync(IProjectAccess access, IUserDirectory directory, WorkItemsDbContext db,
         string userId, Comment comment, CancellationToken ct)
     {
         if (await access.CanOperateFactoryAsync(userId, comment.OrganizationId, ct)) return false;
-        var rootAuthor = comment.ParentCommentId is { } rootId
-            ? await db.Comments.AsNoTracking().Where(x => x.Id == rootId).Select(x => x.AuthorId).FirstOrDefaultAsync(ct)
-            : null;
-        string[] authors = rootAuthor is null ? [comment.AuthorId] : [comment.AuthorId, rootAuthor];
-        return (await directory.FilterAgentsAsync(authors, ct)).Count > 0;
+        string[] people = [comment.AuthorId, .. comment.MentionedUserIds];
+        if (comment.ParentCommentId is { } rootId
+            && await db.Comments.AsNoTracking().Where(x => x.Id == rootId)
+                .Select(x => new { x.AuthorId, x.MentionedUserIds }).FirstOrDefaultAsync(ct) is { } root)
+            people = [.. people, root.AuthorId, .. root.MentionedUserIds];
+        return (await directory.FilterAgentsAsync(people.Distinct().ToArray(), ct)).Count > 0;
     }
 
     /// <summary>

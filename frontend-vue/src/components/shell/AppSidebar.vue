@@ -221,7 +221,7 @@ const teamNav = computed<NavItem[]>(() => {
 function sectionVisible(items: unknown[]) {
   if (items === project.value) return Boolean(projects.current)
   if (items === teamNav.value) return Boolean(teams.current)
-  return true
+  return items.length > 0
 }
 
 /**
@@ -232,20 +232,17 @@ function sectionVisible(items: unknown[]) {
  */
 const organization = computed<NavItem[]>(() => {
   const slug = organizations.currentSlug
-  // Hidden from stakeholders and guests: a link to a place they cannot work is noise.
-  const factory = organizations.current?.canOperateFactory
-    ? [
-        {
-          label: 'Factory',
-          icon: Factory,
-          to: slug ? factoryPath(slug) : '/factory',
-          shortcut: 'g then f',
-          tour: 'factory-link',
-        },
-      ]
-    : []
+  // Hidden from stakeholders and guests, the whole group: a link to a place they cannot
+  // work is noise, and OrgSettingsLayout refuses them as FactoryLayout does.
+  if (!organizations.current?.canOperateFactory) return []
   return [
-    ...factory,
+    {
+      label: 'Factory',
+      icon: Factory,
+      to: slug ? factoryPath(slug) : '/factory',
+      shortcut: 'g then f',
+      tour: 'factory-link',
+    },
     { label: 'Agents', icon: Bot, to: slug ? orgSettingsPath(slug, 'agents') : '/agents' },
     { label: 'Members', icon: UserRound, to: slug ? orgSettingsPath(slug, 'members') : '/members' },
     {

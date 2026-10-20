@@ -60,7 +60,7 @@ public static class CommentEndpoints
         if (item is null) return Results.NotFound();
         var take = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 100);
         var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
-        var hidden = await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct);
+        var hidden = await FactoryVisibility.HiddenAgentsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct);
         var visible = onItem.WithoutFactory(db, hidden);
         var query = newestFirst.Value
             ? visible.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id)
@@ -91,10 +91,10 @@ public static class CommentEndpoints
                 return Results.Problem("A deleted comment's thread cannot be replied to.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
         }
         var markdown = request.BodyMarkdown!.Trim();
-        var mentions = await ResolveMentionsAsync(markdown, item.ProjectId, access, directory, ct);
+        var mentions = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
         var now = clock.GetUtcNow();
         var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, ParentCommentId = thread?.Id, AuthorId = user.UserId!, BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown), MentionedUserIds = mentions.ToArray(), CreatedAt = now };
-        comment.Added(item, mentions, thread?.AuthorId, now);
+        comment.Added(item, mentions, thread, now);
         db.Comments.Add(comment);
         await ItemWatcherRules.AddAsync(db, item, user.UserId, ItemWatchReason.Commenter, now, ct);
         foreach (var mentionedUserId in mentions)
@@ -121,9 +121,13 @@ public static class CommentEndpoints
             var now = clock.GetUtcNow();
             db.CommentRevisions.Add(new CommentRevision { CommentId = comment.Id, BodyMarkdown = comment.BodyMarkdown, BodyHtml = comment.BodyHtml, EditedBy = user.UserId!, EditedAt = now });
             comment.BodyMarkdown = markdown; comment.BodyHtml = WorkItemEndpoints.Render(markdown);
-            var mentions = await ResolveMentionsAsync(markdown, item.ProjectId, access, directory, ct);
-            comment.Mentioned(item, mentions.Except(comment.MentionedUserIds, StringComparer.Ordinal).ToArray(), now);
+            var mentions = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
+            var added = mentions.Except(comment.MentionedUserIds, StringComparer.Ordinal).ToArray();
             comment.MentionedUserIds = mentions.ToArray();
+            var thread = added.Length > 0 && comment.ParentCommentId is { } rootId
+                ? await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == rootId, ct)
+                : null;
+            comment.Mentioned(item, added, thread, now);
             foreach (var mentionedUserId in mentions)
                 await ItemWatcherRules.AddAsync(db, item, mentionedUserId, ItemWatchReason.Mentioned, now, ct);
             comment.EditedAt = now;
@@ -239,12 +243,19 @@ public static class CommentEndpoints
             : null;
     }
 
-    private static async Task<IReadOnlyList<string>> ResolveMentionsAsync(string markdown, Guid projectId,
+    /// <summary>
+    /// The project members <paramref name="markdown"/> tags. Agents count only when the author may
+    /// operate the factory: anyone else's agent mention could not ask it anything, and recording
+    /// it would hide the author's own comment from them (<see cref="FactoryVisibility"/>).
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ResolveMentionsAsync(string markdown, WorkItem item, string authorId,
         IProjectAccess access, IUserDirectory directory, CancellationToken ct)
     {
         var tokens = Mention.Matches(markdown).Select(x => x.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (tokens.Length == 0) return [];
-        var people = await directory.GetAsync(await access.ListProjectMemberIdsAsync(projectId, ct), ct);
+        var people = await directory.GetAsync(await access.ListProjectMemberIdsAsync(item.ProjectId, ct), ct);
+        if (!await access.CanOperateFactoryAsync(authorId, item.OrganizationId, ct))
+            people = people.Where(x => !x.Value.IsAgent).ToDictionary();
         var matched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var token in tokens)
         {
