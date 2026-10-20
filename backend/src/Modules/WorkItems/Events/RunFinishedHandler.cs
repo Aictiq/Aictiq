@@ -169,7 +169,7 @@ public sealed class RunFinishedHandler(
         };
         // The comment's own event carries the run's news to watchers through the outbox;
         // the column above is the replay guard, unrelated to it.
-        comment.Added(item, mentionedUserIds: [], threadAuthorId: thread?.AuthorId, now);
+        comment.Added(item, mentionedUserIds: [], thread: thread, now);
         db.Comments.Add(comment);
 
         if (!@event.ChainStopped) db.ItemHistory.Add(new ItemHistory

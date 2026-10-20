@@ -11,8 +11,9 @@ using Aictiq.SharedKernel.Paging;
 namespace Aictiq.IntegrationTests.Automation;
 
 /// <summary>
-/// A stakeholder sees the work and none of the machinery: no agent's comments or the
-/// threads they start, no run's record of itself, and no playbook page.
+/// A stakeholder sees the work and none of the machinery: no agent's comments, no comment
+/// asking an agent something, no thread either starts, no run's record of itself, and no
+/// playbook page.
 /// </summary>
 [Trait("Category", "Automation")]
 public sealed class FactoryVisibilityTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
@@ -73,6 +74,44 @@ public sealed class FactoryVisibilityTests(PostgresFixture postgres, GarageFixtu
         Assert.DoesNotContain(feed, x => x.Kind == "commented" && x.Actor?.Id == AgentId);
     }
 
+    [Theory]
+    [InlineData(OrgRole.Member)]
+    [InlineData(OrgRole.Guest)]
+    public async Task a_stakeholder_or_guest_does_not_see_a_comment_asking_an_agent_or_its_thread(OrgRole role)
+    {
+        using var outsider = await StakeholderAsync(role);
+        var plain = await CommentAsync(Owner, ItemKey, "Customers keep landing on the wrong page.");
+        var asking = await CommentAsync(Owner, ItemKey, "@builder look at the redirect middleware.");
+        Assert.Contains(AgentId, asking.Mentions);
+        var answer = await CommentAsync(Owner, ItemKey, "And keep the old route working.", asking.Id);
+        var aside = await CommentAsync(Owner, ItemKey, "@builder also check the logout redirect.", plain.Id);
+        // Their own @builder could not ask it anything, so it is not a mention and stays theirs.
+        var own = await CommentAsync(outsider, ItemKey, "@builder can you change the colour?");
+        Assert.DoesNotContain(AgentId, own.Mentions);
+
+        var all = await CommentsAsync(ItemKey);
+        Assert.Equal([plain.Id, asking.Id, answer.Id, aside.Id, own.Id], all.Items.Select(x => x.Id));
+
+        var seen = (await outsider.GetFromJsonAsync<PagedResult<CommentView>>(
+            $"/api/v1/orgs/{Slug}/items/{ItemKey}/comments/", ApiTestContext.Json, Ct))!;
+        Assert.Equal([plain.Id, own.Id], seen.Items.Select(x => x.Id));
+        Assert.Equal(2, seen.TotalCount);
+
+        var reply = await outsider.PostAsJsonAsync($"/api/v1/orgs/{Slug}/items/{ItemKey}/comments",
+            new CreateCommentRequest("What does that mean?", answer.Id), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, reply.StatusCode);
+        var react = await outsider.PutAsJsonAsync($"/api/v1/orgs/{Slug}/items/{ItemKey}/comments/{aside.Id}/reactions",
+            new ReactToCommentRequest("👍"), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.NotFound, react.StatusCode);
+
+        var search = (await outsider.GetFromJsonAsync<SearchResponse>(
+            $"/api/v1/orgs/{Slug}/search?q=redirect&types=comments", ApiTestContext.Json, Ct))!;
+        Assert.Empty(search.Comments);
+        var ownerSearch = (await Owner.GetFromJsonAsync<SearchResponse>(
+            $"/api/v1/orgs/{Slug}/search?q=redirect&types=comments", ApiTestContext.Json, Ct))!;
+        Assert.Equal(2, ownerSearch.Comments.Count);
+    }
+
     [Fact]
     public async Task a_stakeholder_does_not_see_the_factory_section_or_a_playbook_page_outside_it()
     {
@@ -103,10 +142,10 @@ public sealed class FactoryVisibilityTests(PostgresFixture postgres, GarageFixtu
         Assert.Contains(legacy, ownerTree);
     }
 
-    private async Task<HttpClient> StakeholderAsync()
+    private async Task<HttpClient> StakeholderAsync(OrgRole role = OrgRole.Member)
     {
         var auth = await Context.RegisterAsync($"stakeholder-{Guid.NewGuid():N}@test.local", "Sam", "Stakeholder");
-        await AddMemberAsync(auth.User.Id, OrgRole.Member, canOperateFactory: false);
+        await AddMemberAsync(auth.User.Id, role, canOperateFactory: false);
         return Context.ClientFor(auth);
     }
 

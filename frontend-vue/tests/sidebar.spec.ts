@@ -29,7 +29,15 @@ const project = (role: ProjectRole): Project => ({
   version: 1,
 })
 
-async function render(role: ProjectRole) {
+const organization = (slug: string, canOperateFactory: boolean) => ({
+  id: `org-${slug}`,
+  slug,
+  name: slug,
+  role: 'member' as const,
+  canOperateFactory,
+})
+
+async function render(role: ProjectRole, canOperateFactory = true) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -41,6 +49,10 @@ async function render(role: ProjectRole) {
       })
     }),
   )
+  useOrganizationsStore().organizations = [
+    organization('acme', canOperateFactory),
+    organization('globex', canOperateFactory),
+  ]
   useOrganizationsStore().select('acme')
   useProjectsStore().select('DSO')
 
@@ -99,10 +111,29 @@ describe('AppSidebar agents link', () => {
     useOrganizationsStore().select('globex')
     await flushPromises()
     expect(agentsLink().attributes('href')).toBe('/o/globex/settings/agents')
+  })
+})
 
-    useOrganizationsStore().select(null)
-    await flushPromises()
-    expect(agentsLink().attributes('href')).toBe('/agents')
+describe('AppSidebar organization group', () => {
+  const labels = (wrapper: Awaited<ReturnType<typeof render>>) =>
+    wrapper.findAll('a').map((a) => a.text())
+
+  it('shows an operator the factory, agents, members and settings', async () => {
+    const wrapper = await render('member')
+
+    expect(wrapper.text()).toContain('Organization')
+    expect(labels(wrapper)).toEqual(
+      expect.arrayContaining(['Factory', 'Agents', 'Members', 'Settings']),
+    )
+  })
+
+  it('leaves the whole group out for a stakeholder or guest', async () => {
+    const wrapper = await render('member', false)
+
+    expect(wrapper.text()).not.toContain('Organization')
+    for (const label of ['Factory', 'Agents', 'Members', 'Settings'])
+      expect(labels(wrapper)).not.toContain(label)
+    expect(hrefs(wrapper).some((href) => href?.startsWith('/o/acme/settings'))).toBe(false)
   })
 })
 

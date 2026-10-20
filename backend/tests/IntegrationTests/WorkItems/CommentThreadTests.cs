@@ -311,6 +311,36 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
     }
 
     [Fact]
+    public async Task a_comment_asking_an_agent_and_its_thread_are_not_news_to_a_stakeholder()
+    {
+        var (anaId, ana) = await JoinAsync("Ana", "Kovač");
+        var item = await CreateItemAsync("Checkout times out");
+        var plain = await CommentAsync(ana, item.Key, "Happens every Friday.");
+        var created = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/agents",
+            new CreateAgentRequest("builder", [_project.Id]), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+
+        // Watching (she commented), tagged and answered, she hears only of the comment she can read.
+        var asking = await CommentAsync(_owner, item.Key, "@builder @Ana look at the Friday batch job.");
+        var answer = await CommentAsync(_owner, item.Key, "Keep the lock short, @Ana.", asking.Id);
+        var aside = await CommentAsync(_owner, item.Key, "@builder check the retries too.", plain.Id);
+        var visible = await CommentAsync(_owner, item.Key, "Thanks, @Ana.", plain.Id);
+        foreach (var comment in new[] { asking, answer, aside, visible }) await HandleAddedAsync(comment.Id);
+        Assert.DoesNotContain(anaId, (await NotificationsAsync(asking.Id)).Select(x => x.UserId));
+        Assert.DoesNotContain(anaId, (await NotificationsAsync(answer.Id)).Select(x => x.UserId));
+        Assert.DoesNotContain(anaId, (await NotificationsAsync(aside.Id)).Select(x => x.UserId));
+        Assert.Equal([(anaId, NotificationKind.Mentioned)], (await NotificationsAsync(visible.Id)).Where(x => x.UserId == anaId));
+
+        // An edit that tags her in a hidden comment does not tell her either.
+        var edited = await _owner.PatchAsJsonAsync(ItemPath(item.Key, $"comments/{aside.Id}"),
+            new UpdateCommentRequest("@builder check the retries too, and tell @Ana."), ApiTestContext.Json, Ct);
+        Assert.True(edited.IsSuccessStatusCode, await edited.Content.ReadAsStringAsync(Ct));
+        await HandleMentionsAddedAsync(aside.Id);
+        var inbox = (await ana.GetFromJsonAsync<List<NotificationView>>("/api/v1/me/notifications", ApiTestContext.Json, Ct))!;
+        Assert.Equal([NotificationKind.Mentioned], inbox.Select(x => x.Kind));
+    }
+
+    [Fact]
     public async Task every_emoji_toggles_on_roots_and_replies_with_names_counts_and_independent_users()
     {
         var (anaId, ana) = await JoinAsync("Ana", "Kovač");

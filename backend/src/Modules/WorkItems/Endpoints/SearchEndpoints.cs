@@ -93,7 +93,7 @@ public static class SearchEndpoints
         }
         var comments = includeComments
             ? await FullTextCommentsAsync(db, projectIds, query, take,
-                await FactoryVisibility.HiddenAuthorsAsync(access, directory, userId, organizationId,
+                await FactoryVisibility.HiddenAgentsAsync(access, directory, userId, organizationId,
                     db.Comments.AsNoTracking().Where(x => db.Items.Any(i => i.Id == x.ItemId && projectIds.Contains(i.ProjectId))), ct) ?? [], ct)
             : [];
         var pages = includePages ? (await wiki.SearchAsync(projectIds, query, take, userId, ct)).Select(x => new SearchPageResult(x.Id, x.ProjectId, x.Slug, x.Title, x.Snippet, x.Rank)).ToList() : [];
@@ -201,9 +201,9 @@ public static class SearchEndpoints
         return results;
     }
 
-    /// <param name="hiddenAuthors">Agents whose comments, and threads, the caller may not see (<see cref="FactoryVisibility"/>).</param>
+    /// <param name="hiddenAgents">Agents whose comments, comments mentioning them, and the threads of either, the caller may not see (<see cref="FactoryVisibility"/>).</param>
     private static async Task<List<SearchCommentResult>> FullTextCommentsAsync(WorkItemsDbContext db, IReadOnlyList<Guid> projects, string query, int limit,
-        string[] hiddenAuthors, CancellationToken ct)
+        string[] hiddenAgents, CancellationToken ct)
     {
         const string sql = """
             WITH search_query AS (SELECT websearch_to_tsquery('english', @query) || websearch_to_tsquery('simple', @query) AS value)
@@ -215,14 +215,15 @@ public static class SearchEndpoints
             JOIN work.items item ON item.id = comment.item_id
             CROSS JOIN search_query
             WHERE item.project_id = ANY(@projects) AND comment.deleted_at IS NULL AND comment.search @@ search_query.value
-              AND NOT comment.author_id = ANY(@hidden)
-              AND NOT EXISTS (SELECT 1 FROM work.comments root WHERE root.id = comment.parent_comment_id AND root.author_id = ANY(@hidden))
+              AND NOT comment.author_id = ANY(@hidden) AND NOT comment.mentioned_user_ids && @hidden
+              AND NOT EXISTS (SELECT 1 FROM work.comments root WHERE root.id = comment.parent_comment_id
+                  AND (root.author_id = ANY(@hidden) OR root.mentioned_user_ids && @hidden))
             ORDER BY rank DESC, comment.created_at DESC, comment.id
             LIMIT @limit
             """;
         await using var command = await CommandAsync(db, sql, projects, query, ct);
         command.Parameters.AddWithValue("limit", limit);
-        command.Parameters.AddWithValue("hidden", NpgsqlDbType.Array | NpgsqlDbType.Text, hiddenAuthors);
+        command.Parameters.AddWithValue("hidden", NpgsqlDbType.Array | NpgsqlDbType.Text, hiddenAgents);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var results = new List<SearchCommentResult>();
         while (await reader.ReadAsync(ct)) results.Add(new SearchCommentResult(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetFloat(4)));

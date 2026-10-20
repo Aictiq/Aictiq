@@ -112,7 +112,10 @@ function openOrganizationSettings() {
           <DropdownMenuSeparator />
         </template>
 
-        <DropdownMenuItem v-if="organizations.current" @select="openOrganizationSettings">
+        <DropdownMenuItem
+          v-if="organizations.current?.canOperateFactory"
+          @select="openOrganizationSettings"
+        >
           <Settings class="size-3.5" aria-hidden="true" />
           Organization settings
         </DropdownMenuItem>

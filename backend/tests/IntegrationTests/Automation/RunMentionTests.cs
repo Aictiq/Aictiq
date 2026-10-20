@@ -157,14 +157,13 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         Assert.Null(second.RequestedRunnerId);
         Assert.Equal(again.Id, second.TriggerCommentId);
 
-        // A stakeholder sees the item's discussion but not the agent's answer.
+        // A stakeholder sees neither the questions put to the agent nor its answers.
         var stakeholderAuth = await Context.RegisterAsync($"stakeholder-{Guid.NewGuid():N}@test.local");
         using var stakeholder = Context.ClientFor(stakeholderAuth);
         await AddMemberAsync(stakeholderAuth.User.Id, OrgRole.Member, canOperateFactory: false);
         var seen = (await stakeholder.GetFromJsonAsync<PagedResult<CommentView>>(
             $"/api/v1/orgs/{Slug}/items/{ItemKey}/comments/", ApiTestContext.Json, Ct))!.Items;
-        Assert.Contains(seen, c => c.Id == comment.Id);
-        Assert.DoesNotContain(seen, c => c.Author.IsAgent);
+        Assert.Empty(seen);
     }
 
     [Fact]
@@ -293,7 +292,7 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         await AddMemberAsync(stakeholderAuth.User.Id, OrgRole.Member, canOperateFactory: false);
 
         var fromStakeholder = await CommentAsync(stakeholder, ItemKey, "@builder can you change the colour?");
-        Assert.Contains(AgentId, fromStakeholder.Mentions);
+        Assert.DoesNotContain(AgentId, fromStakeholder.Mentions);
         await DeliverAsync(fromStakeholder);
 
         var ofPerson = await CommentAsync(Owner, ItemKey, "@Alice have a look");

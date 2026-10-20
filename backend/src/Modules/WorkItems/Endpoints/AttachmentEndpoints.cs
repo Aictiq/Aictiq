@@ -241,7 +241,7 @@ public static class AttachmentEndpoints
         var includeComments = string.Equals(include, "comments", StringComparison.OrdinalIgnoreCase);
         var onItem = db.Comments.AsNoTracking().Where(x => x.ItemId == item.Id);
         var comments = includeComments
-            ? onItem.WithoutFactory(db, await FactoryVisibility.HiddenAuthorsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct))
+            ? onItem.WithoutFactory(db, await FactoryVisibility.HiddenAgentsAsync(access, directory, user.UserId!, item.OrganizationId, onItem, ct))
             : onItem;
         // An attachment pasted into a comment belongs to the comment rather than the item.
         // The opt-in keeps the existing item's-files panel concise while runners can ask for
