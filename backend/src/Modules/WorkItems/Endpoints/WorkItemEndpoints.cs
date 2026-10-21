@@ -26,7 +26,11 @@ public sealed record WorkItemSummaryView(string Key, string Title, WorkflowState
 /// - an omitted <c>dueDate</c> clears the stored one - so a field the view withholds is a
 /// field every update silently erases.
 /// </param>
-public sealed record WorkItemView(Guid Id, string Key, WorkItemType Type, string Title, string DescriptionMarkdown, string DescriptionHtml, Guid StateId, Guid? BoardColumnId, WorkflowStateCategory StateCategory, WorkItemPriority Priority, string? AssigneeId, Guid? TeamId, Guid? SprintId, Guid? ParentId, decimal? Points, decimal? EstimateHours, decimal? RemainingHours, decimal? CompletedHours, DateOnly? DueDate, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, ItemRollup Rollup, IReadOnlyList<ItemLabelView> Labels, bool Blocked, bool IsWatching, int WatcherCount, string? ClaimedBy, DateTimeOffset? ClaimedAt, DateTimeOffset? ClaimHeartbeatAt);
+/// <param name="ScheduledRunAt">
+/// When the item's run is booked to start, while it still waits for that time. Filled only
+/// on board cards; every other view leaves it null.
+/// </param>
+public sealed record WorkItemView(Guid Id, string Key, WorkItemType Type, string Title, string DescriptionMarkdown, string DescriptionHtml, Guid StateId, Guid? BoardColumnId, WorkflowStateCategory StateCategory, WorkItemPriority Priority, string? AssigneeId, Guid? TeamId, Guid? SprintId, Guid? ParentId, decimal? Points, decimal? EstimateHours, decimal? RemainingHours, decimal? CompletedHours, DateOnly? DueDate, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, ItemRollup Rollup, IReadOnlyList<ItemLabelView> Labels, bool Blocked, bool IsWatching, int WatcherCount, string? ClaimedBy, DateTimeOffset? ClaimedAt, DateTimeOffset? ClaimHeartbeatAt, DateTimeOffset? ScheduledRunAt = null);
 public sealed record CreateWorkItemRequest(WorkItemType Type, string? Title, string? DescriptionMarkdown, Guid? StateId, WorkItemPriority? Priority, string? AssigneeId, Guid? TeamId, Guid? ParentId, decimal? Points, decimal? EstimateHours, decimal? RemainingHours, decimal? CompletedHours, DateOnly? DueDate, IReadOnlyList<Guid>? LabelIds);
 public sealed record UpdateWorkItemRequest(WorkItemType? Type, string? Title, string? DescriptionMarkdown, Guid? StateId, WorkItemPriority? Priority, string? AssigneeId, Guid? TeamId, Guid? ParentId, decimal? Points, decimal? EstimateHours, decimal? RemainingHours, decimal? CompletedHours, DateOnly? DueDate, IReadOnlyList<Guid>? LabelIds, uint Version);
 public sealed record TransitionRequest(Guid ToStateId, uint Version);

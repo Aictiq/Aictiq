@@ -40,6 +40,9 @@ export interface WorkItem {
   claimedBy: string | null
   claimedAt: string | null
   claimHeartbeatAt: string | null
+  /** When the item's run is booked to start, while it waits for that time. Only board
+   *  cards carry it; a claim alone cannot say whether an agent is at work or booked. */
+  scheduledRunAt?: string | null
   rollup: {
     totalCount: number
     completedCount: number

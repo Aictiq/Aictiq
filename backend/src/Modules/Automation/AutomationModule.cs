@@ -54,6 +54,7 @@ public static class AutomationModule
         services.AddScoped<ChainQueue>();
         services.AddScoped<IFactoryPages, AutomationFactoryPages>();
         services.AddScoped<IProjectChatGrants, AutomationProjectChatGrants>();
+        services.AddScoped<IScheduledRuns, AutomationScheduledRuns>();
         // The run tools, the aictiq://run/{id} resource: the API host discovers them from
         // this assembly exactly as it discovers WorkItems'.
         services.AddSingleton<IMcpToolProvider>(new McpToolProvider(typeof(RunMcpTools).Assembly));

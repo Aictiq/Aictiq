@@ -40,7 +40,7 @@ public static class BoardEndpoints
     // projection (so counts and WIP stay exact), but full cards - labels, rollups, watchers -
     // are built only for the first `take` of each column in rank order. `expand` lets one
     // column grow ("colId:n,colId:n") without re-paging the others.
-    private static async Task<IResult> Get(Guid teamId, string? filter, string? q, string? assigneeIds, int? take, string? expand, WorkItemsDbContext db, TenancyDbContext tenancy, IProjectAccess access, IUserDirectory directory, ICurrentUser user, ICurrentTenant tenant, CancellationToken ct)
+    private static async Task<IResult> Get(Guid teamId, string? filter, string? q, string? assigneeIds, int? take, string? expand, WorkItemsDbContext db, TenancyDbContext tenancy, IProjectAccess access, IUserDirectory directory, IScheduledRuns scheduledRuns, ICurrentUser user, ICurrentTenant tenant, CancellationToken ct)
     {
         var team = await VisibleTeam(teamId, tenancy, access, user, ct); if (team is null) return Results.NotFound();
         var board = await GetOrCreateAsync(db, tenant.OrganizationId!.Value, team, ct);
@@ -68,6 +68,9 @@ public static class BoardEndpoints
         var states = await db.WorkflowStates.AsNoTracking().Where(x => columnStateIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         foreach (var (id, state) in await WorkItemEndpoints.StatesAsync(db, items, ct)) states.TryAdd(id, state);
         var cards = await WorkItemEndpoints.ViewsAsync(db, user.UserId!, items, states, ct);
+        // A claim says an agent holds the item, not whether its run is booked for later: ask Automation.
+        var scheduled = await scheduledRuns.WaitingAsync(pageIds, ct);
+        if (scheduled.Count > 0) cards = cards.Select(card => scheduled.TryGetValue(card.Id, out var at) ? card with { ScheduledRunAt = at } : card).ToList();
         return Results.Ok(ToView(board, items, cards, states, counts));
     }
 
