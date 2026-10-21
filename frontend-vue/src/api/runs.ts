@@ -337,3 +337,10 @@ export const continueRun = (slug: string, runId: string) =>
  */
 export const startRunNow = (slug: string, runId: string) =>
   apiFetch<void>(`${runsBase(slug)}/${runId}/start-now`, { method: 'POST' })
+
+/** Moves a waiting run's start time in place. 409 once the run is no longer waiting. */
+export const rescheduleRun = (slug: string, runId: string, scheduledFor: string) =>
+  apiFetch<void>(`${runsBase(slug)}/${runId}/reschedule`, {
+    method: 'POST',
+    body: { scheduledFor },
+  })
