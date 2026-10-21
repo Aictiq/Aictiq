@@ -97,6 +97,21 @@ Run-completion updates also include an optional `runId`. When the notificationâ€
 organization grants `canOperateFactory`, link to `/o/{slug}/factory/runs/{runId}`;
 otherwise open the related item. Older notifications have no run ID.
 
+Each entry also says who did what on which item:
+
+- `actor` (`id`, `displayName`, `avatarKey`, `isAgent`) is who acted: a person, or the agent
+  of a finished run. It is null on notifications written before actors were recorded, and
+  for an agent when the caller may not operate the factory in that organization. Without an
+  actor, show `message`, the plain sentence every entry carries.
+- `itemTitle`, `itemType` (`epic`, `feature`, `story`, `task`, `bug`) and `itemState` (the
+  workflow state's name) describe the item as it is now. They are null when the caller can
+  no longer see the item's project. For an entry without an item, `itemTitle` is the sprint
+  name or wiki page title.
+- `fromState` and `toState` are a transition's states as they were named when it happened.
+  `emoji` is the reaction on a `reacted` entry.
+
+Email and chat messages are unchanged.
+
 ## Notification preferences and chat channels
 
 `GET`/`PUT /api/v1/me/notification-preferences` exchange one entry per kind:

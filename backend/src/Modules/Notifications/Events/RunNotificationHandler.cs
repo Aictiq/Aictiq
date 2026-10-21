@@ -53,7 +53,7 @@ public sealed class RunNotificationHandler(
             {
                 OrganizationId = e.OrganizationId, UserId = recipient, EventId = e.EventId, Kind = kind,
                 ProjectId = e.ProjectId, ItemId = e.ItemId, ItemKey = e.ItemKey, RunId = e.RunId,
-                Message = message, CreatedAt = now
+                Message = message, CreatedAt = now, ActorId = e.AgentId, Subject = item?.Title
             };
             db.Notifications.Add(notification); created.Add(notification);
         }

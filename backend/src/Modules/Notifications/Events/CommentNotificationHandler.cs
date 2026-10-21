@@ -86,7 +86,7 @@ public abstract class CommentNotifier(NotificationsDbContext db, IUserRealtimePu
                 NotificationKind.Replied => "Someone replied to your comment.",
                 _ => "A watched item has a new comment."
             };
-            var notification = new Notification { OrganizationId = organizationId, UserId = recipient, EventId = eventId, Kind = kind, ProjectId = projectId, ItemId = itemId, ItemKey = itemKey, Message = message, CreatedAt = now };
+            var notification = new Notification { OrganizationId = organizationId, UserId = recipient, EventId = eventId, Kind = kind, ProjectId = projectId, ItemId = itemId, ItemKey = itemKey, Message = message, CreatedAt = now, ActorId = comment.AuthorId, Subject = comment.ItemTitle };
             db.Notifications.Add(notification); created.Add(notification);
         }
         try
