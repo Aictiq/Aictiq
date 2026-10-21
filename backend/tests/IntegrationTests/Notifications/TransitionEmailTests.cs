@@ -94,6 +94,10 @@ public sealed class TransitionEmailTests(PostgresFixture postgres, GarageFixture
         // An older notification with an id but no key cannot name a project: use the inbox.
         using var tenant = scope.ServiceProvider.GetRequiredService<AmbientCurrentTenant>().Use(organization.Id);
         var notification = await db.Notifications.SingleAsync(ct);
+        Assert.Equal(actor.User.Id, notification.ActorId);
+        Assert.Equal("Active", notification.ToState);
+        Assert.NotNull(notification.FromState);
+        Assert.Equal("Follow <b>the email</b>", notification.Subject);
         var legacy = new Notification
         {
             OrganizationId = organization.Id, UserId = notification.UserId, EventId = Guid.NewGuid(),

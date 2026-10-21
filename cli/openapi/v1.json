@@ -1739,6 +1739,32 @@
         ],
         "type": "object"
       },
+      "NotificationActorView": {
+        "properties": {
+          "avatarKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isAgent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "avatarKey",
+          "isAgent"
+        ],
+        "type": "object"
+      },
       "NotificationKind": {
         "enum": [
           "assigned",
@@ -1770,9 +1796,31 @@
       },
       "NotificationView": {
         "properties": {
+          "actor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NotificationActorView"
+              }
+            ]
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "emoji": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromState": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "id": {
             "format": "uuid",
@@ -1786,6 +1834,24 @@
             ]
           },
           "itemKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "itemState": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "itemTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "itemType": {
             "type": [
               "null",
               "string"
@@ -1820,6 +1886,12 @@
           },
           "runId": {
             "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "toState": {
             "type": [
               "null",
               "string"

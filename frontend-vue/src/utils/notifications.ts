@@ -1,4 +1,10 @@
-import type { ChatChannelType, NotificationKind, NotificationMode } from '@/api/notifications'
+import type { WorkItemType } from '@/api/items'
+import type {
+  ChatChannelType,
+  Notification,
+  NotificationKind,
+  NotificationMode,
+} from '@/api/notifications'
 import { ApiError } from '@/utils/api'
 
 /**
@@ -48,6 +54,83 @@ const kindLabels: Record<NotificationKind, string> = {
 
 /** A kind the API added after this build still reads as something rather than nothing. */
 export const notificationKindLabel = (kind: string) => kindLabels[kind as NotificationKind] ?? kind
+
+const articles: Record<WorkItemType, string> = {
+  epic: 'an epic',
+  feature: 'a feature',
+  story: 'a story',
+  task: 'a task',
+  bug: 'a bug',
+}
+
+/**
+ * What a notification says happened, after the actor's name: "commented on a story". Null
+ * when the row does not name an actor - an older row, or an agent the reader may not see -
+ * so the caller shows the row's own message instead.
+ */
+export function notificationAction(entry: Notification): string | null {
+  if (!entry.actor) return null
+  const item = (entry.itemType && articles[entry.itemType]) ?? 'an item'
+  switch (entry.kind) {
+    case 'assigned':
+      return `assigned ${item} to you`
+    case 'mentioned':
+      return 'mentioned you'
+    case 'commented':
+      return `commented on ${item}`
+    case 'replied':
+      return 'replied to your comment'
+    case 'reacted':
+      return entry.emoji ? `reacted ${entry.emoji} to your comment` : 'reacted to your comment'
+    case 'transitioned':
+      if (entry.fromState && entry.toState)
+        return `moved ${item} from ${entry.fromState} to ${entry.toState}`
+      return entry.toState ? `moved ${item} to ${entry.toState}` : `moved ${item}`
+    case 'claimed':
+      return `claimed ${item}`
+    case 'sprintStarted':
+      return 'started a sprint'
+    case 'sprintCompleted':
+      return 'completed a sprint'
+    case 'wikiMentioned':
+      return 'mentioned you on a wiki page'
+    case 'inviteAccepted':
+      return 'accepted your invitation'
+    case 'runSucceeded':
+      return '’s run succeeded'
+    case 'runNeedsInput':
+      return '’s refine run needs your input'
+    case 'runRefined':
+      return `refined ${item}, ready for review`
+    case 'runFailed':
+      // The outcome is only in the stored sentence; say the same thing it does.
+      if (entry.message.includes('timed out')) return '’s run timed out'
+      if (entry.message.includes('cancelled')) return '’s run was cancelled'
+      if (entry.message.includes('without a refined ticket'))
+        return '’s refine run finished without a refined ticket'
+      return '’s run failed'
+    default:
+      return null
+  }
+}
+
+const relativeUnits: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 365 * 24 * 3600],
+  ['month', 30 * 24 * 3600],
+  ['week', 7 * 24 * 3600],
+  ['day', 24 * 3600],
+  ['hour', 3600],
+  ['minute', 60],
+]
+
+/** "18 hours ago", "yesterday", "just now". */
+export function relativeTime(value: string, now = Date.now()) {
+  const seconds = Math.round((new Date(value).getTime() - now) / 1000)
+  const format = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  for (const [unit, size] of relativeUnits)
+    if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit)
+  return 'just now'
+}
 
 export const chatChannelTypes: ChatChannelType[] = ['telegram', 'slack', 'discord']
 

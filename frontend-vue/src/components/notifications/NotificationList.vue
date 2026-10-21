@@ -3,7 +3,7 @@ import { RouterLink } from 'vue-router'
 import type { Notification } from '@/api/notifications'
 import { factoryRunPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
-import { notificationKindLabel } from '@/utils/notifications'
+import NotificationRow from '@/components/notifications/NotificationRow.vue'
 
 defineProps<{ entries: Notification[] }>()
 const emit = defineEmits<{ select: [entry: Notification] }>()
@@ -34,14 +34,7 @@ function destination(entry: Notification) {
         :class="!entry.readAt && 'bg-muted/40'"
         @click="emit('select', entry)"
       >
-        <span class="min-w-0 flex-1">
-          <span class="block text-sm" :class="!entry.readAt && 'font-semibold'">{{
-            entry.message
-          }}</span>
-          <span class="text-muted-foreground mt-1 block text-xs">
-            {{ entry.itemKey ?? (entry.kind === 'reacted' ? 'Reacted to your comment' : notificationKindLabel(entry.kind)) }} · {{ new Date(entry.createdAt).toLocaleString() }}
-          </span>
-        </span>
+        <NotificationRow :entry="entry" />
         <span
           v-if="!entry.readAt"
           class="bg-primary mt-1.5 size-2 shrink-0 rounded-full"

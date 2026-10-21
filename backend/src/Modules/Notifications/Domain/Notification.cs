@@ -15,6 +15,17 @@ public sealed class Notification : TenantEntity
     public string? ItemKey { get; init; }
     public Guid? RunId { get; init; }
     public required string Message { get; init; }
+
+    /// <summary>Who acted: a person, or the agent of a run. Null on rows written before it
+    /// was recorded; the inbox then shows <see cref="Message"/> as it always did.</summary>
+    public string? ActorId { get; init; }
+    /// <summary>The state names of a transition as they were when it happened.</summary>
+    public string? FromState { get; init; }
+    public string? ToState { get; init; }
+    public string? Emoji { get; init; }
+    /// <summary>A title captured when the notification was written: what the inbox shows for
+    /// a sprint, wiki page or invitation, which have no work item to look up.</summary>
+    public string? Subject { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? ReadAt { get; set; }
 }
