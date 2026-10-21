@@ -69,6 +69,15 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
     private static string Text(CallToolResult result) =>
         string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
 
+    private async Task<string> CreatedKeyAsync(McpClient mcp, string tool, Dictionary<string, object?> arguments)
+    {
+        var result = await mcp.CallToolAsync(tool, arguments, cancellationToken: Ct);
+        Assert.True(result.IsError != true, Text(result));
+        var key = Regex.Match(Text(result), $"{Project.Key}-\\d+", RegexOptions.IgnoreCase).Value;
+        Assert.NotEmpty(key);
+        return key;
+    }
+
     private async Task<HttpClient> MemberAsync(bool canOperateFactory)
     {
         var auth = await Context.RegisterAsync($"chat-member-{Guid.NewGuid():N}@test.local");
@@ -241,13 +250,6 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
             }, cancellationToken: Ct);
             Assert.Contains("not found or no access", Text(elsewhere), StringComparison.Ordinal);
 
-            var subtask = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
-            {
-                ["parentKey"] = key, ["title"] = "Nope", ["team"] = team.Key,
-            }, cancellationToken: Ct);
-            Assert.True(subtask.IsError);
-            Assert.Contains("requires the 'write'", Text(subtask), StringComparison.Ordinal);
-
             var edit = await mcp.CallToolAsync("update_item", new Dictionary<string, object?>
             {
                 ["key"] = ItemKey, ["version"] = Item.Version, ["title"] = "Hijacked",
@@ -271,6 +273,183 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         Assert.Equal("Fix the login redirect", (await ItemAsync(ItemKey)).Title);
 
         await FinishAsync(runner, runId, new RunnerFinishRequest("succeeded", 0, "Created the tickets.", null, null, null, null, null));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task chat_creates_one_parent_with_three_tasks_and_preserves_reporter_and_team_defaults(bool namedTeam)
+    {
+        Guid? teamId = null;
+        string? teamKey = null;
+        if (namedTeam)
+        {
+            var response = await Owner.PostAsJsonAsync($"{ProjectBase}/teams/",
+                new CreateTeamRequest("Platform", "PLAT"), ApiTestContext.Json, Ct);
+            response.EnsureSuccessStatusCode();
+            var team = (await response.Content.ReadFromJsonAsync<TeamView>(ApiTestContext.Json, Ct))!;
+            teamId = team.Id;
+            teamKey = team.Key;
+        }
+
+        var before = await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'");
+        var asked = await AskAsync(Owner, "Create one redirect ticket with three subtasks: preserve query, validate target, cover logout.");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        // The runner receives hierarchy and partial-failure instructions, not one create_item per ticket.
+        Assert.Contains("create_subtask", claimed.Prompt);
+        Assert.Contains("parent's returned real key as parentKey", claimed.Prompt);
+        Assert.Contains("Never replace requested subtasks with standalone tickets", claimed.Prompt);
+        Assert.Contains("If any creation fails", claimed.Prompt);
+        Assert.Contains($"/o/{Slug}/p/{Project.Key}/items/{Project.Key}-123", claimed.Prompt);
+
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        var parentKey = await CreatedKeyAsync(mcp, "create_item", new()
+        {
+            ["project"] = Project.Key, ["title"] = "Fix redirects", ["description"] = "Agreed redirect breakdown", ["team"] = teamKey,
+        });
+        var parent = await ItemAsync(parentKey);
+        Assert.Equal(WorkItemType.Bug, parent.Type);
+        Assert.Null(parent.ParentId);
+        Assert.Equal("Agreed redirect breakdown", parent.DescriptionMarkdown);
+        Assert.Equal(teamId ?? Item.TeamId, parent.TeamId);
+
+        string[] titles = ["Preserve query", "Validate target", "Cover logout"];
+        var keys = new List<string>();
+        foreach (var title in titles)
+        {
+            var key = await CreatedKeyAsync(mcp, "create_subtask", new() { ["parentKey"] = parentKey, ["title"] = title });
+            keys.Add(key);
+            var child = await ItemAsync(key);
+            Assert.Equal(title, child.Title);
+            Assert.Equal(WorkItemType.Task, child.Type);
+            Assert.Equal(parent.Id, child.ParentId);
+            Assert.Equal(parent.TeamId, child.TeamId);
+            var ancestors = await Owner.GetFromJsonAsync<List<WorkItemView>>($"/api/v1/orgs/{Slug}/items/{key}/ancestors", ApiTestContext.Json, Ct);
+            Assert.Equal(parentKey, Assert.Single(ancestors!).Key);
+        }
+        var children = await Owner.GetFromJsonAsync<List<WorkItemView>>($"/api/v1/orgs/{Slug}/items/{parentKey}/children", ApiTestContext.Json, Ct);
+        Assert.Equal(keys, children!.Select(child => child.Key));
+        Assert.Equal(before + 4, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'"));
+        Assert.Equal(4, await ScalarAsync($"""
+            SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}' AND created_by = '{OwnerId}'
+                AND (id = '{parent.Id}' OR parent_id = '{parent.Id}')
+            """));
+
+        // The creation exception confers no edit permission, even on items this chat created.
+        foreach (var key in new[] { parentKey, keys[0] })
+        {
+            var item = await ItemAsync(key);
+            var edit = await mcp.CallToolAsync("update_item", new Dictionary<string, object?>
+            {
+                ["key"] = key, ["version"] = item.Version, ["title"] = "Hijacked",
+            }, cancellationToken: Ct);
+            Assert.True(edit.IsError);
+            Assert.Contains("requires the 'write'", Text(edit));
+            Assert.Equal(item.Title, (await ItemAsync(key)).Title);
+        }
+
+        var answer = $"Parent: [{parentKey}](/o/{Slug}/p/{Project.Key}/items/{parentKey})\nSubtasks:\n"
+            + string.Join("\n", keys.Select(key => $"- [{key}](/o/{Slug}/p/{Project.Key}/items/{key})"));
+        await FinishAsync(runner, runId, new RunnerFinishRequest("succeeded", 0, answer, null, null, null, null, null));
+        Assert.Equal(answer, Assert.Single((await ChatAsync(Owner)).Messages).Answer);
+    }
+
+    [Fact]
+    public async Task a_failed_subtask_leaves_the_created_hierarchy_intact_without_standalone_replacements()
+    {
+        var asked = await AskAsync(Owner, "Create a redirect ticket with subtasks");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        var parentKey = await CreatedKeyAsync(mcp, "create_item", new() { ["project"] = Project.Key, ["title"] = "Fix redirects" });
+        var childKey = await CreatedKeyAsync(mcp, "create_subtask", new() { ["parentKey"] = parentKey, ["title"] = "Preserve query" });
+        var parent = await ItemAsync(parentKey);
+        var before = await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'");
+
+        var failed = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+        {
+            ["parentKey"] = parentKey, ["title"] = "Validate target", ["team"] = "MISSING",
+        }, cancellationToken: Ct);
+        Assert.Contains("not found in project", Text(failed));
+        Assert.Equal(before, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'"));
+        var children = await Owner.GetFromJsonAsync<List<WorkItemView>>($"/api/v1/orgs/{Slug}/items/{parentKey}/children", ApiTestContext.Json, Ct);
+        Assert.Equal(childKey, Assert.Single(children!).Key);
+        Assert.Equal(parent.Id, (await ItemAsync(childKey)).ParentId);
+
+        var answer = $"Created parent [{parentKey}](/o/{Slug}/p/{Project.Key}/items/{parentKey}) and subtask [{childKey}](/o/{Slug}/p/{Project.Key}/items/{childKey}). Validate target failed: team MISSING was not found.";
+        await FinishAsync(runner, runId, new RunnerFinishRequest("succeeded", 0, answer, null, null, null, null, null));
+        Assert.Equal(answer, Assert.Single((await ChatAsync(Owner)).Messages).Answer);
+    }
+
+    [Fact]
+    public async Task chat_subtasks_refuse_foreign_or_missing_parents_foreign_teams_and_archived_projects()
+    {
+        var other = await CreateProjectAsync("Ops", "ops", ProjectVisibility.Organization);
+        var otherParent = await CreateItemAsync("Outside chat", other.Key);
+        var asked = await AskAsync(Owner, "Create subtasks");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        // The agent can read the foreign parent; the chat grant must still refuse creation there.
+        var visible = await mcp.CallToolAsync("get_item", new Dictionary<string, object?> { ["key"] = otherParent.Key }, cancellationToken: Ct);
+        Assert.Contains("Outside chat", Text(visible));
+        var before = await ScalarAsync("SELECT count(*) FROM work.items");
+        foreach (var parentKey in new[] { otherParent.Key, $"{Project.Key}-99999" })
+        {
+            var refused = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+            {
+                ["parentKey"] = parentKey, ["title"] = "Refused",
+            }, cancellationToken: Ct);
+            Assert.Contains("not found or no access", Text(refused));
+        }
+        var foreignTeam = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+        {
+            ["parentKey"] = ItemKey, ["title"] = "Refused", ["team"] = otherParent.TeamId!.Value.ToString(),
+        }, cancellationToken: Ct);
+        Assert.Contains("not found in project", Text(foreignTeam));
+
+        (await Owner.PostAsync($"{ProjectBase}/archive", null, Ct)).EnsureSuccessStatusCode();
+        var archived = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+        {
+            ["parentKey"] = ItemKey, ["title"] = "Refused",
+        }, cancellationToken: Ct);
+        Assert.Contains("archived", Text(archived));
+        Assert.Equal(before, await ScalarAsync("SELECT count(*) FROM work.items"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task chat_subtasks_refuse_creation_after_the_requester_loses_creation_access(bool removeMembership)
+    {
+        var auth = await Context.RegisterAsync($"chat-requester-{Guid.NewGuid():N}@test.local");
+        await AddMemberAsync(auth.User.Id, OrgRole.Member, canOperateFactory: true);
+        using var requester = Context.ClientFor(auth);
+        var asked = await AskAsync(requester, "Create a ticket with subtasks");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        var parentKey = await CreatedKeyAsync(mcp, "create_item", new() { ["project"] = Project.Key, ["title"] = "Requested parent" });
+        var parent = await ItemAsync(parentKey);
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM work.items WHERE id = '{parent.Id}' AND created_by = '{auth.User.Id}'"));
+        // Keep the agent's access while removing or demoting the person who requested this run.
+        var membershipUrl = $"/api/v1/orgs/{Slug}/members/{auth.User.Id}";
+        var changed = removeMembership
+            ? await Owner.DeleteAsync(membershipUrl, Ct)
+            : await Owner.PutAsJsonAsync(membershipUrl, new UpdateMemberRequest(OrgRole.Guest), ApiTestContext.Json, Ct);
+        changed.EnsureSuccessStatusCode();
+        var before = await ScalarAsync("SELECT count(*) FROM work.items");
+        var refused = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+        {
+            ["parentKey"] = parentKey, ["title"] = "Refused",
+        }, cancellationToken: Ct);
+        Assert.Contains("not found or no access", Text(refused));
+        Assert.Equal(before, await ScalarAsync("SELECT count(*) FROM work.items"));
     }
 
     [Fact]

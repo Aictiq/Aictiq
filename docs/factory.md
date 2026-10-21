@@ -576,8 +576,12 @@ lives or what a change would take. The automatically selected agent answers on o
   fallback described above.
 - **Tickets from the chat.** Ask the agent to "make tickets for these 3 bugs", and it creates them
   in this project, with you as the reporter, and links them in its answer. Creating items is the
-  only change the run's token allows. It has no `write` scope, so it cannot edit, transition,
-  comment on or delete items, and it can create items only in this project.
+  only change the run's token allows. You can also ask for one parent ticket with subtasks:
+  it creates the parent first, then linked Tasks with the agreed titles. Tasks inherit the
+  parent's team unless you name another team. The answer groups and links the created items;
+  if creation fails partway through, it reports the failure and what was already created,
+  without replacing subtasks with standalone tickets. It has no `write` scope, so it cannot
+  edit, transition, comment on or delete items, and it can create items only in this project.
 - **Who can chat.** Project members who may operate the factory. Stakeholders and Guests see no
   chat button, and the API answers them with 403.
 
