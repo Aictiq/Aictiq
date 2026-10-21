@@ -289,8 +289,10 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         // Creating needs the Member role on the project - resolved through Tenancy, never by
         // finding some item that happens to carry the key - and a parent needs to be writable.
         WorkItem? parent = parentKey is null ? null : await WritableAsync(parentKey, ct);
-        var writable = parent is null ? await ProjectAsync(project, write: true, ct) : await access.FindProjectAsync(parent.OrganizationId, parent.ProjectKey, ct);
+        var writable = await ProjectAsync(parent?.ProjectKey ?? project, write: true, ct);
         if (writable is null) throw new McpAnswerException($"project '{project}' not found or no access");
+        // Both creation tools must validate the chat grant, including when the project came
+        // from a parent key. This permits creating a child, never editing its parent.
         var reporter = await ChatReporterAsync(writable, ct) ?? user.UserId!;
         var projectKey = writable.Key; Guid? projectId = writable.Id;
         // As REST does: a project nobody has created an item in yet may have no workflow.
