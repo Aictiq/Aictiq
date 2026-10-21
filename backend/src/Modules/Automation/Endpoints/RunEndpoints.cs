@@ -99,6 +99,9 @@ public sealed record DispatchRunRequest(
     Guid? PlaybookId, string? AgentId, Guid? RunnerId = null, DateTimeOffset? ScheduledFor = null,
     IReadOnlyList<string>? RequiredTags = null);
 
+/// <param name="ScheduledFor">The new start time, with its offset. Must be in the future.</param>
+public sealed record RescheduleRunRequest(DateTimeOffset ScheduledFor);
+
 /// <summary>
 /// A person's window on the factory: dispatch, watch, cancel.
 ///
@@ -131,6 +134,7 @@ public static class RunEndpoints
         runs.MapGet("/{runId:guid}/log", LogAsync).RequireOrgRole(OrgRole.Guest).RequireScope(Scopes.Read);
         runs.MapPost("/{runId:guid}/cancel", CancelAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
         runs.MapPost("/{runId:guid}/start-now", StartNowAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
+        runs.MapPost("/{runId:guid}/reschedule", RescheduleAsync).RequireOrgRole(OrgRole.Member).RequireScope(Scopes.Write);
         runs.MapPost("/{runId:guid}/continue", ContinueAsync).RequireOrgRole(OrgRole.Member)
             .RequireFactoryOperator().RequireScope(Scopes.Write);
 
@@ -647,6 +651,60 @@ public static class RunEndpoints
         await realtime.PublishAsync(run.ProjectId, "run.changed", new
         {
             runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", scheduledFor = (DateTimeOffset?)null,
+        }, ct);
+        return Results.NoContent();
+    }
+
+    /// <summary>Changes a waiting run's time without releasing its item claim or replacing the run.</summary>
+    private static async Task<IResult> RescheduleAsync(
+        Guid runId, RescheduleRunRequest request, HttpContext http, AutomationDbContext db, ICurrentUser user,
+        IProjectAccess access, IRealtimePublisher realtime, TimeProvider clock, CancellationToken ct)
+    {
+        if (user.UserId is not { } userId)
+        {
+            return NotFound();
+        }
+        var run = await db.Runs.AsNoTracking().SingleOrDefaultAsync(run => run.Id == runId, ct);
+        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is not { } role)
+        {
+            return NotFound();
+        }
+        if (await AuthorizationFilters.FactoryOperatorRefusalAsync(http) is { } refusal)
+        {
+            return refusal;
+        }
+        if (run.RequestedBy != userId && !role.Satisfies(ProjectRole.Admin))
+        {
+            return Results.Problem(
+                title: "Insufficient permissions.",
+                detail: "Only the person who dispatched a run, or a project admin, can reschedule it.",
+                type: ProblemTypes.InsufficientRole,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var now = clock.GetUtcNow();
+        if (request.ScheduledFor <= now)
+        {
+            return Validation("scheduledFor", "Choose a start time in the future.");
+        }
+
+        var scheduledFor = request.ScheduledFor.ToUniversalTime();
+        // Check the row at the update: a runner may have claimed it or its old time may
+        // have arrived since it was read. An ordinary queued run cannot be postponed.
+        var rescheduled = await db.Runs
+            .Where(r => r.Id == run.Id && r.Status == RunStatus.Queued && r.ScheduledFor > now)
+            .ExecuteUpdateAsync(set => set.SetProperty(r => r.ScheduledFor, (DateTimeOffset?)scheduledFor), ct);
+        if (rescheduled == 0)
+        {
+            return Results.Problem(
+                title: "This run is no longer waiting for its start time.",
+                type: ProblemTypes.Conflict,
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        await realtime.PublishAsync(run.ProjectId, "run.changed", new
+        {
+            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", scheduledFor,
         }, ct);
         return Results.NoContent();
     }
