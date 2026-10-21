@@ -13,8 +13,10 @@ minimumReleaseAge: 2880
 # GHSA-2883-xcg3-v3hh: force the patched 4.x version without violating Redocly's
 # declared ^4 dependency range. GHSA-jqcg-44mw-7w3h (proxy-addr, via the MCP SDK's
 # express) and GHSA-68fv-2mgg-jv7q (source-map-js, via vitest's postcss): same, inside
-# each dependent's declared range.
+# each dependent's declared range. GHSA-587h-7wmj-h5pm (vite 8.2.0-8.2.3, via vitest):
+# the web app's vite, inside vitest's ^8 range.
 overrides:
   js-yaml: 4.3.2
+  vite: 8.3.4
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
