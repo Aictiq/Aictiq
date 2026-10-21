@@ -26,8 +26,10 @@ auditConfig:
 # stay inside every dependent's declared range. Drop once upstream lockfiles move on.
 overrides:
   # GHSA-6qxp-vccf-f47h: shadcn-vue's MCP OAuth client can send credentials to an
-  # authorization server chosen by the MCP server. Pin the patched SDK within
-  # shadcn-vue's ^1.29.0 range until its dependency floor requires a fixed version.
-  '@modelcontextprotocol/sdk': 1.31.0
+  # authorization server chosen by the MCP server. GHSA-22jm-h49p-29qw (tasks not tied
+  # to their session) and GHSA-46jr-4wx8-v453 (one request can exhaust memory during
+  # validation) are fixed in 1.32.0. Pin the patched SDK within shadcn-vue's ^1.29.0
+  # range until its dependency floor requires a fixed version.
+  '@modelcontextprotocol/sdk': 1.32.1
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
