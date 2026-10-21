@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Prompts;
@@ -357,6 +358,85 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
     }
 
     [Fact]
+    public async Task chat_creates_every_requested_type_with_its_description_parent_and_requester_as_reporter()
+    {
+        var auth = await Context.RegisterAsync($"typed-chat-requester-{Guid.NewGuid():N}@test.local");
+        await AddMemberAsync(auth.User.Id, OrgRole.Member, canOperateFactory: true);
+        using var requester = Context.ClientFor(auth);
+        var before = await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'");
+        var asked = await AskAsync(requester,
+            "Create an Epic for redirects, a Feature under that Epic, a Story under that Feature, a Task under that Story, and a Bug under that Story. Use the descriptions we agreed.");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        Assert.Contains("Supported types are Epic, Feature, Story, Task and Bug", claimed.Prompt);
+        Assert.Contains("Preserve the requested type", claimed.Prompt);
+        Assert.Contains("description that carries what the conversation established", claimed.Prompt);
+        Assert.Contains("Confirm each created ticket's type and link its returned real key", claimed.Prompt);
+        Assert.Contains("making parent relationships clear", claimed.Prompt);
+
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        var created = new Dictionary<WorkItemType, WorkItemView>();
+        foreach (var (type, parentType) in new (WorkItemType Type, WorkItemType? Parent)[]
+        {
+            (WorkItemType.Epic, null),
+            (WorkItemType.Feature, WorkItemType.Epic),
+            (WorkItemType.Story, WorkItemType.Feature),
+            (WorkItemType.Task, WorkItemType.Story),
+            (WorkItemType.Bug, WorkItemType.Story),
+        })
+        {
+            var parent = parentType is { } parentKind ? created[parentKind] : null;
+            var description = $"Agreed **{type}** redirect requirements.";
+            var result = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+            {
+                ["project"] = Project.Key, ["type"] = type.ToString(), ["title"] = $"Redirect {type}",
+                ["description"] = description, ["parentKey"] = parent?.Key,
+            }, cancellationToken: Ct);
+            Assert.True(result.IsError != true, Text(result));
+            using var document = JsonDocument.Parse(Text(result));
+            var payload = document.RootElement;
+            var item = await ItemAsync(payload.GetProperty("key").GetString()!);
+            Assert.Equal(type.ToString(), payload.GetProperty("type").GetString());
+            Assert.Equal(parent?.Key, payload.GetProperty("parentKey").GetString());
+            Assert.Equal(type, item.Type);
+            Assert.Equal($"Redirect {type}", item.Title);
+            Assert.Equal(description, item.DescriptionMarkdown);
+            Assert.Contains($"<strong>{type}</strong>", item.DescriptionHtml);
+            Assert.Equal(parent?.Id, item.ParentId);
+            Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM work.items WHERE id = '{item.Id}' AND created_by = '{auth.User.Id}'"));
+            created.Add(type, item);
+        }
+        Assert.Equal(before + 5, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'"));
+    }
+
+    [Fact]
+    public async Task chat_requires_an_agreed_parent_for_features_and_tasks_and_creates_no_replacements()
+    {
+        var asked = await AskAsync(Owner, "Create a Feature and a Task for redirects.");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        Assert.Contains("Features require an Epic", claimed.Prompt);
+        Assert.Contains("Tasks require a Story or Bug", claimed.Prompt);
+        Assert.Contains("Ask for missing or ambiguous required parent information before creating the item", claimed.Prompt);
+        Assert.Contains("without creating a different type or a standalone replacement", claimed.Prompt);
+        var before = await ScalarAsync("SELECT count(*) FROM work.items");
+
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        foreach (var type in new[] { "Feature", "Task" })
+        {
+            var refused = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+            {
+                ["project"] = Project.Key, ["title"] = $"Redirect {type}", ["type"] = type,
+            }, cancellationToken: Ct);
+            Assert.Contains("parent", Text(refused), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\"key\":", Text(refused));
+        }
+        Assert.Equal(before, await ScalarAsync("SELECT count(*) FROM work.items"));
+    }
+
+    [Fact]
     public async Task a_failed_subtask_leaves_the_created_hierarchy_intact_without_standalone_replacements()
     {
         var asked = await AskAsync(Owner, "Create a redirect ticket with subtasks");
@@ -406,6 +486,19 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
             }, cancellationToken: Ct);
             Assert.Contains("not found or no access", Text(refused));
         }
+        // Explicit type and parentKey must not let a chat redirect creation to a
+        // readable project, whether the project or the parent names it.
+        foreach (var (projectKey, parentKey) in new[]
+        {
+            (Project.Key, otherParent.Key), (other.Key, ItemKey), (other.Key, otherParent.Key),
+        })
+        {
+            var refused = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+            {
+                ["project"] = projectKey, ["parentKey"] = parentKey, ["title"] = "Refused typed task", ["type"] = "Task",
+            }, cancellationToken: Ct);
+            Assert.Contains(projectKey == Project.Key ? "same project" : "not found or no access", Text(refused));
+        }
         var foreignTeam = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
         {
             ["parentKey"] = ItemKey, ["title"] = "Refused", ["team"] = otherParent.TeamId!.Value.ToString(),
@@ -449,6 +542,11 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
             ["parentKey"] = parentKey, ["title"] = "Refused",
         }, cancellationToken: Ct);
         Assert.Contains("not found or no access", Text(refused));
+        var typedRefused = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+        {
+            ["project"] = Project.Key, ["parentKey"] = parentKey, ["title"] = "Refused typed task", ["type"] = "Task",
+        }, cancellationToken: Ct);
+        Assert.Contains("not found or no access", Text(typedRefused));
         Assert.Equal(before, await ScalarAsync("SELECT count(*) FROM work.items"));
     }
 
