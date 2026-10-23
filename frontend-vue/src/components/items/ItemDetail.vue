@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Pencil, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
@@ -33,7 +33,7 @@ import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
 import { avatarUrl } from '@/api/profile'
 import { addItemLabel, listLabels, removeItemLabel, type Label } from '@/api/labels'
-import { listItemRuns } from '@/api/runs'
+import { listItemRuns, listRuns, type Run } from '@/api/runs'
 import { getProject, hasProjectRole, listProjectMembers } from '@/api/projects'
 import { createGitHubBranch, listGitHubBindings } from '@/api/github'
 import { listLinks, listRelations } from '@/api/relations'
@@ -73,7 +73,14 @@ import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
-import { isLiveRun, runDuration, runRequesterLabel, runScheduledLabel, startRunButton } from '@/lib/runs'
+import {
+  isLiveRun,
+  runDuration,
+  runRequesterLabel,
+  runScheduledLabel,
+  runStatusLabel,
+  startRunButton,
+} from '@/lib/runs'
 import { resumeCommand } from '@/lib/resumeCommand'
 import { toApiError } from '@/utils/api'
 
@@ -312,6 +319,30 @@ const itemRuns = computed(() =>
   canOperateFactory.value ? runsQuery.data.value?.items ?? [] : [],
 )
 const liveRun = computed(() => itemRuns.value.find((entry) => isLiveRun(entry.status)) ?? null)
+// Each subtask's newest implement run (retries and continuations are implement runs too),
+// so a parent shows its children's progress; refine, chat and stage runs never replace it.
+// Keyed under the child's 'runs' so anything that refreshes a child's runs refreshes this.
+const childRunQueries = useQueries({
+  queries: computed(() =>
+    childItems.value.map((child) => ({
+      queryKey: [props.slug, child.key, 'runs', 'latest-implement'],
+      queryFn: () => listRuns(props.slug, { item: child.key, kind: 'implement', pageSize: 1 }),
+      enabled: canOperateFactory.value,
+      refetchInterval: (query: { state: { data?: { items: Run[] } } }) =>
+        isLiveRun(query.state.data?.items[0]?.status) ? 30_000 : false,
+    })),
+  ),
+})
+// Only a loaded answer counts: a child still loading or whose runs failed to load shows nothing.
+const childLatestRun = computed(() => {
+  const latest = new Map<string, Run>()
+  if (!canOperateFactory.value) return latest
+  childItems.value.forEach((child, index) => {
+    const run = childRunQueries.value[index]?.data?.items[0]
+    if (run) latest.set(child.key, run)
+  })
+  return latest
+})
 const startRun = computed(() =>
   startRunButton({
     canOperateFactory: canOperateFactory.value,
@@ -1311,8 +1342,21 @@ function logged(updated: TimeTrackingItem) {
               :title="`Remaining ${child.remainingHours ?? 0}h of ${child.estimateHours ?? '-'}h estimated`"
               >{{ child.remainingHours ?? 0 }}h / {{ child.estimateHours ?? '-' }}h</span
             ><span
-              class="text-muted-foreground shrink-0 capitalize text-xs"
+              v-if="childLatestRun.get(child.key)"
+              class="shrink-0"
               :class="child.estimateHours === null && child.remainingHours === null && 'ml-auto'"
+              :title="`Latest implementation run: ${runStatusLabel[childLatestRun.get(child.key)!.status]}`"
+              data-testid="subtask-run-status"
+              ><RunStatusBadge :status="childLatestRun.get(child.key)!.status" /></span
+            ><span
+              class="text-muted-foreground shrink-0 capitalize text-xs"
+              :class="
+                child.estimateHours === null &&
+                child.remainingHours === null &&
+                !childLatestRun.get(child.key) &&
+                'ml-auto'
+              "
+              title="Workflow state"
               >{{ child.stateCategory }}</span
             >
           </button>
