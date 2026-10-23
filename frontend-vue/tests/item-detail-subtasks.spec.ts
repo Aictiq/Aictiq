@@ -61,6 +61,9 @@ async function mountDetail(
     role?: string
     archived?: boolean
     teamId?: string | null
+    operator?: boolean
+    children?: WorkItem[]
+    childRuns?: (url: URL) => Response | Promise<Response>
     create?: (body: Record<string, unknown>) => Response | Promise<Response>
   } = {},
 ) {
@@ -69,7 +72,8 @@ async function mountDetail(
     type: options.type ?? parent.type,
     teamId: options.teamId === undefined ? parent.teamId : options.teamId,
   }
-  const children: WorkItem[] = []
+  const children: WorkItem[] = [...(options.children ?? [])]
+  const runRequests: URL[] = []
   const writes: Record<string, unknown>[] = []
   vi.stubGlobal(
     'fetch',
@@ -96,6 +100,12 @@ async function mountDetail(
         return response({ ...item, key, id: key === 'PROJ-1' ? 'i1' : 'i2' })
       }
       if (url.endsWith('/children')) return response(children)
+      if (url.endsWith('/orgs/acme/runs')) {
+        const query = new URL(String(input), 'http://localhost')
+        runRequests.push(query)
+        if (options.childRuns) return options.childRuns(query)
+        return response({ items: [], totalCount: 0 })
+      }
       if (url.endsWith('/runs')) return response({ items: [], totalCount: 0 })
       if (url.endsWith('/comments') || url.endsWith('/history')) return response({ items: [] })
       if (url.endsWith('/projects/PROJ'))
@@ -120,7 +130,7 @@ async function mountDetail(
   await router.isReady()
   const organizations = useOrganizationsStore()
   organizations.organizations = [
-    { id: 'org-1', slug: 'acme', name: 'Acme', role: 'member', canOperateFactory: false },
+    { id: 'org-1', slug: 'acme', name: 'Acme', role: 'member', canOperateFactory: options.operator ?? false },
   ]
   organizations.select('acme')
   useSessionStore().set({
@@ -154,7 +164,7 @@ async function mountDetail(
   })
   wrappers.push(wrapper)
   await flushPromises()
-  return { wrapper, writes, invalidate, client }
+  return { wrapper, writes, invalidate, client, runRequests }
 }
 
 afterEach(() => {
@@ -303,5 +313,84 @@ describe('ItemDetail quick subtasks', () => {
     await wrapper.get('[aria-label="Add subtask to PROJ-2"]').trigger('click')
     expect(wrapper.get<HTMLInputElement>('#subtask-title').element.value).toBe('')
     expect(writes).toHaveLength(0)
+  })
+})
+
+describe('ItemDetail subtask implementation runs', () => {
+  const child = (key: string, title: string): WorkItem => ({
+    ...parent,
+    id: key,
+    key,
+    type: 'task',
+    title,
+    parentId: parent.id,
+  })
+  const run = (status: string) => ({ id: `r-${status}`, status, kind: 'implement' })
+  const rows = (wrapper: VueWrapper) =>
+    wrapper.findAll('[data-testid="item-subtasks"] button').filter((row) => row.text().includes('PROJ-'))
+
+  it('shows each child\'s latest implement run beside its workflow state', async () => {
+    const statuses: Record<string, string | null> = {
+      'PROJ-2': 'succeeded',
+      'PROJ-3': 'failed',
+      'PROJ-4': 'cancelled',
+      'PROJ-5': 'timedOut',
+      'PROJ-6': 'running',
+      'PROJ-7': null,
+    }
+    const { wrapper, runRequests } = await mountDetail({
+      operator: true,
+      children: Object.keys(statuses).map((key) => child(key, `Task ${key}`)),
+      childRuns: (url) => {
+        const status = statuses[url.searchParams.get('item')!]
+        return response({ items: status ? [run(status)] : [], totalCount: status ? 1 : 0 })
+      },
+    })
+    expect(runRequests).toHaveLength(6)
+    for (const request of runRequests) {
+      expect(request.searchParams.get('kind')).toBe('implement')
+      expect(request.searchParams.get('pageSize')).toBe('1')
+    }
+    const text = rows(wrapper).map((row) => row.text())
+    expect(text[0]).toContain('Succeeded')
+    expect(text[1]).toContain('Failed')
+    expect(text[2]).toContain('Cancelled')
+    expect(text[3]).toContain('Timed out')
+    expect(text[4]).toContain('Running')
+    expect(rows(wrapper)[5]!.find('[data-testid="subtask-run-status"]').exists()).toBe(false)
+    for (const row of text) expect(row).toContain('active')
+  })
+
+  it('shows nothing while a child\'s runs load or when they fail to load', async () => {
+    const { wrapper } = await mountDetail({
+      operator: true,
+      children: [child('PROJ-2', 'Pending'), child('PROJ-3', 'Broken')],
+      childRuns: (url) =>
+        url.searchParams.get('item') === 'PROJ-2'
+          ? new Promise<Response>(() => {})
+          : response({ title: 'Unavailable', status: 503 }, 503),
+    })
+    expect(wrapper.find('[data-testid="subtask-run-status"]').exists()).toBe(false)
+    expect(rows(wrapper)).toHaveLength(2)
+  })
+
+  it('does not load runs for people who cannot operate the factory', async () => {
+    const { wrapper, runRequests } = await mountDetail({
+      children: [child('PROJ-2', 'Task')],
+      childRuns: () => response({ items: [run('failed')], totalCount: 1 }),
+    })
+    expect(runRequests).toHaveLength(0)
+    expect(wrapper.find('[data-testid="subtask-run-status"]').exists()).toBe(false)
+  })
+
+  it('still opens the child when its row is clicked', async () => {
+    const { wrapper } = await mountDetail({
+      operator: true,
+      children: [child('PROJ-2', 'Task')],
+      childRuns: () => response({ items: [run('succeeded')], totalCount: 1 }),
+    })
+    await rows(wrapper)[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.path).toBe('/o/acme/p/PROJ/items/PROJ-2')
   })
 })
