@@ -27,6 +27,7 @@ import {
   watchItem,
   type WorkItem,
   type WorkItemPriority,
+  type WorkItemType,
 } from '@/api/items'
 import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
@@ -410,6 +411,27 @@ const drafts = ref<Record<NumberField, string>>({
 })
 const savingPlanning = ref(false)
 const planningError = ref<string | null>(null)
+// ── Type ────────────────────────────────────────────────────────────────────────────
+// The server owns the parent/child and estimation rules for a conversion; a refused change
+// keeps the old type and every other field as they were, and says why.
+const itemTypes: { value: WorkItemType; label: string }[] = [
+  { value: 'epic', label: 'Epic' },
+  { value: 'feature', label: 'Feature' },
+  { value: 'story', label: 'Story' },
+  { value: 'task', label: 'Task' },
+  { value: 'bug', label: 'Bug' },
+]
+const mayChangeType = computed(
+  () =>
+    hasProjectRole(project.data.value?.role ?? 'guest', 'member') &&
+    !project.data.value?.isArchived,
+)
+const changingType = ref(false)
+const typeError = ref<string | null>(null)
+watch(
+  () => props.itemKey,
+  () => (typeError.value = null),
+)
 useProjectRealtime(
   () => props.slug,
   () => props.projectKey,
@@ -613,6 +635,36 @@ async function editPlanning(changes: Partial<WorkItem>) {
       drafts.value[field] = current[field] === null ? '' : String(current[field])
   } finally {
     savingPlanning.value = false
+  }
+}
+async function changeType(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const current = item.data.value
+  const type = select.value as WorkItemType
+  if (!current || type === current.type || changingType.value) return
+  const label = itemTypes.find((entry) => entry.value === type)?.label
+  changingType.value = true
+  typeError.value = null
+  try {
+    const updated = await editItem(props.slug, current, { type })
+    client.setQueryData<WorkItem>([props.slug, props.itemKey], updated)
+    await Promise.all([
+      invalidateLists(current),
+      // The parent lists its children with their types.
+      client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === props.slug && query.queryKey[2] === 'children',
+      }),
+    ])
+    toast.saved(`${current.key} changed to ${label}.`)
+  } catch (error) {
+    select.value = current.type
+    const problem = toApiError(error)
+    const reasons = Object.values(problem.fieldErrors).flat()
+    typeError.value = `Could not change to ${label}: ${
+      reasons.length ? reasons.join(' ') : (problem.problem?.detail ?? problem.title)
+    }`
+  } finally {
+    changingType.value = false
   }
 }
 function changePriority(event: Event) {
@@ -1728,6 +1780,24 @@ function logged(updated: TimeTrackingItem) {
             <Check class="size-4" aria-hidden="true" />
           </button>
         </div>
+      </div>
+      <div v-if="mayChangeType" class="rounded-md border p-3">
+        <label for="item-type" class="font-label">Type</label>
+        <select
+          id="item-type"
+          :value="currentItem.type"
+          class="border-input bg-background mt-2 w-full rounded border px-2 py-1.5 text-sm disabled:opacity-50"
+          :disabled="changingType"
+          @change="changeType"
+        >
+          <option v-for="entry in itemTypes" :key="entry.value" :value="entry.value">
+            {{ entry.label }}
+          </option>
+        </select>
+        <p v-if="changingType" class="text-muted-foreground mt-1 text-xs">Saving…</p>
+        <p v-else-if="typeError" class="text-destructive mt-1 text-xs" role="alert">
+          {{ typeError }}
+        </p>
       </div>
       <div class="rounded-md border p-3">
         <label for="item-status" class="font-label">
