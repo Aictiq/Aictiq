@@ -15,6 +15,7 @@ import {
 import {
   applyLogPage,
   canCancelRun,
+  cardScheduledLabel,
   canRetryRun,
   chainTotals,
   emptyLogState,
@@ -31,6 +32,7 @@ import {
   runRequesterLabel,
   runStageLabels,
   runSuccessRate,
+  msUntilNextSchedule,
   runScheduledLabel,
   runWaitingMessage,
   scaleUpMessage,
@@ -502,6 +504,34 @@ describe('lib/runs', () => {
       expect(
         runScheduledLabel({ status: 'queued', scheduledFor: '2026-10-02T11:00:00Z' }, now),
       ).toBeNull()
+    })
+  })
+
+  describe('board card schedule', () => {
+    const now = new Date('2026-10-02T12:00:00Z')
+
+    it('labels a card whose run still waits for its start time', () => {
+      expect(cardScheduledLabel({ scheduledRunAt: '2026-10-02T20:00:00Z' }, now)).toMatch(
+        /^Agent run scheduled for /,
+      )
+    })
+
+    it('says nothing without a start time or once the time has come', () => {
+      expect(cardScheduledLabel({}, now)).toBeNull()
+      expect(cardScheduledLabel({ scheduledRunAt: null }, now)).toBeNull()
+      expect(cardScheduledLabel({ scheduledRunAt: '2026-10-02T12:00:00Z' }, now)).toBeNull()
+      expect(cardScheduledLabel({ scheduledRunAt: '2026-10-02T11:00:00Z' }, now)).toBeNull()
+    })
+
+    it('wakes for the soonest start time still ahead, capped at an hour', () => {
+      expect(
+        msUntilNextSchedule(
+          [null, undefined, '2026-10-02T11:00:00Z', '2026-10-02T12:10:00Z', '2026-10-02T12:05:00Z'],
+          now,
+        ),
+      ).toBe(5 * 60_000)
+      expect(msUntilNextSchedule(['2026-10-09T12:00:00Z'], now)).toBe(3_600_000)
+      expect(msUntilNextSchedule([null, '2026-10-02T11:00:00Z'], now)).toBeNull()
     })
   })
 

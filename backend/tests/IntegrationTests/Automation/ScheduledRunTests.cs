@@ -5,6 +5,7 @@ using Aictiq.IntegrationTests.Storage;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.Modules.Automation.Workers;
 using Aictiq.Modules.Tenancy.Endpoints;
+using Aictiq.Modules.WorkItems.Endpoints;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aictiq.IntegrationTests.Automation;
@@ -281,6 +282,46 @@ public sealed class ScheduledRunTests(PostgresFixture postgres, GarageFixture ga
         using var stakeholderClient = Context.ClientFor(stakeholder);
         Assert.Equal(HttpStatusCode.Forbidden,
             (await RescheduleAsync(run.Id, DateTimeOffset.UtcNow.AddHours(18), stakeholderClient)).StatusCode);
+    }
+
+    private async Task<DateTimeOffset?> BoardScheduleAsync(string itemKey)
+    {
+        var board = await Owner.GetFromJsonAsync<BoardView>($"/api/v1/orgs/{Slug}/teams/{Item.TeamId}/board", ApiTestContext.Json, Ct);
+        return board!.Columns.SelectMany(column => column.Cards).Single(card => card.Key == itemKey).ScheduledRunAt;
+    }
+
+    [Fact]
+    public async Task a_board_card_carries_its_start_time_only_while_the_run_waits_for_it()
+    {
+        // Nothing booked, and an ordinary queued run that only claims the item: no start time.
+        Assert.Null(await BoardScheduleAsync(ItemKey));
+        var ordinary = await CreateItemAsync("Tidy the footer");
+        await DispatchAsync(ordinary.Key);
+        Assert.NotNull((await ItemAsync(ordinary.Key)).ClaimedBy);
+        Assert.Null(await BoardScheduleAsync(ordinary.Key));
+
+        var startAt = DateTimeOffset.UtcNow.AddHours(6);
+        var run = await ScheduledAsync(ItemKey, startAt);
+        Assert.Equal((await RunAsync(run.Id)).ScheduledFor!.Value.UtcDateTime, (await BoardScheduleAsync(ItemKey))!.Value.UtcDateTime);
+
+        var later = DateTimeOffset.UtcNow.AddHours(9);
+        Assert.Equal(HttpStatusCode.NoContent, (await RescheduleAsync(run.Id, later)).StatusCode);
+        Assert.Equal((await RunAsync(run.Id)).ScheduledFor!.Value.UtcDateTime, (await BoardScheduleAsync(ItemKey))!.Value.UtcDateTime);
+
+        // Its time has come: still queued, no longer waiting.
+        await MakeDueAsync(run.Id);
+        Assert.Equal("queued", (await RunAsync(run.Id)).Status);
+        Assert.Null(await BoardScheduleAsync(ItemKey));
+
+        // Cancelled, or started early: gone.
+        var cancelled = await CreateItemAsync("Cancelled later");
+        var cancelledRun = await ScheduledAsync(cancelled.Key, startAt);
+        Assert.Equal(HttpStatusCode.NoContent, (await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{cancelledRun.Id}/cancel", null, Ct)).StatusCode);
+        Assert.Null(await BoardScheduleAsync(cancelled.Key));
+        var early = await CreateItemAsync("Started early");
+        var earlyRun = await ScheduledAsync(early.Key, startAt);
+        Assert.Equal(HttpStatusCode.NoContent, (await Owner.PostAsync($"/api/v1/orgs/{Slug}/runs/{earlyRun.Id}/start-now", null, Ct)).StatusCode);
+        Assert.Null(await BoardScheduleAsync(early.Key));
     }
 
     [Fact]
