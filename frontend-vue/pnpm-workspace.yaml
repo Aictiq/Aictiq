@@ -20,6 +20,16 @@ auditConfig:
     # TypeScript config, via fast-glob/micromatch), which expands our own fixed globs and
     # never untrusted input, and none of it ships in the bundle.
     - GHSA-vfj7-8cjw-p6xm
+    # zod <4.6.6 memory exhaustion on large arrays. Our zod is 4.6.7; the vulnerable 3.25.76
+    # is shadcn-vue's own copy (it pins ^3.25.76, and no patched 3.x exists), used by its
+    # dev-only component CLI to validate registry JSON from registries we choose. Nothing
+    # of it ships in the bundle. Drop once shadcn-vue moves to zod 4.
+    - GHSA-mrhx-c7xc-m3w5
+    # body-parser 2.x crash on trailing bytes after a compressed body, via shadcn-vue's MCP
+    # SDK (express). Only the dev-only `shadcn-vue mcp` server reaches it, and nothing runs
+    # it. The fix, 2.4.0, was published 2026-10-22 and is still inside minimumReleaseAge;
+    # replace this with a body-parser override once it is older than two days.
+    - GHSA-27r3-jxmh-p828
 
 # GHSA-jqcg-44mw-7w3h (proxy-addr, via shadcn-vue's MCP SDK) and GHSA-68fv-2mgg-jv7q
 # (source-map-js, via the Vue compiler and postcss): force the patched releases, which
@@ -33,3 +43,5 @@ overrides:
   '@modelcontextprotocol/sdk': 1.32.1
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
+  # GHSA-xjj6-f33q-929c: shadcn-vue's ^8.9.0 resolved to a vulnerable 8.11.2.
+  undici: 8.12.3
