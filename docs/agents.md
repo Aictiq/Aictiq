@@ -234,9 +234,20 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Refining | `submit_refinement` (refine runs only) |
 | Follow-up playbooks | `submit_stage_verdict` (follow-up playbook runs only) |
 
-`create_item` takes an optional `description` (Markdown). It is also the one write a
-project-chat run's token may make. That token has no `write` scope, and the item it creates
-records the person who asked the chat as its reporter.
+`create_item(project, title, description?, team?, type?, parentKey?)` accepts an optional
+Markdown description and a type: `Epic`, `Feature`, `Story`, `Task` or `Bug` (case-insensitive).
+Omitting `type` keeps the existing Bug default. `parentKey` must name an accessible, writable
+item in the same project. Epics have no parent; Features require an Epic; Stories may stand
+alone or belong to an Epic/Feature; Bugs may stand alone or belong to an Epic/Feature/Story;
+Tasks require a Story/Bug. Ask for missing or ambiguous required parents before creation;
+invalid types and parents are refused without creating an item or substituting a type.
+The result includes the real `key`, `version`, `type` and `parentKey` (null for roots).
+`create_subtask(parentKey, title, team?)` still creates a Task under a Story or Bug.
+
+These creation tools are the only writes a project-chat run's token may make, within its
+current project only. That token has no `write` scope, and each created item records the
+person who asked the chat as its reporter. Confirm each created ticket's type and link its
+real key in the answer.
 
 There is also a `work-on-item(key)` prompt and `aictiq://item/{key}` and `aictiq://run/{id}`
 resources, which render the same loop, the item's Markdown and a run's status and log tail
@@ -244,10 +255,11 @@ for clients that use them.
 
 **Teams** decide which Backlog and Board an item shows on. `get_project` (and each entry of
 `list_projects`) lists the project's teams with `id`, `key`, `name` and `isDefault`.
-`create_item(project, title, description?, team?)` and `create_subtask(parentKey, title, team?)` take a team
+`create_item` and `create_subtask` take a team
 key or id; a team that is not in the item's project is refused and nothing is created. Without
-`team`, `create_item` uses the project's default team, and `create_subtask` uses the parent's
-team, or the default team if the parent has none.
+`team`, Stories, Bugs and Tasks use their parent's team, or the project's default team if
+the parent has none. Epics and Features remain unteamed. `create_subtask` follows the same
+Task defaults.
 
 **Delegating** is how an orchestrating agent hands a subtask to a worker the way a person
 does from the item page: `start_run(key, playbook?, agent?, runner?)` queues a factory run (the

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using Aictiq.Modules.Tenancy;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
@@ -19,6 +20,9 @@ namespace Aictiq.Modules.WorkItems.Mcp;
 
 public sealed record McpItem(string Key, string Title, WorkItemType Type, string State, uint Version,
     string? AssigneeId, string? ClaimedBy, DateTimeOffset? ClaimHeartbeatAt, decimal? RemainingHours);
+
+public sealed record McpCreatedItem(string Key, uint Version, string Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ParentKey);
 
 /// <summary>
 /// Agent-facing work-item operations.  They deliberately use the same contexts and tenant
@@ -267,44 +271,56 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     // These compact aliases keep the complete documented v1 work-item tool surface
     // available to clients; richer validation remains in the matching REST endpoint.
     [McpServerTool(Name = "create_item")]
-    [Description("Creates a Bug in a project. Without team it lands on the project's default team; get_project lists the teams.")]
+    [Description("Creates an Epic, Feature, Story, Task or Bug in a project (default Bug). Features require an Epic parent; Tasks require a Story or Bug parent. Ask for a missing or ambiguous required parent before calling. Without team, Stories, Bugs and Tasks follow their parent's team or the project's default; Epics and Features remain unteamed. Returns the real key, type and parentKey.")]
     public Task<object?> CreateItem(string project, string title, string? description = null,
-        [Description("Optional team key (such as CORE) or team id from get_project. Omit it for the project's default team.")] string? team = null,
-        CancellationToken cancellationToken = default) => CreateBasic(project, title, null, team, cancellationToken, description);
+        [Description("Optional team key (such as CORE) or team id from get_project. Omit it to use the existing defaults for this type and parent.")] string? team = null,
+        [Description("Epic, Feature, Story, Task or Bug (case-insensitive). Omit for Bug.")] string? type = null,
+        [Description("Existing parent item key in this project. Epics cannot have a parent; Features require an Epic; Stories allow an Epic or Feature; Bugs allow an Epic, Feature or Story; Tasks require a Story or Bug.")] string? parentKey = null,
+        CancellationToken cancellationToken = default) => CreateBasic(project, title, parentKey, team, ParseType(type), cancellationToken, description);
     [McpServerTool(Name = "create_subtask")]
     [Description("Creates a Task under a parent item. Without team it takes the parent's team, or the project's default team if the parent has none.")]
     public Task<object?> CreateSubtask(string parentKey, string title,
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it to follow the parent's team.")] string? team = null,
-        CancellationToken cancellationToken = default) => CreateBasic(null, title, parentKey, team, cancellationToken);
+        CancellationToken cancellationToken = default) => CreateBasic(null, title, parentKey, team, WorkItemType.Task, cancellationToken);
     [McpServerTool(Name = "update_item")] public async Task<bool> UpdateItem(string key, uint version, string? title = null, string? description = null, CancellationToken cancellationToken = default) { if (title is { Length: > 500 }) throw new McpException("title must be 500 characters or fewer."); if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer."); var item = await TryWritableAsync(key, cancellationToken); if (item is null || item.Version != version) return false; if (!string.IsNullOrWhiteSpace(title)) item.Title = title.Trim(); if (description is not null) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } item.UpdatedAt = clock.GetUtcNow(); await db.SaveChangesAsync(cancellationToken); return true; }
     // http(s) only, like the REST endpoint: a stored javascript: or file: URL is rendered as a
     // link on the item page, and a private address is a way to point a person at a neighbour.
     [McpServerTool(Name = "link_item")] public async Task<bool> LinkItem(string key, string url, CancellationToken cancellationToken = default) { var item = await TryWritableAsync(key, cancellationToken); if (item is null || !LinkPreviewFetcher.TryParsePublicUrl(url, out var parsed, out _)) return false; var uri = parsed!; db.ItemLinks.Add(new ItemLink { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, Kind = ItemLinkKind.Url, Provider = "url", ExternalId = uri.AbsoluteUri, Url = uri.AbsoluteUri, CreatedAt = clock.GetUtcNow() }); try { await db.SaveChangesAsync(cancellationToken); return true; } catch (DbUpdateException) { return true; } }
     [McpServerTool(Name = "bulk_update")] public async Task<int> BulkUpdate(string project, IReadOnlyList<string> keys, string? assigneeId = null, CancellationToken cancellationToken = default) { var writable = await ProjectAsync(project, write: true, cancellationToken) ?? throw new McpAnswerException($"project '{project}' not found or no access"); if (!await WorkItemEndpoints.AssignableAsync(access, writable.Id, assigneeId, cancellationToken)) throw new McpAnswerException("assigneeId must be someone who can see this project"); var numbers = keys.Select(WorkItemEndpoints.ParseKey).Where(k => k.Number is not null && k.ProjectKey == writable.Key).Select(k => k.Number!.Value).Distinct().ToArray(); var rows = numbers.Length == 0 ? [] : await db.Items.Where(x => x.ProjectId == writable.Id && numbers.Contains(x.Number)).ToListAsync(cancellationToken); foreach (var row in rows) { row.AssigneeId = assigneeId; row.UpdatedAt = clock.GetUtcNow(); } await db.SaveChangesAsync(cancellationToken); return rows.Count; }
 
-    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, CancellationToken ct, string? description = null)
+    private static WorkItemType ParseType(string? type)
+    {
+        if (type is null) return WorkItemType.Bug;
+        // Enum.TryParse alone also accepts numeric values and comma-separated names.
+        if (Enum.GetNames<WorkItemType>().Any(name => name.Equals(type, StringComparison.OrdinalIgnoreCase))
+            && Enum.TryParse<WorkItemType>(type, ignoreCase: true, out var parsed)) return parsed;
+        throw new McpException("type must be Epic, Feature, Story, Task or Bug.");
+    }
+
+    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, WorkItemType type, CancellationToken ct, string? description = null)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 500) throw new McpException("title must contain 1 to 500 characters.");
         if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer.");
         // Creating needs the Member role on the project - resolved through Tenancy, never by
         // finding some item that happens to carry the key - and a parent needs to be writable.
         WorkItem? parent = parentKey is null ? null : await WritableAsync(parentKey, ct);
-        var writable = await ProjectAsync(parent?.ProjectKey ?? project, write: true, ct);
+        var writable = await ProjectAsync(project ?? parent?.ProjectKey, write: true, ct);
         if (writable is null) throw new McpAnswerException($"project '{project}' not found or no access");
         // Both creation tools must validate the chat grant, including when the project came
         // from a parent key. This permits creating a child, never editing its parent.
         var reporter = await ChatReporterAsync(writable, ct) ?? user.UserId!;
+        var parentError = await WorkItemEndpoints.ValidateParentAsync(db, null, type, parent?.Id, writable.Id, ct);
+        if (parentError is not null) throw new McpAnswerException(parentError);
         var projectKey = writable.Key; Guid? projectId = writable.Id;
         // As REST does: a project nobody has created an item in yet may have no workflow.
         await WorkflowEndpoints.EnsureDefaultAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
         var state = await db.WorkflowStates.Where(s => s.IsInitial && db.Workflows.Any(w => w.Id == s.WorkflowId && w.ProjectId == projectId)).Select(s => s.Id).FirstOrDefaultAsync(ct); if (state == Guid.Empty) throw new McpAnswerException($"project '{projectKey}' has no initial workflow state");
-        var type = parent is null ? WorkItemType.Bug : WorkItemType.Task;
         var teamId = string.IsNullOrWhiteSpace(team)
             ? await WorkItemEndpoints.DefaultTeamAsync(db, tenancy, type, parent?.Id, projectId.Value, ct)
             : await TeamAsync(team, projectId.Value, projectKey, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await WorkItemEndpoints.NextNumberAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = reporter, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; if (!string.IsNullOrWhiteSpace(description)) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new { item.Key, item.Version };
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = reporter, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; if (!string.IsNullOrWhiteSpace(description)) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new McpCreatedItem(item.Key, item.Version, item.Type.ToString(), parent?.Key);
     }
     /// <summary>
     /// For a project-chat run's token, which has no write scope: the person whose question the
