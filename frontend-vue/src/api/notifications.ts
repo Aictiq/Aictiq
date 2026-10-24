@@ -1,3 +1,4 @@
+import type { WorkItemType } from '@/api/items'
 import { apiFetch } from '@/utils/api'
 
 export type NotificationKind =
@@ -27,6 +28,23 @@ export interface Notification {
   message: string
   createdAt: string
   readAt: string | null
+  /** Who acted. Null on older rows, and for an agent the reader may not see: use `message`. */
+  actor?: NotificationActor | null
+  /** The item's title now, or a sprint's name or wiki page's title for a row without an item. */
+  itemTitle?: string | null
+  itemType?: WorkItemType | null
+  /** The item's current workflow state. */
+  itemState?: string | null
+  /** A transition's states as they were named when it happened. */
+  fromState?: string | null
+  toState?: string | null
+  emoji?: string | null
+}
+export interface NotificationActor {
+  id: string
+  displayName: string
+  avatarKey: string | null
+  isAgent: boolean
 }
 export type NotificationMode = 'off' | 'immediate' | 'digest'
 /**

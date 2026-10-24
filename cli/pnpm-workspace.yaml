@@ -13,8 +13,22 @@ minimumReleaseAge: 2880
 # GHSA-2883-xcg3-v3hh: force the patched 4.x version without violating Redocly's
 # declared ^4 dependency range. GHSA-jqcg-44mw-7w3h (proxy-addr, via the MCP SDK's
 # express) and GHSA-68fv-2mgg-jv7q (source-map-js, via vitest's postcss): same, inside
-# each dependent's declared range.
+# each dependent's declared range. GHSA-587h-7wmj-h5pm (vite 8.2.0-8.2.3, via vitest):
+# the web app's vite, inside vitest's ^8 range.
 overrides:
   js-yaml: 4.3.2
+  vite: 8.3.4
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
+  # GHSA-mrhx-c7xc-m3w5: the MCP SDK's zod (^3.25 || ^4) resolved to a vulnerable 4.5.4.
+  zod: 4.6.7
+
+# Advisories pnpm audit skips. Each entry needs a reason and is dropped once a fix ships.
+auditConfig:
+  ignoreGhsas:
+    # body-parser 2.x crash on trailing bytes after a compressed body, via the MCP SDK's
+    # express. The CLI uses only the SDK's stdio server and HTTP client, so express and
+    # body-parser are never loaded. The fix, 2.4.0, was published 2026-10-22 and is still
+    # inside minimumReleaseAge; replace this with a body-parser override once it is older
+    # than two days.
+    - GHSA-27r3-jxmh-p828

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute } from 'vue-router'
 import {
@@ -7,6 +7,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Clock,
   Filter,
   GripVertical,
   Plus,
@@ -44,6 +45,7 @@ import { vNearEnd } from '@/lib/nearEnd'
 import { destinationIsAtWipLimit, moveBoardCard, unmappedStates } from '@/lib/board'
 import { createTicket } from '@/composables/useCreateTicket'
 import { typeLabels } from '@/lib/hierarchy'
+import { cardScheduledLabel, msUntilNextSchedule } from '@/lib/runs'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -140,6 +142,23 @@ const projectMembersQuery = useQuery({
   queryFn: () => listProjectMembers(slug.value, projectKey.value),
 })
 const board = computed(() => boardQuery.data.value)
+// A clock leaves its card when the start time comes, which no run event announces: wake up
+// for the soonest start time on the board rather than poll.
+const now = ref(new Date())
+let scheduleTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  [board, now],
+  () => {
+    clearTimeout(scheduleTimer)
+    const times =
+      board.value?.columns.flatMap((column) => column.cards.map((card) => card.scheduledRunAt)) ??
+      []
+    const wait = msUntilNextSchedule(times, now.value)
+    if (wait !== null) scheduleTimer = setTimeout(() => (now.value = new Date()), wait + 500)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => clearTimeout(scheduleTimer))
 const workflowStates = computed(() => workflowQuery.data.value?.states ?? [])
 const projectMembers = computed(() => projectMembersQuery.data.value ?? [])
 // The assignee filter is applied by the server, so column counts and WIP stay exact.
@@ -816,11 +835,19 @@ watch(
                       <ItemTypeIcon :type="card.type" /><KeyChip :label="card.key" /><PriorityIcon
                         :priority="card.priority"
                       /><span v-if="card.blocked" class="text-destructive text-xs">Blocked</span
-                      ><ClaimGlyph
-                        class="ml-auto"
-                        :claimed-by="card.claimedBy"
-                        :claim-heartbeat-at="card.claimHeartbeatAt"
-                      />
+                      ><span class="ml-auto inline-flex items-center gap-1.5"
+                        ><span
+                          v-if="cardScheduledLabel(card, now)"
+                          class="text-primary inline-flex"
+                          role="img"
+                          data-testid="card-scheduled"
+                          :title="cardScheduledLabel(card, now)!"
+                          :aria-label="cardScheduledLabel(card, now)!"
+                          ><Clock class="size-3.5" aria-hidden="true" /></span
+                        ><ClaimGlyph
+                          :claimed-by="card.claimedBy"
+                          :claim-heartbeat-at="card.claimHeartbeatAt"
+                      /></span>
                     </div>
                     <p class="mt-2 text-sm font-medium">{{ card.title }}</p>
                     <div class="mt-2 flex flex-wrap items-center gap-1.5">

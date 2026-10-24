@@ -34,6 +34,19 @@ searching for "aictiq"), call them directly. Do not guess URLs or scrape the web
 
 Only change items, states or comments when the user asked for it.
 
+For creation, use `create_item(project, title, description?, team?, type?, parentKey?)`.
+Supported types are `Epic`, `Feature`, `Story`, `Task` and `Bug` (case-insensitive); omitting
+`type` defaults to Bug. Preserve the requested type. `parentKey` must be accessible and in
+the same project: Epics have no parent; Features require an Epic; Stories may stand alone
+or belong to an Epic/Feature; Bugs may stand alone or belong to an Epic/Feature/Story;
+Tasks require a Story/Bug. Ask for missing or ambiguous required parents before creating;
+explain invalid types or parents without substituting a type or standalone item.
+`create_subtask(parentKey, title, team?)` still creates a Task. Without an explicit team,
+Stories, Bugs and Tasks use their parent's team or the project's default; Epics and Features
+remain unteamed. Creation returns `key`, `version`, `type` and `parentKey`; confirm the type
+and link each real key. Project chat may create only in its current project and records the
+requesting person as reporter.
+
 ## 2. Fall back to the `aictiq` CLI
 
 If no `aictiq` MCP tools are available, use the CLI from the shell. Add `--json` for output you

@@ -66,6 +66,8 @@ public sealed class NotificationsDbContext(
         modelBuilder.Entity<Notification>(b =>
         {
             b.ToTable("notifications"); b.Property(x => x.UserId).HasMaxLength(64); b.Property(x => x.ItemKey).HasMaxLength(32); b.Property(x => x.Message).HasMaxLength(500); b.Property(x => x.Kind).HasConversion<short>();
+            b.Property(x => x.ActorId).HasMaxLength(64); b.Property(x => x.FromState).HasMaxLength(100); b.Property(x => x.ToState).HasMaxLength(100);
+            b.Property(x => x.Emoji).HasMaxLength(32); b.Property(x => x.Subject).HasMaxLength(500);
             b.HasIndex(x => new { x.UserId, x.EventId }).IsUnique(); b.HasIndex(x => new { x.UserId, x.ReadAt, x.CreatedAt });
         });
         modelBuilder.Entity<NotificationPreference>(b =>

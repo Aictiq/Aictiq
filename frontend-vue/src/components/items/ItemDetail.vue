@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { Bot, Check, Copy, CopyPlus, GitBranch, Link, Pencil, Plus, Reply, Save, SquareTerminal, Trash2, X } from '@lucide/vue'
 import {
@@ -27,12 +27,13 @@ import {
   watchItem,
   type WorkItem,
   type WorkItemPriority,
+  type WorkItemType,
 } from '@/api/items'
 import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
 import { avatarUrl } from '@/api/profile'
 import { addItemLabel, listLabels, removeItemLabel, type Label } from '@/api/labels'
-import { listItemRuns } from '@/api/runs'
+import { listItemRuns, listRuns, type Run } from '@/api/runs'
 import { getProject, hasProjectRole, listProjectMembers } from '@/api/projects'
 import { createGitHubBranch, listGitHubBindings } from '@/api/github'
 import { listLinks, listRelations } from '@/api/relations'
@@ -72,7 +73,14 @@ import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
-import { isLiveRun, runDuration, runRequesterLabel, runScheduledLabel, startRunButton } from '@/lib/runs'
+import {
+  isLiveRun,
+  runDuration,
+  runRequesterLabel,
+  runScheduledLabel,
+  runStatusLabel,
+  startRunButton,
+} from '@/lib/runs'
 import { resumeCommand } from '@/lib/resumeCommand'
 import { toApiError } from '@/utils/api'
 
@@ -311,6 +319,30 @@ const itemRuns = computed(() =>
   canOperateFactory.value ? runsQuery.data.value?.items ?? [] : [],
 )
 const liveRun = computed(() => itemRuns.value.find((entry) => isLiveRun(entry.status)) ?? null)
+// Each subtask's newest implement run (retries and continuations are implement runs too),
+// so a parent shows its children's progress; refine, chat and stage runs never replace it.
+// Keyed under the child's 'runs' so anything that refreshes a child's runs refreshes this.
+const childRunQueries = useQueries({
+  queries: computed(() =>
+    childItems.value.map((child) => ({
+      queryKey: [props.slug, child.key, 'runs', 'latest-implement'],
+      queryFn: () => listRuns(props.slug, { item: child.key, kind: 'implement', pageSize: 1 }),
+      enabled: canOperateFactory.value,
+      refetchInterval: (query: { state: { data?: { items: Run[] } } }) =>
+        isLiveRun(query.state.data?.items[0]?.status) ? 30_000 : false,
+    })),
+  ),
+})
+// Only a loaded answer counts: a child still loading or whose runs failed to load shows nothing.
+const childLatestRun = computed(() => {
+  const latest = new Map<string, Run>()
+  if (!canOperateFactory.value) return latest
+  childItems.value.forEach((child, index) => {
+    const run = childRunQueries.value[index]?.data?.items[0]
+    if (run) latest.set(child.key, run)
+  })
+  return latest
+})
 const startRun = computed(() =>
   startRunButton({
     canOperateFactory: canOperateFactory.value,
@@ -410,6 +442,27 @@ const drafts = ref<Record<NumberField, string>>({
 })
 const savingPlanning = ref(false)
 const planningError = ref<string | null>(null)
+// ── Type ────────────────────────────────────────────────────────────────────────────
+// The server owns the parent/child and estimation rules for a conversion; a refused change
+// keeps the old type and every other field as they were, and says why.
+const itemTypes: { value: WorkItemType; label: string }[] = [
+  { value: 'epic', label: 'Epic' },
+  { value: 'feature', label: 'Feature' },
+  { value: 'story', label: 'Story' },
+  { value: 'task', label: 'Task' },
+  { value: 'bug', label: 'Bug' },
+]
+const mayChangeType = computed(
+  () =>
+    hasProjectRole(project.data.value?.role ?? 'guest', 'member') &&
+    !project.data.value?.isArchived,
+)
+const changingType = ref(false)
+const typeError = ref<string | null>(null)
+watch(
+  () => props.itemKey,
+  () => (typeError.value = null),
+)
 useProjectRealtime(
   () => props.slug,
   () => props.projectKey,
@@ -613,6 +666,36 @@ async function editPlanning(changes: Partial<WorkItem>) {
       drafts.value[field] = current[field] === null ? '' : String(current[field])
   } finally {
     savingPlanning.value = false
+  }
+}
+async function changeType(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const current = item.data.value
+  const type = select.value as WorkItemType
+  if (!current || type === current.type || changingType.value) return
+  const label = itemTypes.find((entry) => entry.value === type)?.label
+  changingType.value = true
+  typeError.value = null
+  try {
+    const updated = await editItem(props.slug, current, { type })
+    client.setQueryData<WorkItem>([props.slug, props.itemKey], updated)
+    await Promise.all([
+      invalidateLists(current),
+      // The parent lists its children with their types.
+      client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === props.slug && query.queryKey[2] === 'children',
+      }),
+    ])
+    toast.saved(`${current.key} changed to ${label}.`)
+  } catch (error) {
+    select.value = current.type
+    const problem = toApiError(error)
+    const reasons = Object.values(problem.fieldErrors).flat()
+    typeError.value = `Could not change to ${label}: ${
+      reasons.length ? reasons.join(' ') : (problem.problem?.detail ?? problem.title)
+    }`
+  } finally {
+    changingType.value = false
   }
 }
 function changePriority(event: Event) {
@@ -1259,8 +1342,21 @@ function logged(updated: TimeTrackingItem) {
               :title="`Remaining ${child.remainingHours ?? 0}h of ${child.estimateHours ?? '-'}h estimated`"
               >{{ child.remainingHours ?? 0 }}h / {{ child.estimateHours ?? '-' }}h</span
             ><span
-              class="text-muted-foreground shrink-0 capitalize text-xs"
+              v-if="childLatestRun.get(child.key)"
+              class="shrink-0"
               :class="child.estimateHours === null && child.remainingHours === null && 'ml-auto'"
+              :title="`Latest implementation run: ${runStatusLabel[childLatestRun.get(child.key)!.status]}`"
+              data-testid="subtask-run-status"
+              ><RunStatusBadge :status="childLatestRun.get(child.key)!.status" /></span
+            ><span
+              class="text-muted-foreground shrink-0 capitalize text-xs"
+              :class="
+                child.estimateHours === null &&
+                child.remainingHours === null &&
+                !childLatestRun.get(child.key) &&
+                'ml-auto'
+              "
+              title="Workflow state"
               >{{ child.stateCategory }}</span
             >
           </button>
@@ -1728,6 +1824,24 @@ function logged(updated: TimeTrackingItem) {
             <Check class="size-4" aria-hidden="true" />
           </button>
         </div>
+      </div>
+      <div v-if="mayChangeType" class="rounded-md border p-3">
+        <label for="item-type" class="font-label">Type</label>
+        <select
+          id="item-type"
+          :value="currentItem.type"
+          class="border-input bg-background mt-2 w-full rounded border px-2 py-1.5 text-sm disabled:opacity-50"
+          :disabled="changingType"
+          @change="changeType"
+        >
+          <option v-for="entry in itemTypes" :key="entry.value" :value="entry.value">
+            {{ entry.label }}
+          </option>
+        </select>
+        <p v-if="changingType" class="text-muted-foreground mt-1 text-xs">Saving…</p>
+        <p v-else-if="typeError" class="text-destructive mt-1 text-xs" role="alert">
+          {{ typeError }}
+        </p>
       </div>
       <div class="rounded-md border p-3">
         <label for="item-status" class="font-label">

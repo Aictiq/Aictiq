@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ExternalLink, Hand, Play, RotateCcw, StepForward } from '@lucide/vue'
+import { CalendarClock, ExternalLink, Hand, Play, RotateCcw, StepForward } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
-import { cancelRun, continueRun, dispatchRun, getRun, startRunNow } from '@/api/runs'
+import { cancelRun, continueRun, dispatchRun, getRun, rescheduleRun, startRunNow } from '@/api/runs'
 import type { Run } from '@/api/runs'
 import { getProject, hasProjectRole } from '@/api/projects'
 import KeyChip from '@/components/common/KeyChip.vue'
@@ -15,6 +15,14 @@ import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useRunRealtime } from '@/composables/useRunRealtime'
 import { useToast } from '@/composables/useToast'
 import { useProjectsStore } from '@/stores/projects'
@@ -24,13 +32,17 @@ import {
   canRetryRun,
   chainTotals,
   formatCost,
+  formatScheduledTime,
   formatTokens,
+  fromDateTimeLocalValue,
   isLiveRun,
   isWaitingForSchedule,
+  localTimeZone,
   projectKeyOf,
   runDuration,
   runRequesterLabel,
   runScheduledLabel,
+  toDateTimeLocalValue,
 } from '@/lib/runs'
 import { ApiError } from '@/utils/api'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
@@ -195,6 +207,53 @@ useRunRealtime({
 const mayStartNow = computed(
   () => mayCancel.value && !!run.value && isWaitingForSchedule(run.value, now.value),
 )
+const editingTime = ref(false)
+const startAt = ref('')
+const scheduleError = ref<string | null>(null)
+const rescheduling = ref(false)
+const timeZone = localTimeZone()
+
+function editTime() {
+  if (!run.value?.scheduledFor) return
+  startAt.value = toDateTimeLocalValue(new Date(run.value.scheduledFor))
+  scheduleError.value = null
+  editingTime.value = true
+}
+
+async function saveTime() {
+  const current = run.value
+  if (!current || rescheduling.value) return
+  const at = fromDateTimeLocalValue(startAt.value)
+  scheduleError.value = !at
+    ? 'Choose a date and time.'
+    : at.getTime() <= Date.now()
+      ? 'Choose a start time in the future.'
+      : null
+  if (scheduleError.value || !at) return
+
+  rescheduling.value = true
+  try {
+    await rescheduleRun(slug.value, current.id, at.toISOString())
+    editingTime.value = false
+    toast.info(`Run scheduled for ${formatScheduledTime(at.toISOString())}.`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      editingTime.value = false
+      toast.info('This run is no longer waiting for its start time.')
+    } else if (error instanceof ApiError && error.fieldErrors.scheduledFor?.length) {
+      scheduleError.value = error.fieldErrors.scheduledFor.join(' ')
+    } else {
+      toast.error(error)
+    }
+  } finally {
+    rescheduling.value = false
+    await client.invalidateQueries({ queryKey: [slug.value, 'runs', current.id] })
+    if (current.itemKey) {
+      await client.invalidateQueries({ queryKey: [slug.value, current.itemKey] })
+    }
+  }
+}
+
 const startingNow = ref(false)
 async function startNow() {
   const current = run.value
@@ -328,6 +387,17 @@ const tokens = computed(() => {
             Start now
           </Button>
           <Button
+            v-if="mayStartNow"
+            variant="outline"
+            size="sm"
+            :disabled="startingNow || rescheduling"
+            data-testid="run-edit-time"
+            @click="editTime"
+          >
+            <CalendarClock class="size-3.5" aria-hidden="true" />
+            Edit time
+          </Button>
+          <Button
             v-if="mayCancel"
             variant="outline"
             size="sm"
@@ -341,7 +411,9 @@ const tokens = computed(() => {
           </Button>
         </div>
 
-        <dl class="text-muted-foreground mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-3">
+        <dl
+          class="text-muted-foreground mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-3"
+        >
           <div>
             <dt class="inline">Playbook&nbsp;</dt>
             <dd class="text-foreground inline">{{ run.playbookName ?? '-' }}</dd>
@@ -370,11 +442,15 @@ const tokens = computed(() => {
           </div>
           <div>
             <dt class="inline">Queued&nbsp;</dt>
-            <dd class="text-foreground inline">{{ run.queuedAt ? new Date(run.queuedAt).toLocaleString() : '-' }}</dd>
+            <dd class="text-foreground inline">
+              {{ run.queuedAt ? new Date(run.queuedAt).toLocaleString() : '-' }}
+            </dd>
           </div>
           <div v-if="run.scheduledFor">
             <dt class="inline">Start at&nbsp;</dt>
-            <dd class="text-foreground inline">{{ new Date(run.scheduledFor).toLocaleString() }}</dd>
+            <dd class="text-foreground inline">
+              {{ new Date(run.scheduledFor).toLocaleString() }}
+            </dd>
           </div>
           <div v-if="run.startedAt">
             <dt class="inline">Started&nbsp;</dt>
@@ -487,7 +563,11 @@ const tokens = computed(() => {
       <section v-if="chain" class="border-border rounded-lg border" data-testid="run-chain">
         <header class="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-3 pb-2">
           <h2 class="text-sm font-medium">Continued runs</h2>
-          <span v-if="chainTotal" class="text-muted-foreground text-xs" data-testid="run-chain-total">
+          <span
+            v-if="chainTotal"
+            class="text-muted-foreground text-xs"
+            data-testid="run-chain-total"
+          >
             Total {{ chainTotal }}
           </span>
         </header>
@@ -504,7 +584,9 @@ const tokens = computed(() => {
               </span>
               <RunStatusBadge :status="link.status" />
               <span v-if="link.autoContinued" class="text-muted-foreground italic">automatic</span>
-              <span class="text-muted-foreground">{{ new Date(link.queuedAt).toLocaleString() }}</span>
+              <span class="text-muted-foreground">{{
+                new Date(link.queuedAt).toLocaleString()
+              }}</span>
               <span class="text-foreground ml-auto">
                 {{
                   [
@@ -528,11 +610,66 @@ const tokens = computed(() => {
         </summary>
         <pre
           class="text-muted-foreground overflow-x-auto px-4 pt-1 pb-4 font-mono text-xs whitespace-pre-wrap"
-          >{{ run.promptSnapshot }}</pre
-        >
+          >{{ run.promptSnapshot }}</pre>
       </details>
 
       <RunLog ref="logRef" :slug="slug" :run="run" />
     </div>
+    <Dialog
+      :open="editingTime"
+      @update:open="
+        (value) => {
+          if (!rescheduling) editingTime = value
+        }
+      "
+    >
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit start time</DialogTitle>
+          <DialogDescription>
+            The item stays reserved for this run. Work begins at or after the selected time, when a
+            runner is available.
+          </DialogDescription>
+        </DialogHeader>
+        <form id="reschedule-run" class="space-y-2" novalidate @submit.prevent="saveTime">
+          <label for="run-start-at" class="text-sm font-medium">Start at</label>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              id="run-start-at"
+              v-model="startAt"
+              type="datetime-local"
+              :min="toDateTimeLocalValue(now)"
+              :disabled="rescheduling"
+              :aria-invalid="!!scheduleError"
+              :aria-describedby="scheduleError ? 'run-start-at-error' : undefined"
+              data-testid="run-start-at"
+              class="border-input bg-background min-w-0 flex-1 rounded border px-2 py-1.5 text-sm"
+            />
+            <span class="text-muted-foreground shrink-0 text-xs">{{ timeZone }}</span>
+          </div>
+          <p
+            v-if="scheduleError"
+            id="run-start-at-error"
+            role="alert"
+            class="text-destructive text-xs"
+          >
+            {{ scheduleError }}
+          </p>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" :disabled="rescheduling" @click="editingTime = false"
+            >Cancel</Button
+          >
+          <Button
+            type="submit"
+            form="reschedule-run"
+            :disabled="rescheduling"
+            data-testid="run-save-time"
+          >
+            {{ rescheduling ? 'Saving…' : 'Save time' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </SettingsSection>
 </template>

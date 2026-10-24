@@ -5,10 +5,16 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Run } from '@/api/runs'
+import { formatScheduledTime, toDateTimeLocalValue } from '@/lib/runs'
+import { useSessionStore } from '@/stores/session'
 import RunDetailView from '@/views/factory/RunDetailView.vue'
 
 // The page owns a SignalR connection; nothing here is about realtime.
 vi.mock('@/composables/useRunRealtime', () => ({ useRunRealtime: () => {} }))
+const { infoToast } = vi.hoisted(() => ({ infoToast: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ info: infoToast, error: vi.fn() }),
+}))
 
 /**
  * A failed run's way forward: Continue resumes the agent's session where it stopped, Retry
@@ -81,9 +87,33 @@ const failed: Run = {
   ],
 }
 
-function stubFetch(run: Run) {
+interface RunTestOptions {
+  role?: string
+  userId?: string
+  rescheduleStatus?: number
+}
+
+function stubFetch(run: Run, options: RunTestOptions) {
   const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
     const url = String(input)
+    if (url.endsWith('/reschedule') && init?.method === 'POST') {
+      const status = options.rescheduleStatus ?? 204
+      if (status === 204) {
+        run.scheduledFor = JSON.parse(String(init.body)).scheduledFor
+        return new Response(null, { status })
+      }
+      if (status === 409) run.status = 'running'
+      return new Response(
+        JSON.stringify({
+          title: 'Cannot reschedule run',
+          status,
+          ...(status === 422
+            ? { errors: { scheduledFor: ['Choose a start time in the future.'] } }
+            : {}),
+        }),
+        { status, headers: { 'content-type': 'application/problem+json' } },
+      )
+    }
     const body =
       init?.method === 'POST'
         ? { ...run, id: 'r-3', status: 'queued' }
@@ -92,7 +122,7 @@ function stubFetch(run: Run) {
           : url.includes('/runs/')
             ? run
             : url.includes('/projects/')
-              ? { id: 'pr1', key: 'PROJ', role: 'admin', isArchived: false }
+              ? { id: 'pr1', key: 'PROJ', role: options.role ?? 'admin', isArchived: false }
               : {}
     return new Response(JSON.stringify(body), {
       status: init?.method === 'POST' ? 201 : 200,
@@ -103,8 +133,20 @@ function stubFetch(run: Run) {
   return fetchMock
 }
 
-async function mountRun(run: Run) {
-  const fetchMock = stubFetch(run)
+async function mountRun(run: Run, options: RunTestOptions = {}) {
+  const fetchMock = stubFetch(run, options)
+  const pinia = createPinia()
+  useSessionStore(pinia).set({
+    id: options.userId ?? 'u1',
+    email: 'fixture@example.invalid',
+    firstName: 'Fixture',
+    lastName: 'Reviewer',
+    fullName: 'Fixture Reviewer',
+    roles: [],
+    isAgent: false,
+    avatarKey: null,
+    timeZone: 'UTC',
+  })
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -115,13 +157,118 @@ async function mountRun(run: Run) {
   await router.push(`/o/acme/factory/runs/${run.id}`)
   await router.isReady()
   const wrapper = mount(RunDetailView, {
-    global: { plugins: [createPinia(), router, VueQueryPlugin] },
+    global: {
+      plugins: [pinia, router, VueQueryPlugin],
+      stubs: {
+        Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
+        DialogContent: { template: '<div><slot /></div>' },
+        DialogHeader: { template: '<div><slot /></div>' },
+        DialogTitle: { template: '<div><slot /></div>' },
+        DialogDescription: { template: '<div><slot /></div>' },
+        DialogFooter: { template: '<div><slot /></div>' },
+      },
+    },
   })
   await flushPromises()
   return { wrapper, router, fetchMock }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
+})
+
+const scheduled = (): Run => ({
+  ...failed,
+  status: 'queued',
+  scheduledFor: new Date(Date.now() + 6 * 3_600_000).toISOString(),
+  continuable: false,
+  chain: null,
+})
+
+describe('RunDetailView rescheduling', () => {
+  it.each([
+    ['queued', new Date(Date.now() + 3_600_000).toISOString(), 'member', 'u1', true],
+    ['queued', new Date(Date.now() + 3_600_000).toISOString(), 'admin', 'u2', true],
+    ['queued', new Date(Date.now() + 3_600_000).toISOString(), 'member', 'u2', false],
+    ['queued', null, 'admin', 'u1', false],
+    ['queued', '2020-01-01T00:00:00Z', 'admin', 'u1', false],
+    ['running', new Date(Date.now() + 3_600_000).toISOString(), 'admin', 'u1', false],
+    ['cancelled', new Date(Date.now() + 3_600_000).toISOString(), 'admin', 'u1', false],
+    ['succeeded', new Date(Date.now() + 3_600_000).toISOString(), 'admin', 'u1', false],
+  ] as const)(
+    'shows Edit time for %s at %s with role %s and user %s: %s',
+    async (status, scheduledFor, role, userId, visible) => {
+      const { wrapper } = await mountRun({ ...scheduled(), status, scheduledFor }, { role, userId })
+      expect(wrapper.find('[data-testid="run-edit-time"]').exists()).toBe(visible)
+      wrapper.unmount()
+    },
+  )
+
+  it('prefills the existing time and saves a future time to the same run', async () => {
+    const current = scheduled()
+    const { wrapper, fetchMock } = await mountRun(current)
+    await wrapper.get('[data-testid="run-edit-time"]').trigger('click')
+    const input = wrapper.get<HTMLInputElement>('[data-testid="run-start-at"]')
+    expect(input.element.value).toBe(toDateTimeLocalValue(new Date(current.scheduledFor!)))
+    const at = new Date(Date.now() + 12 * 3_600_000)
+    at.setSeconds(0, 0)
+    await input.setValue(toDateTimeLocalValue(at))
+    await wrapper.get('#reschedule-run').trigger('submit')
+    await flushPromises()
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(String(posts[0]![0])).toBe('/api/v1/orgs/acme/runs/r-2/reschedule')
+    expect(JSON.parse(String(posts[0]![1]!.body))).toEqual({ scheduledFor: at.toISOString() })
+    expect(wrapper.find('#reschedule-run').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="run-scheduled"]').text()).toBe(
+      `Scheduled for ${formatScheduledTime(at.toISOString())}`,
+    )
+    wrapper.unmount()
+  })
+
+  it.each(['', '2020-01-01T12:00', toDateTimeLocalValue(new Date())])(
+    'rejects an empty, past or current time: %s',
+    async (value) => {
+      const { wrapper, fetchMock } = await mountRun(scheduled())
+      await wrapper.get('[data-testid="run-edit-time"]').trigger('click')
+      await wrapper.get('[data-testid="run-start-at"]').setValue(value)
+      await wrapper.get('#reschedule-run').trigger('submit')
+      expect(wrapper.get('[role="alert"]').text()).toBe(
+        value ? 'Choose a start time in the future.' : 'Choose a date and time.',
+      )
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+      wrapper.unmount()
+    },
+  )
+
+  it('shows backend field validation on the date/time input', async () => {
+    const { wrapper } = await mountRun(scheduled(), { rescheduleStatus: 422 })
+    await wrapper.get('[data-testid="run-edit-time"]').trigger('click')
+    await wrapper.get('#reschedule-run').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Choose a start time in the future.')
+    expect(wrapper.get('[data-testid="run-start-at"]').attributes('aria-invalid')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('explains a 409 and refreshes the page when the run has started', async () => {
+    const { wrapper, fetchMock } = await mountRun(scheduled(), { rescheduleStatus: 409 })
+    await wrapper.get('[data-testid="run-edit-time"]').trigger('click')
+    const readsBeforeSave = fetchMock.mock.calls.filter(
+      ([, init]) => !init?.method || init.method === 'GET',
+    ).length
+    await wrapper.get('#reschedule-run').trigger('submit')
+    await flushPromises()
+    expect(infoToast).toHaveBeenCalledWith('This run is no longer waiting for its start time.')
+    expect(wrapper.find('#reschedule-run').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="run-edit-time"]').exists()).toBe(false)
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => !init?.method || init.method === 'GET').length,
+    ).toBeGreaterThan(readsBeforeSave)
+    wrapper.unmount()
+  })
+})
 
 describe('RunDetailView continue and retry', () => {
   it('offers Continue and Retry on a continuable run and shows the chain with its total', async () => {

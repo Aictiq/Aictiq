@@ -345,6 +345,37 @@ export function runScheduledLabel(
     : null
 }
 
+/**
+ * "Agent run scheduled for Thu 2 Oct, 22:00" on a board card whose run waits for its start
+ * time; null otherwise, including once that time has come and the run is merely queued.
+ */
+export function cardScheduledLabel(
+  card: { scheduledRunAt?: string | null },
+  now: Date = new Date(),
+): string | null {
+  const scheduledFor = card.scheduledRunAt ?? null
+  return isWaitingForSchedule({ status: 'queued', scheduledFor }, now)
+    ? `Agent run scheduled for ${formatScheduledTime(scheduledFor!)}`
+    : null
+}
+
+/** Long timers are capped: a browser fires a timeout over ~24.8 days at once. */
+const MAX_SCHEDULE_WAIT_MS = 3_600_000
+
+/**
+ * How long until the soonest of these start times passes, so a board can drop a clock when
+ * its time comes without a run event to tell it; null when none is still ahead.
+ */
+export function msUntilNextSchedule(
+  times: (string | null | undefined)[],
+  now: Date = new Date(),
+): number | null {
+  const ahead = times
+    .map((time) => (time ? new Date(time).getTime() - now.getTime() : Number.NaN))
+    .filter((ms) => ms > 0)
+  return ahead.length ? Math.min(Math.min(...ahead), MAX_SCHEDULE_WAIT_MS) : null
+}
+
 // ── The log ─────────────────────────────────────────────────────────────────────────
 
 /** The cap marker's sequence: it sorts after anything a runner can send. */

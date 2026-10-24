@@ -1,6 +1,7 @@
 using Aictiq.Modules.Notifications.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
+using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -11,7 +12,26 @@ using Aictiq.Modules.Notifications.Delivery;
 
 namespace Aictiq.Modules.Notifications.Endpoints;
 
-public sealed record NotificationView(Guid Id, NotificationKind Kind, Guid? ProjectId, Guid? ItemId, string? ItemKey, string Message, DateTimeOffset CreatedAt, DateTimeOffset? ReadAt, Guid? OrganizationId = null, Guid? RunId = null);
+/// <summary>
+/// One inbox row. <c>message</c> is the plain sentence every row has always had; the rest
+/// says who did what on which item. <c>actor</c> is null on rows written before it was
+/// recorded, and for an agent shown to someone who may not operate the factory. The item
+/// fields are the item as it is now, and null when the caller can no longer see it.
+/// </summary>
+public sealed record NotificationView(Guid Id, NotificationKind Kind, Guid? ProjectId, Guid? ItemId, string? ItemKey, string Message, DateTimeOffset CreatedAt, DateTimeOffset? ReadAt, Guid? OrganizationId = null, Guid? RunId = null)
+{
+    public NotificationActorView? Actor { get; init; }
+    /// <summary>The item's title, or a sprint's name or wiki page's title for a row without an item.</summary>
+    public string? ItemTitle { get; init; }
+    public string? ItemType { get; init; }
+    /// <summary>The item's current workflow state.</summary>
+    public string? ItemState { get; init; }
+    /// <summary>A transition's states as they were named when it happened.</summary>
+    public string? FromState { get; init; }
+    public string? ToState { get; init; }
+    public string? Emoji { get; init; }
+}
+public sealed record NotificationActorView(string Id, string DisplayName, string? AvatarKey, bool IsAgent);
 public sealed record MarkNotificationsReadRequest(IReadOnlyList<Guid>? Ids, bool All = false);
 /// <summary>
 /// <c>email</c> is the persisted delivery mode. The boolean constructor/property remain
@@ -53,12 +73,48 @@ public static class NotificationEndpoints
     // Nullable, like every other optional query flag: a non-nullable bool is *required*
     // by minimal-API binding, so the inbox - which sends the flag only when filtering -
     // got a 400 rather than its list.
-    private static async Task<IResult> List(bool? unread, NotificationVisibility visibility, ICurrentUser user, CancellationToken ct)
+    private static async Task<IResult> List(bool? unread, NotificationVisibility visibility, ICurrentUser user,
+        IProjectAccess access, IWorkItemLookup items, IUserDirectory directory, AmbientCurrentTenant tenant, CancellationToken ct)
     {
-        var query = await visibility.QueryAsync(user.UserId!, unread == true, ct);
-        return Results.Ok(await query.OrderByDescending(x => x.CreatedAt).Take(200)
-            .Select(x => new NotificationView(x.Id, x.Kind, x.ProjectId, x.ItemId, x.ItemKey, x.Message,
-                x.CreatedAt, x.ReadAt, x.OrganizationId, x.RunId)).ToListAsync(ct));
+        var userId = user.UserId!;
+        var query = await visibility.QueryAsync(userId, unread == true, ct);
+        var rows = await query.OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(ct);
+
+        // Each organization is read under its own tenant, and an item only from a project the
+        // caller can still see: the inbox spans organizations, the item data does not.
+        var summaries = new Dictionary<Guid, WorkItemSummary>();
+        var operatesFactory = new HashSet<Guid>();
+        foreach (var organization in rows.GroupBy(x => x.OrganizationId))
+        {
+            using var scope = tenant.Use(organization.Key);
+            if (await access.CanOperateFactoryAsync(userId, organization.Key, ct)) operatesFactory.Add(organization.Key);
+            var visibleProjects = new List<Guid>();
+            foreach (var projectId in organization.Where(x => x.ItemId is not null).Select(x => x.ProjectId).OfType<Guid>().Distinct())
+                if (await access.GetProjectRoleAsync(userId, projectId, ct) is not null) visibleProjects.Add(projectId);
+            var itemIds = organization.Where(x => x.ItemId is not null && x.ProjectId is { } p && visibleProjects.Contains(p))
+                .Select(x => x.ItemId!.Value).Distinct().ToArray();
+            foreach (var summary in await items.GetSummariesAsync(itemIds, ct))
+                if (visibleProjects.Contains(summary.ProjectId)) summaries[summary.Id] = summary;
+        }
+        var actors = await directory.GetAsync(rows.Select(x => x.ActorId).OfType<string>().Distinct().ToArray(), ct);
+
+        return Results.Ok(rows.Select(x =>
+        {
+            var item = x.ItemId is { } itemId ? summaries.GetValueOrDefault(itemId) : null;
+            var actor = x.ActorId is { } actorId ? actors.GetValueOrDefault(actorId) : null;
+            // An agent's name is factory detail (AICTIQ-105/106): a stakeholder reads "Someone".
+            if (actor is { IsAgent: true } && !operatesFactory.Contains(x.OrganizationId)) actor = null;
+            return new NotificationView(x.Id, x.Kind, x.ProjectId, x.ItemId, x.ItemKey, x.Message, x.CreatedAt, x.ReadAt, x.OrganizationId, x.RunId)
+            {
+                Actor = actor is null ? null : new NotificationActorView(actor.Id, actor.DisplayName, actor.AvatarKey, actor.IsAgent),
+                ItemTitle = x.ItemId is null ? x.Subject : item?.Title,
+                ItemType = item?.Type,
+                ItemState = item?.State,
+                FromState = x.FromState,
+                ToState = x.ToState,
+                Emoji = x.Emoji
+            };
+        }).ToList());
     }
     private static async Task<IResult> MarkRead(MarkNotificationsReadRequest request, NotificationsDbContext db, ICurrentUser user, TimeProvider clock, CancellationToken ct) { var query = db.Notifications.IgnoreQueryFilters().Where(x => x.UserId == user.UserId && x.ReadAt == null); if (!request.All) { var ids = request.Ids?.Distinct().ToArray() ?? []; if (ids.Length == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["ids"] = ["Provide notification ids or all=true."] }); query = query.Where(x => ids.Contains(x.Id)); } var count = await query.ExecuteUpdateAsync(x => x.SetProperty(n => n.ReadAt, clock.GetUtcNow()), ct); return Results.Ok(new { read = count }); }
     private static async Task<IResult> Preferences(NotificationsDbContext db, ICurrentUser user, CancellationToken ct) => Results.Ok(await db.Preferences.AsNoTracking().Where(x => x.UserId == user.UserId).Select(x => new NotificationPreferenceView(x.Kind, x.InApp, x.EmailMode) { TelegramMode = x.TelegramMode, SlackMode = x.SlackMode, DiscordMode = x.DiscordMode }).ToListAsync(ct));

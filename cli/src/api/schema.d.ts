@@ -4358,6 +4358,12 @@ export interface components {
             /** Format: uint32 */
             version: number | string;
         };
+        NotificationActorView: {
+            avatarKey: null | string;
+            displayName: string;
+            id: string;
+            isAgent: boolean;
+        };
         /** @enum {unknown} */
         NotificationKind: "assigned" | "mentioned" | "commented" | "transitioned" | "claimed" | "sprintStarted" | "sprintCompleted" | "wikiMentioned" | "inviteAccepted" | "replied" | "reacted";
         NotificationPreferenceView: {
@@ -4366,13 +4372,19 @@ export interface components {
             kind?: components["schemas"]["NotificationKind"];
         };
         NotificationView: {
+            actor?: null | components["schemas"]["NotificationActorView"];
             /** Format: date-time */
             createdAt: string;
+            emoji?: null | string;
+            fromState?: null | string;
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             itemId: null | string;
             itemKey: null | string;
+            itemState?: null | string;
+            itemTitle?: null | string;
+            itemType?: null | string;
             kind: components["schemas"]["NotificationKind"];
             message: string;
             /** Format: uuid */
@@ -4383,6 +4395,7 @@ export interface components {
             readAt: null | string;
             /** Format: uuid */
             runId?: null | string;
+            toState?: null | string;
         };
         /** @enum {unknown} */
         OrgRole: "owner" | "admin" | "member" | "guest" | null;

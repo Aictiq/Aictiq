@@ -454,9 +454,25 @@ matching runner takes it, or the chosen runner if you picked one. While the run 
 and run pages show **Scheduled for** and the local start time. Cancel the run from the run
 page, as you would any queued run. The sweeper does not treat a waiting scheduled run as stuck.
 
+While the run is waiting for its scheduled time, its page offers **Edit time** beside
+**Start now** and **Cancel run**. Edit time opens the current start time in your browser's
+timezone; choose a future time and save. This updates the same run and keeps its item claim,
+agent, playbook, runner and tags. Moving the time also changes its place in the queue. The
+new time appears live on the run page, the item's run list and the claim banner.
+
+Only a factory operator who dispatched the run, or a project Admin who is a factory
+operator, may change its time or start it now. If the old time has arrived, a runner has
+taken the run, or the run was cancelled before you save, Aictiq refuses the change and
+refreshes the page.
+
 Over the API, send `scheduledFor` with an offset, such as `"2026-10-02T22:00:00+02:00"`, in
 the body of `POST /api/v1/orgs/{org}/items/{key}/runs`. The CLI and rules always start runs
 immediately.
+
+To change a waiting run's time through the API, send `{ "scheduledFor": "2026-10-03T22:00:00+02:00" }`
+to `POST /api/v1/orgs/{org}/runs/{runId}/reschedule`. It returns `204` on success, a
+`scheduledFor` field error for a time at or before now, `403` for insufficient permissions,
+or `409` when the run is no longer waiting for its scheduled time.
 
 ### Continue a failed run
 
@@ -560,8 +576,12 @@ lives or what a change would take. The automatically selected agent answers on o
   fallback described above.
 - **Tickets from the chat.** Ask the agent to "make tickets for these 3 bugs", and it creates them
   in this project, with you as the reporter, and links them in its answer. Creating items is the
-  only change the run's token allows. It has no `write` scope, so it cannot edit, transition,
-  comment on or delete items, and it can create items only in this project.
+  only change the run's token allows. You can also ask for one parent ticket with subtasks:
+  it creates the parent first, then linked Tasks with the agreed titles. Tasks inherit the
+  parent's team unless you name another team. The answer groups and links the created items;
+  if creation fails partway through, it reports the failure and what was already created,
+  without replacing subtasks with standalone tickets. It has no `write` scope, so it cannot
+  edit, transition, comment on or delete items, and it can create items only in this project.
 - **Who can chat.** Project members who may operate the factory. Stakeholders and Guests see no
   chat button, and the API answers them with 403.
 

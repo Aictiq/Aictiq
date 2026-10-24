@@ -29,7 +29,8 @@ public sealed class CommentReactionNotificationHandler(NotificationsDbContext db
             {
                 OrganizationId = e.OrganizationId, UserId = e.CommentAuthorId, EventId = e.EventId,
                 Kind = NotificationKind.Reacted, ProjectId = e.ProjectId, ItemId = e.ItemId, ItemKey = e.ItemKey,
-                Message = $"{actor} reacted {e.Emoji} to your comment.", CreatedAt = clock.GetUtcNow()
+                Message = $"{actor} reacted {e.Emoji} to your comment.", CreatedAt = clock.GetUtcNow(),
+                ActorId = e.ActorId, Emoji = e.Emoji, Subject = e.ItemTitle
             };
             db.Notifications.Add(notification);
             try { await db.SaveChangesAsync(ct); }

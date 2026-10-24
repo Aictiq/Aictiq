@@ -118,6 +118,118 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
     }
 
     [Fact]
+    public async Task create_item_supports_every_type_and_all_allowed_parent_combinations()
+    {
+        var project = await CreateProjectAsync("TYP");
+        var epic = await CreateItemAsync(project, "Epic parent", WorkItemType.Epic);
+        var feature = await CreateItemAsync(project, "Feature parent", WorkItemType.Feature, epic.Id);
+        var story = await CreateItemAsync(project, "Story parent", WorkItemType.Story);
+        var bug = await CreateItemAsync(project, "Bug parent");
+        var task = await CreateItemAsync(project, "Task parent", WorkItemType.Task, story.Id);
+        await using var client = await ConnectAsync();
+
+        // The public hierarchy contract, including every rejected pairing. Keep these
+        // expectations independent of the validator exercised by create_item.
+        var allowed = new HashSet<(WorkItemType Parent, WorkItemType Child)>
+        {
+            (WorkItemType.Epic, WorkItemType.Feature),
+            (WorkItemType.Epic, WorkItemType.Story),
+            (WorkItemType.Epic, WorkItemType.Bug),
+            (WorkItemType.Feature, WorkItemType.Story),
+            (WorkItemType.Feature, WorkItemType.Bug),
+            (WorkItemType.Story, WorkItemType.Bug),
+            (WorkItemType.Story, WorkItemType.Task),
+            (WorkItemType.Bug, WorkItemType.Task),
+        };
+        var createdCount = 0;
+        foreach (var type in Enum.GetValues<WorkItemType>())
+        {
+            foreach (var parent in new WorkItemView?[] { null, epic, feature, story, bug, task })
+            {
+                var result = await CallAsync(client, "create_item", new()
+                {
+                    ["project"] = project.Key,
+                    ["title"] = $"{type} under {parent?.Type.ToString() ?? "root"}",
+                    ["type"] = type.ToString(),
+                    ["parentKey"] = parent?.Key,
+                });
+                var succeeds = parent is null
+                    ? type is WorkItemType.Epic or WorkItemType.Story or WorkItemType.Bug
+                    : allowed.Contains((parent.Type, type));
+                if (!succeeds)
+                {
+                    Assert.Contains("parent", Text(result), StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                Assert.NotEqual(true, result.IsError);
+                var created = Json(result);
+                Assert.Equal(type.ToString(), created.GetProperty("type").GetString());
+                Assert.Equal(parent?.Key, created.GetProperty("parentKey").GetString());
+                var persisted = await GetItemAsync(created.GetProperty("key").GetString()!);
+                Assert.Equal(type, persisted.Type);
+                Assert.Equal(parent?.Id, persisted.ParentId);
+                if (type is WorkItemType.Epic or WorkItemType.Feature) Assert.Null(persisted.TeamId);
+                else Assert.NotNull(persisted.TeamId);
+                Assert.Equal(persisted.Version, created.GetProperty("version").GetUInt32());
+                createdCount++;
+            }
+        }
+        Assert.Equal(11, createdCount);
+        Assert.Equal(5L + createdCount,
+            await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{project.Id}'"));
+    }
+
+    [Fact]
+    public async Task create_item_rejects_unknown_and_numeric_types_without_creating_anything()
+    {
+        var project = await CreateProjectAsync("BADT");
+        await using var client = await ConnectAsync();
+
+        foreach (var type in new object[] { "", " ", "Chore", "0", "4", "99", "-1", "Epic, Bug", 0, 4, 99 })
+        {
+            var refused = await CallAsync(client, "create_item", new()
+            {
+                ["project"] = project.Key, ["title"] = "Invalid type", ["type"] = type,
+            });
+            Assert.True(refused.IsError == true || Text(refused).Contains("type", StringComparison.OrdinalIgnoreCase));
+        }
+        Assert.Equal(0L, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{project.Id}'"));
+
+        var created = Json(await CallAsync(client, "create_item", new()
+        {
+            ["project"] = project.Key, ["title"] = "Case insensitive story", ["type"] = "sToRy",
+        }));
+        Assert.Equal("Story", created.GetProperty("type").GetString());
+        Assert.Equal(WorkItemType.Story, (await GetItemAsync(created.GetProperty("key").GetString()!)).Type);
+    }
+
+    [Fact]
+    public async Task create_item_refuses_missing_foreign_and_inaccessible_parents_without_creating_anything()
+    {
+        var project = await CreateProjectAsync("PAR");
+        var other = await CreateProjectAsync("OTH");
+        var foreign = await CreateItemAsync(other, "Foreign parent", WorkItemType.Story);
+        var hiddenProject = await CreateProjectAsync("HID", ProjectVisibility.Private);
+        var hidden = await CreateItemAsync(hiddenProject, "Private parent title", WorkItemType.Story);
+        await using var client = await ConnectAsync(await CreateTokenAsync(_colleague, [Scopes.Mcp, Scopes.Read, Scopes.Write]));
+
+        foreach (var parentKey in new[] { "PAR-99999", "not-an-item", "", " ", foreign.Key, hidden.Key })
+        {
+            var refused = await CallAsync(client, "create_item", new()
+            {
+                ["project"] = project.Key, ["title"] = "Refused child", ["type"] = "Task", ["parentKey"] = parentKey,
+            });
+            Assert.DoesNotContain("Private parent title", Text(refused));
+            Assert.DoesNotContain("\"key\":", Text(refused));
+            Assert.Contains(parentKey == foreign.Key ? "same project" : "not found or no access", Text(refused));
+        }
+        Assert.Equal(0L, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{project.Id}'"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{other.Id}'"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{hiddenProject.Id}'"));
+    }
+
+    [Fact]
     public async Task create_item_and_create_subtask_land_on_a_named_team_or_the_default()
     {
         var project = await CreateProjectAsync("TMS");
@@ -135,7 +247,11 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         var listed = Json(await CallAsync(client, "list_projects", new())).EnumerateArray().Single(p => p.GetProperty("key").GetString() == project.Key);
         Assert.Equal(2, listed.GetProperty("teams").GetArrayLength());
 
-        var unnamed = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "No team named" })).GetProperty("key").GetString()!;
+        var defaultBug = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "No team named" }));
+        Assert.Equal("Bug", defaultBug.GetProperty("type").GetString());
+        Assert.Null(defaultBug.GetProperty("parentKey").GetString());
+        var unnamed = defaultBug.GetProperty("key").GetString()!;
+        Assert.Equal(WorkItemType.Bug, (await GetItemAsync(unnamed)).Type);
         Assert.Equal(defaultTeam, (await GetItemAsync(unnamed)).TeamId);
         var byKey = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By key", ["description"] = "Owned by **Platform**.", ["team"] = "plat" })).GetProperty("key").GetString()!;
         var described = await GetItemAsync(byKey);
@@ -159,6 +275,15 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         // none, and takes the named team over either.
         var inherited = Json(await CallAsync(client, "create_subtask", new() { ["parentKey"] = byKey, ["title"] = "Inherited" })).GetProperty("key").GetString()!;
         Assert.Equal(platform.Id, (await GetItemAsync(inherited)).TeamId);
+        Assert.Equal(WorkItemType.Task, (await GetItemAsync(inherited)).Type);
+        Assert.Equal(described.Id, (await GetItemAsync(inherited)).ParentId);
+        var typed = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Typed task inherits team", ["type"] = "Task", ["parentKey"] = byKey }));
+        Assert.Equal(platform.Id, (await GetItemAsync(typed.GetProperty("key").GetString()!)).TeamId);
+        var story = await CreateItemAsync(project, "Story parent", WorkItemType.Story);
+        var defaultChild = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Untyped child stays a Bug", ["parentKey"] = story.Key }));
+        var child = await GetItemAsync(defaultChild.GetProperty("key").GetString()!);
+        Assert.Equal(WorkItemType.Bug, child.Type);
+        Assert.Equal(story.Id, child.ParentId);
         var named = Json(await CallAsync(client, "create_subtask", new() { ["parentKey"] = byKey, ["title"] = "Named", ["team"] = teams[0].GetProperty("key").GetString() })).GetProperty("key").GetString()!;
         Assert.Equal(defaultTeam, (await GetItemAsync(named)).TeamId);
         var orphan = await GetItemAsync(unnamed);
@@ -773,10 +898,10 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         return (await response.Content.ReadFromJsonAsync<ProjectView>(ApiTestContext.Json, TestContext.Current.CancellationToken))!;
     }
 
-    private async Task<WorkItemView> CreateItemAsync(ProjectView project, string title)
+    private async Task<WorkItemView> CreateItemAsync(ProjectView project, string title, WorkItemType type = WorkItemType.Bug, Guid? parentId = null)
     {
         var response = await _owner.PostAsJsonAsync($"/api/v1/orgs/mcp-org/projects/{project.Key}/items/",
-            new CreateWorkItemRequest(WorkItemType.Bug, title, null, null, null, null, null, null, null, null, null, null, null, null),
+            new CreateWorkItemRequest(type, title, null, null, null, null, null, parentId, null, null, null, null, null, null),
             ApiTestContext.Json, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, TestContext.Current.CancellationToken))!;

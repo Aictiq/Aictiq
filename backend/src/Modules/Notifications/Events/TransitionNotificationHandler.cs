@@ -40,7 +40,9 @@ public sealed class TransitionNotificationHandler(
             {
                 OrganizationId = e.OrganizationId, UserId = recipient, EventId = e.EventId,
                 Kind = NotificationKind.Transitioned, ProjectId = e.ProjectId, ItemId = e.ItemId,
-                ItemKey = e.Key, RunId = e.Run?.Id, Message = $"A watched item moved to a new workflow state.", CreatedAt = now
+                ItemKey = e.Key, RunId = e.Run?.Id, Message = $"A watched item moved to a new workflow state.", CreatedAt = now,
+                ActorId = e.ActorId, FromState = states.GetValueOrDefault(e.FromStateId), ToState = states.GetValueOrDefault(e.ToStateId),
+                Subject = e.ItemTitle
             };
             db.Notifications.Add(notification); created.Add(notification);
         }
