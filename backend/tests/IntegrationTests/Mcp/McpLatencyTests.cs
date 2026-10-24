@@ -64,6 +64,14 @@ public sealed class McpLatencyTests(PostgresFixture postgres, GarageFixture gara
 
         try
         {
+            // The first burst pays once for JIT, EF query compilation and growing the thread
+            // and connection pools - 2-3x a steady poll locally, seconds on a cold CI runner -
+            // and as a third of the samples it alone decided the p95. Agents poll for hours;
+            // the budget is for that steady state, so the first round is not measured.
+            await Task.WhenAll(clients.Select(async client =>
+                Assert.NotEqual(true, (await CallAsync(client, "list_ready_work", new() { ["project"] = project.Key })).IsError)));
+            await Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
             for (var poll = 0; poll < 3; poll++)
             {
                 var elapsed = await Task.WhenAll(clients.Select(async client =>
