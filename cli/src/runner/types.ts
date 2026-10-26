@@ -115,6 +115,8 @@ export interface RunAttachment {
   sizeBytes: number
   /** Undefined for an attachment on the item description itself. */
   commentId?: string | null
+  /** Set for a file attached to a question in a project chat. */
+  chatMessageId?: string | null
 }
 
 export interface ClaimedRun {

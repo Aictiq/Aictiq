@@ -20,6 +20,12 @@ import {
   type WorkspaceOptions,
 } from '../../src/runner/workspace.js'
 import { RunFailure, type ClaimedRun } from '../../src/runner/types.js'
+import { makeZip } from './zip-fixture.js'
+
+const zip = makeZip([
+  { name: 'docs/codename.txt', data: 'BLUEBIRD' },
+  { name: '../escape.txt', data: 'x' },
+])
 
 // Isolated from the developer's own git configuration (signing, hooks, default branch).
 const gitEnv: NodeJS.ProcessEnv = {
@@ -219,6 +225,49 @@ describe('local workspaces', () => {
     expect(ws.prompt).toContain('from comment c1')
     expect(events).toContain('Provisioned 2 attachments: screenshot.png, screenshot-2.png')
     expect(ws.attachmentsDir.startsWith(ws.checkout)).toBe(false)
+  })
+
+  it('provisions a chat run\'s files, extracts its ZIPs and names what it could not fetch', async () => {
+    const ws = await provisionWorkspace(
+      claimed({ itemId: null, itemKey: null, workOnDefaultBranch: true, branchName: 'main' }),
+      options({
+        attachments: {
+          list: async () => [
+            { id: 'z1', fileName: 'spec.zip', contentType: 'application/zip', sizeBytes: zip.byteLength, chatMessageId: 'm1' },
+            { id: 'p1', fileName: 'brief.pdf', contentType: 'application/pdf', sizeBytes: 4, chatMessageId: 'm1' },
+            { id: 'gone', fileName: 'gone.png', contentType: 'image/webp', sizeBytes: 4, chatMessageId: 'm1' },
+          ],
+          download: async (id) => {
+            if (id === 'gone') throw new Error('blob missing')
+            return id === 'z1' ? zip : new TextEncoder().encode('%PDF')
+          },
+        },
+      }),
+    )
+
+    expect(readFileSync(join(ws.attachmentsDir, 'spec.zip.contents', 'docs', 'codename.txt'), 'utf8')).toBe('BLUEBIRD')
+    expect(existsSync(join(ws.attachmentsDir, 'brief.pdf'))).toBe(true)
+    expect(ws.prompt).toContain('from chat question m1')
+    expect(ws.prompt).toContain(`extracted: ${join(ws.attachmentsDir, 'spec.zip.contents', 'docs', 'codename.txt')}`)
+    expect(ws.prompt).toContain('not extracted: ../escape.txt (unsafe path)')
+    expect(ws.prompt).toContain('- gone.png (download failed: blob missing)')
+    expect(events).toContain('Extracted 1 file from "spec.zip", skipped 1')
+    await ws.cleanup()
+  })
+
+  it('tells a chat run when its files could not be listed at all', async () => {
+    const ws = await provisionWorkspace(
+      claimed({ itemId: null, itemKey: null, workOnDefaultBranch: true, branchName: 'main' }),
+      options({
+        attachments: {
+          list: async () => { throw new Error('404') },
+          download: async () => new Uint8Array(),
+        },
+      }),
+    )
+
+    expect(ws.prompt).toContain('could not fetch the chat\'s files (404)')
+    await ws.cleanup()
   })
 
   it('skips over-limit and failed attachments without failing provisioning', async () => {

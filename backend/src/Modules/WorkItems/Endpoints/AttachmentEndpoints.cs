@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using Aictiq.Modules.WorkItems.Access;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
@@ -43,9 +44,10 @@ public static class AttachmentEndpoints
     /// <summary>
     /// Stores a file as a <em>pending</em> attachment; <c>commit</c> gives it an owner. Images
     /// are re-encoded as WebP no wider than <see cref="AttachmentsOptions.MaxImageWidth"/>, so
-    /// what is stored and served is the processed file, never the upload.
+    /// what is stored and served is the processed file, never the upload. <c>?purpose=chat</c>
+    /// also refuses what a project chat's agent could not read, so the panel says so at once.
     /// </summary>
-    private static async Task<IResult> Upload(HttpContext http, string projectKey, IFormFile? file,
+    private static async Task<IResult> Upload(HttpContext http, string projectKey, IFormFile? file, string? purpose,
         WorkItemsDbContext db, ICurrentTenant tenant, ICurrentUser user, IBlobStorage storage, IPlanLimits planLimits,
         IOptions<AttachmentsOptions> options, IProjectAccess access, TimeProvider clock, CancellationToken ct)
     {
@@ -53,6 +55,9 @@ public static class AttachmentEndpoints
         var projectId = http.ResolvedProjectId()!.Value;
         var error = Validate(file, policy, out var fileName, out var contentType);
         if (error is not null) return error;
+        var forChat = string.Equals(purpose, "chat", StringComparison.OrdinalIgnoreCase);
+        if (forChat && !ChatAttachmentFiles.IsSupported(contentType!))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["contentType"] = [ChatAttachmentFiles.UnsupportedType] });
 
         byte[] bytes;
         await using (var upload = file!.OpenReadStream())
@@ -74,6 +79,8 @@ public static class AttachmentEndpoints
                     break;
             }
         }
+        if (forChat && ChatAttachmentFiles.Unreadable(fileName!, contentType!, bytes) is { } unreadable)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = [unreadable] });
 
         var plan = await planLimits.CanStoreBytesAsync(tenant.OrganizationId!.Value, bytes.LongLength, ct);
         if (!plan.Allowed) return Results.Problem(plan.Reason, title: "Plan limit reached.", type: ProblemTypes.PlanLimit,
@@ -195,7 +202,8 @@ public static class AttachmentEndpoints
     }
 
     private static async Task<IResult> Download(HttpContext http, Guid attachmentId, WorkItemsDbContext db, ICurrentUser user,
-        IProjectAccess access, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, CancellationToken ct)
+        IProjectAccess access, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, IProjectChatGrants chatGrants,
+        CancellationToken ct)
     {
         // A pending upload is visible to its uploader only: a comment has no id until it is
         // posted, so the image being pasted into it is still pending while it is previewed.
@@ -205,6 +213,8 @@ public static class AttachmentEndpoints
         // A page's attachment is part of the page: a project member the page's permissions
         // hide it from must not read its images by id.
         if (attachment.WikiPageId is { } pageId && !await pages.CanReadAsync(pageId, attachment.ProjectId, user.UserId!, ct)) return Results.NotFound();
+        // A chat file is part of someone's private chat.
+        if (!await ChatAttachmentAccess.CanReadAsync(attachment, user, chatGrants, ct)) return Results.NotFound();
         // The same for a comment's, when the comment is the factory's and the caller may not see it.
         if (attachment.CommentId is { } commentId
             && await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId, ct) is { } comment
@@ -226,6 +236,8 @@ public static class AttachmentEndpoints
     {
         var attachment = await db.Attachments.FirstOrDefaultAsync(x => x.Id == attachmentId, ct);
         if (attachment is null || await access.GetProjectRoleAsync(user.UserId!, attachment.ProjectId, ct) is not { } role || !role.Satisfies(ProjectRole.Member)) return Results.NotFound();
+        // A chat file is its uploader's alone, so no admin removes it by id; clearing the chat does.
+        if (attachment.ChatMessageId is not null && attachment.UploadedBy != user.UserId) return Results.NotFound();
         if (attachment.UploadedBy != user.UserId && !role.Satisfies(ProjectRole.Admin)) return Results.Forbid();
         attachment.Deleted();
         db.Attachments.Remove(attachment);

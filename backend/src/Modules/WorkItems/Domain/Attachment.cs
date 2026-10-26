@@ -12,6 +12,11 @@ public sealed class Attachment : TenantEntity
     public Guid? ItemId { get; set; }
     public Guid? CommentId { get; set; }
     public Guid? WikiPageId { get; set; }
+    /// <summary>
+    /// A question in its uploader's private project chat. No FK: the chat lives in Automation.
+    /// Only the uploader, and the live chat run answering them, may read such a file.
+    /// </summary>
+    public Guid? ChatMessageId { get; set; }
     public required string ObjectKey { get; init; }
     public required string FileName { get; init; }
     public required string ContentType { get; init; }

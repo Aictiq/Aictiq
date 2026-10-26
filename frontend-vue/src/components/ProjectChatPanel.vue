@@ -1,11 +1,25 @@
 <script setup lang="ts">
-import { Loader2, MessageCircle, Send, Trash2, TriangleAlert, X } from '@lucide/vue'
+import {
+  FileArchive,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  MessageCircle,
+  Paperclip,
+  Send,
+  Trash2,
+  TriangleAlert,
+  X,
+} from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
+import { attachmentUrl, deleteAttachment, uploadAttachment } from '@/api/attachments'
 import {
   askProjectChat,
+  chatAttachmentAccept,
   clearProjectChat,
   getProjectChat,
+  MAX_CHAT_ATTACHMENTS,
   type ProjectChatMessage,
   type ProjectChatView,
 } from '@/api/project-chat'
@@ -21,12 +35,27 @@ import { ApiError } from '@/utils/api'
  * project chat run, so it needs a runner like any other run; while one is in progress the
  * panel polls for its answer and says plainly when no runner is there to take it.
  *
+ * Files - images, PDFs, text and ZIPs - upload as soon as they are picked, so a file the
+ * agent could not read is refused with its reason before the question goes. They stay
+ * selected until the question is accepted; the agent reads them on the runner.
+ *
  * Only for those who may operate the factory, like every other way of starting a run.
  */
 const props = defineProps<{ slug: string; projectKey: string }>()
 
 const MAX_QUESTION = 4000
 const POLL_MS = 2500
+/** Mirrors the server's default `Attachments:MaxBytes`; the server decides. */
+const MAX_FILE_BYTES = 25 * 1024 * 1024
+
+/** A picked file: uploading, uploaded as a pending attachment, or refused with the reason. */
+interface Selection {
+  key: number
+  file: File
+  status: 'uploading' | 'ready' | 'failed'
+  attachmentId: string | null
+  error: string | null
+}
 
 const organizations = useOrganizationsStore()
 const canOperate = computed(() => organizations.current?.canOperateFactory === true)
@@ -39,14 +68,21 @@ const sending = ref(false)
 const clearing = ref(false)
 const error = ref<string | null>(null)
 const list = ref<HTMLElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const selections = ref<Selection[]>([])
+let nextKey = 0
 
 const messages = computed(() => view.value?.messages ?? [])
 const pending = computed(() => messages.value.find((m) => m.status === 'pending') ?? null)
+const uploading = computed(() => selections.value.some((s) => s.status === 'uploading'))
+const refused = computed(() => selections.value.some((s) => s.status === 'failed'))
 const canSend = computed(
   () =>
     !sending.value &&
     !clearing.value &&
     pending.value === null &&
+    !uploading.value &&
+    !refused.value &&
     question.value.trim().length > 0 &&
     question.value.length <= MAX_QUESTION,
 )
@@ -57,12 +93,99 @@ function describe(failure: unknown): string {
     const fields = failure.fieldErrors
     return (
       fields.question?.[0] ??
+      fields.attachmentIds?.[0] ??
+      fields.file?.[0] ??
+      fields.contentType?.[0] ??
+      fields.sizeBytes?.[0] ??
+      fields.fileName?.[0] ??
       fields.agentId?.[0] ??
       (typeof failure.problem?.detail === 'string' ? failure.problem.detail : null) ??
       failure.title
     )
   }
   return 'Something went wrong. Try again.'
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileIcon(contentType: string, fileName: string) {
+  if (contentType.startsWith('image/')) return ImageIcon
+  if (contentType === 'application/zip' || /\.zip$/i.test(fileName)) return FileArchive
+  return FileText
+}
+
+function pickFiles() {
+  fileInput.value?.click()
+}
+
+function onFilesPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  addFiles([...(input.files ?? [])])
+  // The same file picked again after removing it must fire `change` again.
+  input.value = ''
+}
+
+function addFiles(files: File[]) {
+  error.value = null
+  const room = MAX_CHAT_ATTACHMENTS - selections.value.length
+  if (files.length > room) {
+    error.value = `Attach at most ${MAX_CHAT_ATTACHMENTS} files to one question.`
+  }
+  for (const file of files.slice(0, Math.max(0, room))) {
+    const selection: Selection = {
+      key: nextKey++,
+      file,
+      status: 'uploading',
+      attachmentId: null,
+      error: null,
+    }
+    selections.value.push(selection)
+    if (file.size === 0 || file.size > MAX_FILE_BYTES) {
+      fail(selection.key, `${file.name} must be between 1 byte and 25 MB.`)
+      continue
+    }
+    void upload(selection.key, file)
+  }
+}
+
+function find(key: number): Selection | undefined {
+  return selections.value.find((s) => s.key === key)
+}
+
+function fail(key: number, message: string) {
+  const selection = find(key)
+  if (!selection) return
+  selection.status = 'failed'
+  selection.error = message
+}
+
+async function upload(key: number, file: File) {
+  const mine = generation
+  try {
+    const id = await uploadAttachment(props.slug, props.projectKey, file, 'chat')
+    const selection = mine === generation ? find(key) : undefined
+    // Removed while it uploaded: nothing will send it, so it need not wait for the sweeper.
+    if (!selection) {
+      void deleteAttachment(props.slug, id).catch(() => undefined)
+      return
+    }
+    selection.status = 'ready'
+    selection.attachmentId = id
+  } catch (failure) {
+    if (mine === generation) fail(key, `${file.name}: ${describe(failure)}`)
+  }
+}
+
+function removeSelection(key: number) {
+  const selection = find(key)
+  selections.value = selections.value.filter((s) => s.key !== key)
+  if (selection?.attachmentId) {
+    void deleteAttachment(props.slug, selection.attachmentId).catch(() => undefined)
+  }
 }
 
 function runningLabel(message: ProjectChatMessage): string {
@@ -132,9 +255,16 @@ async function send() {
   sending.value = true
   error.value = null
   try {
-    const next = await askProjectChat(props.slug, props.projectKey, question.value.trim())
+    const next = await askProjectChat(
+      props.slug,
+      props.projectKey,
+      question.value.trim(),
+      selections.value.map((s) => s.attachmentId!),
+    )
     if (mine !== generation) return
     question.value = ''
+    // Sent: the files belong to the question now, so they are no longer the composer's.
+    selections.value = []
     show(next)
   } catch (failure) {
     if (mine !== generation) return
@@ -186,6 +316,7 @@ watch(
     view.value = null
     error.value = null
     question.value = ''
+    selections.value = []
     if (open.value) void load()
   },
 )
@@ -257,8 +388,8 @@ onBeforeUnmount(() => {
           Loading
         </p>
         <p v-else-if="messages.length === 0" class="text-muted-foreground text-sm">
-          Ask the agent about this project: how something works, what is left to do, or to
-          file tickets for you. It reads the project's code, wiki and items to answer.
+          Ask the agent about this project: how something works, what is left to do, or to file
+          tickets for you. It reads the project's code, wiki and items to answer.
         </p>
 
         <div
@@ -275,8 +406,43 @@ onBeforeUnmount(() => {
               {{ message.question }}
             </p>
           </div>
+          <ul
+            v-if="message.attachments?.length"
+            class="flex flex-wrap justify-end gap-1.5"
+            aria-label="Files sent with the question"
+            data-testid="project-chat-message-files"
+          >
+            <li v-for="file in message.attachments" :key="file.id">
+              <a
+                :href="attachmentUrl(slug, file.id)"
+                target="_blank"
+                rel="noopener"
+                class="border-border bg-background hover:bg-muted flex max-w-56 items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                :title="`${file.fileName} (${formatSize(file.sizeBytes)})`"
+                data-testid="project-chat-message-file"
+              >
+                <img
+                  v-if="file.contentType.startsWith('image/')"
+                  :src="attachmentUrl(slug, file.id)"
+                  alt=""
+                  class="size-6 shrink-0 rounded object-cover"
+                />
+                <component
+                  :is="fileIcon(file.contentType, file.fileName)"
+                  v-else
+                  class="text-muted-foreground size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                <span class="truncate">{{ file.fileName }}</span>
+              </a>
+            </li>
+          </ul>
 
-          <div v-if="message.status === 'pending'" class="space-y-1" data-testid="project-chat-running">
+          <div
+            v-if="message.status === 'pending'"
+            class="space-y-1"
+            data-testid="project-chat-running"
+          >
             <p class="text-muted-foreground flex items-center gap-2 text-sm">
               <Loader2 class="size-4 animate-spin" aria-hidden="true" />
               {{ runningLabel(message) }}
@@ -312,9 +478,71 @@ onBeforeUnmount(() => {
       </div>
 
       <form class="border-border space-y-2 border-t px-4 py-3" @submit.prevent="send">
-        <p v-if="error" class="text-destructive text-xs" role="alert" data-testid="project-chat-error">
+        <p
+          v-if="error"
+          class="text-destructive text-xs"
+          role="alert"
+          data-testid="project-chat-error"
+        >
           {{ error }}
         </p>
+        <ul
+          v-if="selections.length > 0"
+          class="space-y-1"
+          aria-label="Files to send"
+          data-testid="project-chat-selected-files"
+        >
+          <li
+            v-for="selection in selections"
+            :key="selection.key"
+            class="border-border flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs"
+            :class="selection.status === 'failed' ? 'border-destructive/40 bg-destructive/5' : ''"
+            data-testid="project-chat-selected-file"
+            :data-status="selection.status"
+          >
+            <Loader2
+              v-if="selection.status === 'uploading'"
+              class="text-muted-foreground mt-px size-3.5 shrink-0 animate-spin"
+              aria-hidden="true"
+            />
+            <TriangleAlert
+              v-else-if="selection.status === 'failed'"
+              class="text-destructive mt-px size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <component
+              :is="fileIcon(selection.file.type, selection.file.name)"
+              v-else
+              class="text-muted-foreground mt-px size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span class="min-w-0 flex-1">
+              <span class="flex gap-1.5">
+                <span class="truncate font-medium">{{ selection.file.name }}</span>
+                <span class="text-muted-foreground shrink-0">{{
+                  formatSize(selection.file.size)
+                }}</span>
+              </span>
+              <span
+                v-if="selection.error"
+                class="text-destructive block"
+                data-testid="project-chat-file-error"
+              >
+                {{ selection.error }}
+              </span>
+            </span>
+            <button
+              type="button"
+              class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -m-0.5 rounded p-0.5 outline-none focus-visible:ring-2"
+              :aria-label="`Remove ${selection.file.name}`"
+              :title="`Remove ${selection.file.name}`"
+              data-testid="project-chat-remove-file"
+              @click="removeSelection(selection.key)"
+            >
+              <X class="size-3.5" aria-hidden="true" />
+            </button>
+          </li>
+        </ul>
         <Textarea
           v-model="question"
           class="max-h-40 min-h-10 resize-none"
@@ -325,9 +553,37 @@ onBeforeUnmount(() => {
           @keydown="onKeydown"
         />
         <div class="flex items-center justify-end gap-2">
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            class="hidden"
+            :accept="chatAttachmentAccept"
+            data-testid="project-chat-file-input"
+            @change="onFilesPicked"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            :disabled="selections.length >= MAX_CHAT_ATTACHMENTS || sending"
+            aria-label="Attach files"
+            :title="`Attach images, PDFs, text or ZIP files (up to ${MAX_CHAT_ATTACHMENTS})`"
+            data-testid="project-chat-attach"
+            @click="pickFiles"
+          >
+            <Paperclip class="size-4" aria-hidden="true" />
+          </Button>
           <span v-if="pending" class="text-muted-foreground mr-auto text-xs">
             Wait for the answer before asking again.
           </span>
+          <span v-else-if="refused" class="text-destructive mr-auto text-xs">
+            Remove the files that cannot be sent.
+          </span>
+          <span v-else-if="uploading" class="text-muted-foreground mr-auto text-xs">
+            Uploading files...
+          </span>
+          <span v-else class="mr-auto" />
           <Button type="submit" size="sm" :disabled="!canSend" data-testid="project-chat-send">
             <Send class="size-3.5" aria-hidden="true" />
             Send

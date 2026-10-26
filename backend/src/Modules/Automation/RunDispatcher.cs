@@ -102,7 +102,7 @@ public sealed class RunDispatcher(
     AutomationDbContext db, ICurrentTenant tenant, IWorkItemLookup items, IProjectAccess access,
     IAgentIdentities agents, IWikiPageAccess pages, IWikiPageContent pageContent,
     IWorkItemClaims claims, IRealtimePublisher realtime, IOrganizationBillingState billing,
-    FleetMode fleetMode, TimeProvider clock, IOrganizationLookup organizations)
+    FleetMode fleetMode, TimeProvider clock, IOrganizationLookup organizations, IProjectChatAttachments chatAttachments)
 {
     /// <param name="project">The item's project, already resolved and checked by the door.</param>
     /// <param name="itemKey">The item to hand over.</param>
@@ -338,11 +338,14 @@ public sealed class RunDispatcher(
     /// It borrows only the harness and required tags of the project's default playbook, when there
     /// is one. The chat's earlier answered pairs go along as context, and the oldest pairs past
     /// <see cref="ProjectChat.MaxPairs"/> are dropped in the same transaction that saves the
-    /// question. One question per person is live at a time: <c>ux_runs_project_chat_live</c>.
-    /// The door has checked the person may operate the factory in a project they are a member of.
+    /// question, and so are their files. One question per person is live at a time:
+    /// <c>ux_runs_project_chat_live</c>. The door has checked the person may operate the factory
+    /// in a project they are a member of, and has bound <paramref name="attachments"/> to
+    /// <paramref name="messageId"/>, the id the new question is saved under.
     /// </summary>
     public async Task<DispatchResult> DispatchProjectChatAsync(
-        string organizationSlug, ProjectRef project, string userId, string requesterName, string question, CancellationToken ct)
+        string organizationSlug, ProjectRef project, string userId, string requesterName, string question,
+        Guid messageId, IReadOnlyList<ProjectChatAttachment> attachments, CancellationToken ct)
     {
         var organizationId = tenant.OrganizationId!.Value;
         if (await billing.IsReadOnlyAsync(organizationId, ct))
@@ -371,13 +374,22 @@ public sealed class RunDispatcher(
             .OrderByDescending(row => row.AskedAt)
             .Take(ProjectChat.MaxPairs - 1)
             .ToListAsync(ct);
-        var turns = history.Where(row => row.Status == ProjectChatMessageStatus.Answered && row.Answer is not null)
+        var keptIds = history.Select(row => row.Id).ToHashSet();
+        var files = (await chatAttachments.ListAsync(project.Id, userId, ct))
+            .Where(file => keptIds.Contains(file.ChatMessageId))
+            .ToLookup(file => file.ChatMessageId);
+        var answered = history.Where(row => row.Status == ProjectChatMessageStatus.Answered && row.Answer is not null).ToList();
+        var turns = answered
             .OrderBy(row => row.AskedAt)
-            .Select(row => new ProjectChatTurn(row.Question, row.Answer!))
+            .Select(row => new ProjectChatTurn(row.Question, row.Answer!, files[row.Id].ToList()))
             .ToList();
+        // A question that got no answer is not part of the conversation, but its files are
+        // still in the chat and on the runner, so the agent is told what they are.
+        var unanswered = history.Where(row => !answered.Contains(row)).OrderBy(row => row.AskedAt)
+            .SelectMany(row => files[row.Id]).ToList();
         var prompt = ProjectChatPromptComposer.Compose(
             agent.DisplayName ?? agentUserId, organizationSlug,
-            project.Key, project.Name, requesterName, turns, question);
+            project.Key, project.Name, requesterName, turns, question, attachments, unanswered);
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -399,6 +411,7 @@ public sealed class RunDispatcher(
         db.Runs.Add(run);
         db.ProjectChatMessages.Add(new ProjectChatMessage
         {
+            Id = messageId,
             OrganizationId = organizationId,
             ProjectId = project.Id,
             UserId = userId,
@@ -409,14 +422,16 @@ public sealed class RunDispatcher(
         });
 
         var kept = history.Select(row => row.Id).ToList();
+        List<Guid> dropped;
         await using (var transaction = await db.Database.BeginTransactionAsync(ct))
         {
             try
             {
                 // The new question is the newest pair; everything older than the pairs kept with it goes.
-                await db.ProjectChatMessages
-                    .Where(row => row.ProjectId == project.Id && row.UserId == userId && !kept.Contains(row.Id))
-                    .ExecuteDeleteAsync(ct);
+                var older = db.ProjectChatMessages
+                    .Where(row => row.ProjectId == project.Id && row.UserId == userId && !kept.Contains(row.Id));
+                dropped = await older.Select(row => row.Id).ToListAsync(ct);
+                await older.ExecuteDeleteAsync(ct);
                 await db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
             }
@@ -427,6 +442,10 @@ public sealed class RunDispatcher(
                 return DispatchResult.InProgress();
             }
         }
+        // After the commit: the files live in another module's tables, and a dropped question's
+        // files are useless without it. A failure here leaves files the chat no longer shows,
+        // which the next trim or a clear removes.
+        await chatAttachments.DeleteAsync(project.Id, userId, dropped, ct);
 
         await realtime.PublishAsync(project.Id, "run.changed", new
         {

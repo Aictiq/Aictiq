@@ -239,11 +239,12 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
             b.HasIndex(x => new { x.ProjectId, x.ItemId });
             b.HasIndex(x => new { x.ProjectId, x.CommentId });
             b.HasIndex(x => new { x.ProjectId, x.WikiPageId });
+            b.HasIndex(x => new { x.ProjectId, x.UploadedBy, x.ChatMessageId });
             b.HasIndex(x => new { x.Status, x.CreatedAt });
             b.HasOne<WorkItem>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<Comment>().WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.Cascade);
             b.ToTable(t => t.HasCheckConstraint("ck_attachments_owner_and_status",
-                "(status = 0 AND item_id IS NULL AND comment_id IS NULL AND wiki_page_id IS NULL) OR (status = 1 AND ((item_id IS NOT NULL)::integer + (comment_id IS NOT NULL)::integer + (wiki_page_id IS NOT NULL)::integer = 1))"));
+                "(status = 0 AND item_id IS NULL AND comment_id IS NULL AND wiki_page_id IS NULL AND chat_message_id IS NULL) OR (status = 1 AND ((item_id IS NOT NULL)::integer + (comment_id IS NOT NULL)::integer + (wiki_page_id IS NOT NULL)::integer + (chat_message_id IS NOT NULL)::integer = 1))"));
         });
     }
 

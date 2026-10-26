@@ -17,11 +17,19 @@ public sealed record ProjectChatView(IReadOnlyList<ProjectChatMessageView> Messa
 /// <param name="Answer">The agent's answer as Markdown, once it has one.</param>
 /// <param name="RunStatus">While the question is pending: where its run stands (queued, assigned or running).</param>
 /// <param name="Error">Why there is no answer, for a failed, cancelled or timed-out question.</param>
+/// <param name="Attachments">The files sent with the question, in the order they were attached.</param>
 public sealed record ProjectChatMessageView(
     Guid Id, string Question, string? Answer, ProjectChatMessageStatus Status, RunStatus? RunStatus,
-    string? Error, Guid? RunId, DateTimeOffset AskedAt, DateTimeOffset? AnsweredAt);
+    string? Error, Guid? RunId, DateTimeOffset AskedAt, DateTimeOffset? AnsweredAt,
+    IReadOnlyList<ProjectChatAttachmentView> Attachments);
 
-public sealed record AskProjectChatRequest(string? Question);
+public sealed record ProjectChatAttachmentView(Guid Id, string FileName, string ContentType, long SizeBytes);
+
+/// <summary>A chat file as a project-chat run's runner lists it, shaped like an item attachment.</summary>
+public sealed record ProjectChatRunAttachmentView(Guid Id, Guid ChatMessageId, string FileName, string ContentType, long SizeBytes);
+
+/// <param name="AttachmentIds">The caller's own pending uploads (<c>?purpose=chat</c>) to send with the question.</param>
+public sealed record AskProjectChatRequest(string? Question, IReadOnlyList<Guid>? AttachmentIds = null);
 
 /// <summary>
 /// A person's private chat with the project's default agent. Every route reads and writes the
@@ -39,21 +47,44 @@ public static class ProjectChatEndpoints
         chat.MapPost("/", AskAsync).RequireProjectRole(ProjectRole.Member).RequireFactoryOperator()
             .RequireProjectWritable().RequireScope(Scopes.Write);
         chat.MapDelete("/", ClearAsync).RequireProjectRole(ProjectRole.Member).RequireFactoryOperator().RequireScope(Scopes.Write);
+        // For the runner of a project-chat run, with that run's own token: the files it provisions.
+        chat.MapGet("/attachments", AttachmentsAsync).RequireProjectRole(ProjectRole.Guest).RequireScope(Scopes.Read);
         return api;
     }
 
     private static async Task<IResult> GetAsync(
-        HttpContext http, AutomationDbContext db, ICurrentUser user, IOptions<AutomationOptions> options,
-        TimeProvider clock, CancellationToken ct)
+        HttpContext http, AutomationDbContext db, ICurrentUser user, IProjectChatAttachments attachments,
+        IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken ct)
     {
         var project = http.ResolvedProject()!;
-        return Results.Ok(await ViewAsync(db, project.Id, user.UserId!, options.Value, clock.GetUtcNow(), ct));
+        return Results.Ok(await ViewAsync(db, attachments, project.Id, user.UserId!, options.Value, clock.GetUtcNow(), ct));
+    }
+
+    /// <summary>
+    /// The files of the chat a live project-chat run answers: that run's token reads the asker's
+    /// files in the run's project and nothing else. Anyone else reads their own, which the
+    /// chat view already shows them.
+    /// </summary>
+    private static async Task<IResult> AttachmentsAsync(
+        HttpContext http, ICurrentUser user, IProjectChatGrants grants, IProjectChatAttachments attachments, CancellationToken ct)
+    {
+        var project = http.ResolvedProject()!;
+        var owner = user.UserId!;
+        if (user.Scopes.Contains(Scopes.ProjectChat, StringComparer.Ordinal))
+        {
+            var grant = user.TokenId is { } tokenId ? await grants.FindAsync(tokenId, ct) : null;
+            if (grant is null || grant.ProjectId != project.Id) return Results.NotFound();
+            owner = grant.RequestedBy;
+        }
+        var files = await attachments.ListAsync(project.Id, owner, ct);
+        return Results.Ok(files.Select(file => new ProjectChatRunAttachmentView(
+            file.Id, file.ChatMessageId, file.FileName, file.ContentType, file.SizeBytes)));
     }
 
     private static async Task<IResult> AskAsync(
         string orgSlug, AskProjectChatRequest request, HttpContext http, AutomationDbContext db, ICurrentUser user,
-        RunDispatcher dispatcher, IUserDirectory directory, IOptions<AutomationOptions> options, TimeProvider clock,
-        CancellationToken ct)
+        RunDispatcher dispatcher, IUserDirectory directory, IProjectChatAttachments attachments,
+        IOptions<AutomationOptions> options, TimeProvider clock, CancellationToken ct)
     {
         var question = request.Question?.Trim();
         if (string.IsNullOrEmpty(question) || question.Length > ProjectChat.MaxQuestionLength)
@@ -64,7 +95,37 @@ public static class ProjectChatEndpoints
         var project = http.ResolvedProject()!;
         var userId = user.UserId!;
         var requesterName = (await directory.GetAsync([userId], ct)).GetValueOrDefault(userId)?.DisplayName ?? user.UserName ?? "A project member";
-        var result = await dispatcher.DispatchProjectChatAsync(orgSlug, project, userId, requesterName, question, ct);
+
+        // The files are bound to the question's id before the question exists, so a file that
+        // cannot go along refuses the question with nothing queued; a refused question hands
+        // its files back as uploads the person may send again.
+        var messageId = Guid.CreateVersion7();
+        var (attached, failure) = await attachments.AttachAsync(project.Id, userId, messageId, request.AttachmentIds ?? [], ct);
+        if (failure is { Plan: { } plan })
+        {
+            return Results.Problem(plan.Reason, title: "Plan limit reached.", type: ProblemTypes.PlanLimit,
+                statusCode: StatusCodes.Status402PaymentRequired,
+                extensions: new Dictionary<string, object?> { ["limit"] = plan.Limit, ["upgradeUrl"] = plan.UpgradeUrl });
+        }
+        if (failure is not null)
+        {
+            return Validation(failure.Field, failure.Message);
+        }
+
+        DispatchResult result;
+        try
+        {
+            result = await dispatcher.DispatchProjectChatAsync(orgSlug, project, userId, requesterName, question, messageId, attached, ct);
+        }
+        catch when (attached.Count > 0)
+        {
+            await attachments.DetachAsync(messageId, CancellationToken.None);
+            throw;
+        }
+        if (result.Outcome != DispatchOutcome.Created && attached.Count > 0)
+        {
+            await attachments.DetachAsync(messageId, CancellationToken.None);
+        }
         switch (result.Outcome)
         {
             case DispatchOutcome.Validation:
@@ -84,7 +145,7 @@ public static class ProjectChatEndpoints
         }
 
         return Results.Created($"/api/v1/orgs/{orgSlug}/projects/{project.Key}/chat",
-            await ViewAsync(db, project.Id, userId, options.Value, clock.GetUtcNow(), ct));
+            await ViewAsync(db, attachments, project.Id, userId, options.Value, clock.GetUtcNow(), ct));
     }
 
     /// <summary>
@@ -93,7 +154,7 @@ public static class ProjectChatEndpoints
     /// </summary>
     private static async Task<IResult> ClearAsync(
         HttpContext http, AutomationDbContext db, ICurrentUser user, IRealtimePublisher realtime,
-        TimeProvider clock, CancellationToken ct)
+        IProjectChatAttachments attachments, TimeProvider clock, CancellationToken ct)
     {
         var project = http.ResolvedProject()!;
         var userId = user.UserId!;
@@ -102,6 +163,7 @@ public static class ProjectChatEndpoints
         // Messages first, so the cancelled run's completion finds nothing left to answer.
         await db.ProjectChatMessages.Where(row => row.ProjectId == project.Id && row.UserId == userId)
             .ExecuteDeleteAsync(ct);
+        await attachments.DeleteAsync(project.Id, userId, chatMessageIds: null, ct);
 
         var live = await db.Runs.AsNoTracking()
             .Where(run => run.ProjectId == project.Id && run.RequestedBy == userId
@@ -148,8 +210,8 @@ public static class ProjectChatEndpoints
     }
 
     private static async Task<ProjectChatView> ViewAsync(
-        AutomationDbContext db, Guid projectId, string userId, AutomationOptions options, DateTimeOffset now,
-        CancellationToken ct)
+        AutomationDbContext db, IProjectChatAttachments attachments, Guid projectId, string userId, AutomationOptions options,
+        DateTimeOffset now, CancellationToken ct)
     {
         var messages = await db.ProjectChatMessages.AsNoTracking()
             .Where(row => row.ProjectId == projectId && row.UserId == userId)
@@ -157,6 +219,7 @@ public static class ProjectChatEndpoints
             .Take(ProjectChat.MaxPairs)
             .ToListAsync(ct);
         messages.Reverse();
+        var files = (await attachments.ListAsync(projectId, userId, ct)).ToLookup(file => file.ChatMessageId);
 
         var pendingRunIds = messages.Where(row => row.Status == ProjectChatMessageStatus.Pending && row.RunId is not null)
             .Select(row => row.RunId!.Value).ToList();
@@ -181,7 +244,9 @@ public static class ProjectChatEndpoints
                 row.Status == ProjectChatMessageStatus.Pending && row.RunId is { } runId && pendingRuns.TryGetValue(runId, out var run)
                     ? run.Status
                     : null,
-                row.Error, row.RunId, row.AskedAt, row.AnsweredAt)).ToList(),
+                row.Error, row.RunId, row.AskedAt, row.AnsweredAt,
+                files[row.Id].Select(file => new ProjectChatAttachmentView(file.Id, file.FileName, file.ContentType, file.SizeBytes)).ToList()))
+                .ToList(),
             runnerOnline);
     }
 

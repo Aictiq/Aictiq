@@ -104,16 +104,20 @@ function fileNameOf(file: File): string {
   return `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`
 }
 
-/** Uploads a file as a pending attachment and returns its id. */
+/**
+ * Uploads a file as a pending attachment and returns its id. `purpose: 'chat'` also has the
+ * server refuse what a project chat's agent could not read, with the reason.
+ */
 export async function uploadAttachment(
   slug: string,
   projectKey: string,
   file: File,
+  purpose?: 'chat',
 ): Promise<string> {
   const form = new FormData()
   form.append('file', file, fileNameOf(file))
   const attachment = await apiFetch<Attachment>(
-    `/orgs/${slug}/projects/${projectKey}/attachments`,
+    `/orgs/${slug}/projects/${projectKey}/attachments${purpose ? `?purpose=${purpose}` : ''}`,
     {
       method: 'POST',
       body: form,
