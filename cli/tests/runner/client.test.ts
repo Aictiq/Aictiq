@@ -32,19 +32,23 @@ describe('RunnerClient attachments', () => {
     }
   })
 
-  it('asks nothing about an item for a project-chat run, which has none', async () => {
-    const calls: string[] = []
-    const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
-      calls.push(String(input))
-      return new Response(null, { status: 204 })
+  it('lists a project-chat run\'s chat files and asks nothing about an item, which it has none of', async () => {
+    const calls: Array<{ url: URL; init: RequestInit }> = []
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      calls.push({ url: new URL(String(input)), init: init ?? {} })
+      return new Response(JSON.stringify([
+        { id: 'a1', chatMessageId: 'm1', fileName: 'spec.zip', contentType: 'application/zip', sizeBytes: 3 },
+      ]), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
     const client = new RunnerClient({ baseUrl: 'https://aictiq.example.com/', token: runnerToken, fetch: fetchImpl })
     const run = { ...claimedRun(), itemId: null, itemKey: null }
 
-    expect(await client.listAttachments(run)).toEqual([])
+    expect(await client.listAttachments(run)).toHaveLength(1)
     await client.itemHeartbeat(run)
 
-    expect(calls).toHaveLength(0)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url.pathname).toBe('/api/v1/orgs/acme/projects/ACME/chat/attachments')
+    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${agentToken}`)
   })
 })
 

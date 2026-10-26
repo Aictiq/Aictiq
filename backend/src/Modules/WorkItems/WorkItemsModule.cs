@@ -24,6 +24,7 @@ public static class WorkItemsModule
     {
         services.AddModuleDbContext<WorkItemsDbContext>("work");
         services.AddScoped<IStorageUsageSource, WorkItemsStorageUsageSource>();
+        services.AddScoped<IProjectChatAttachments, WorkItemsProjectChatAttachments>();
         services.AddScoped<IWorkItemLookup, WorkItemLookup>();
         services.AddScoped<IProjectWorkflowAccess, ProjectWorkflowAccess>();
         services.AddScoped<IWorkItemLabels, WorkItemLabelsAccess>();

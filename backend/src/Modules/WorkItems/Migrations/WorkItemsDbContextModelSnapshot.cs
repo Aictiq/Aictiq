@@ -19,7 +19,7 @@ namespace Aictiq.Modules.WorkItems.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("work")
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -30,6 +30,10 @@ namespace Aictiq.Modules.WorkItems.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<Guid?>("ChatMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("chat_message_id");
 
                     b.Property<Guid?>("CommentId")
                         .HasColumnType("uuid")
@@ -121,9 +125,12 @@ namespace Aictiq.Modules.WorkItems.Migrations
                     b.HasIndex("Status", "CreatedAt")
                         .HasDatabaseName("ix_attachments_status_created_at");
 
+                    b.HasIndex("ProjectId", "UploadedBy", "ChatMessageId")
+                        .HasDatabaseName("ix_attachments_project_id_uploaded_by_chat_message_id");
+
                     b.ToTable("attachments", "work", t =>
                         {
-                            t.HasCheckConstraint("ck_attachments_owner_and_status", "(status = 0 AND item_id IS NULL AND comment_id IS NULL AND wiki_page_id IS NULL) OR (status = 1 AND ((item_id IS NOT NULL)::integer + (comment_id IS NOT NULL)::integer + (wiki_page_id IS NOT NULL)::integer = 1))");
+                            t.HasCheckConstraint("ck_attachments_owner_and_status", "(status = 0 AND item_id IS NULL AND comment_id IS NULL AND wiki_page_id IS NULL AND chat_message_id IS NULL) OR (status = 1 AND ((item_id IS NOT NULL)::integer + (comment_id IS NOT NULL)::integer + (wiki_page_id IS NOT NULL)::integer + (chat_message_id IS NOT NULL)::integer = 1))");
                         });
                 });
 

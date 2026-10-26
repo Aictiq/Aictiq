@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -607,9 +608,191 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         Assert.Equal(expectedAgent, run.AgentId);
     }
 
+    private static readonly byte[] Png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+
+    private static readonly byte[] Pdf = "%PDF-1.4\n% codename BLUEBIRD\n%%EOF\n"u8.ToArray();
+
+    private static byte[] Zip(params (string Name, string Text)[] entries)
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, text) in entries)
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(name).Open());
+                writer.Write(text);
+            }
+        }
+        return buffer.ToArray();
+    }
+
+    private async Task<HttpResponseMessage> UploadAsync(HttpClient client, string name, string type, byte[] bytes, bool forChat = true)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue(type);
+        form.Add(file, "file", name);
+        return await client.PostAsync($"{ProjectBase}/attachments{(forChat ? "?purpose=chat" : "")}", form, Ct);
+    }
+
+    private async Task<Guid> UploadOkAsync(HttpClient client, string name, string type, byte[] bytes, bool forChat = true)
+    {
+        var response = await UploadAsync(client, name, type, bytes, forChat);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<AttachmentView>(ApiTestContext.Json, Ct))!.Id;
+    }
+
+    private async Task<ChatView> AskWithFilesAsync(HttpClient client, string question, params Guid[] attachmentIds)
+    {
+        var response = await client.PostAsJsonAsync(ChatUrl, new { question, attachmentIds }, ApiTestContext.Json, Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<ChatView>(ApiTestContext.Json, Ct))!;
+    }
+
+    private static string Download(Guid attachmentId) => $"/api/v1/orgs/{Slug}/attachments/{attachmentId}/download";
+
+    [Fact]
+    public async Task files_go_with_a_question_and_only_the_asker_and_the_run_answering_them_read_them()
+    {
+        var png = await UploadOkAsync(Owner, "screen.png", "image/png", Png);
+        var pdf = await UploadOkAsync(Owner, "brief.pdf", "application/pdf", Pdf);
+        var zip = await UploadOkAsync(Owner, "spec.zip", "application/zip", Zip(("docs/codename.txt", "BLUEBIRD")));
+
+        var asked = await AskWithFilesAsync(Owner, "What is the codename?", pdf, zip, png);
+        var message = Assert.Single(asked.Messages);
+        Assert.Equal(["brief.pdf", "spec.zip", "screen.webp"], message.Attachments.Select(file => file.FileName));
+        Assert.Equal("image/webp", message.Attachments[2].ContentType);
+        // Reopening the chat shows them again.
+        Assert.Equal(3, Assert.Single((await ChatAsync(Owner)).Messages).Attachments.Count);
+
+        var runId = message.RunId!.Value;
+        var prompt = (await RunAsync(runId)).PromptSnapshot!;
+        Assert.Contains("Files attached to this question:", prompt);
+        Assert.Contains("- `spec.zip` (application/zip, ", prompt);
+        Assert.Contains($"attachment id {zip}", prompt);
+        Assert.Contains("Never imply that you considered content you could not read.", prompt);
+
+        // Private: the asker downloads them, another operator of the project cannot read or delete them.
+        Assert.Equal(HttpStatusCode.OK, (await Owner.GetAsync(Download(pdf), Ct)).StatusCode);
+        using var colleague = await MemberAsync(canOperateFactory: true);
+        Assert.Equal(HttpStatusCode.NotFound, (await colleague.GetAsync(Download(pdf), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await colleague.DeleteAsync($"/api/v1/orgs/{Slug}/attachments/{pdf}", Ct)).StatusCode);
+        Assert.Empty((await colleague.GetFromJsonAsync<List<ChatFileView>>($"{ChatUrl}/attachments", ApiTestContext.Json, Ct))!);
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE id = '{pdf}' AND item_id IS NOT NULL"));
+
+        // The run answering the question lists and reads them with its own token.
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await StartAsync(runner, runId);
+        using var agent = TokenClient(claimed.AgentToken);
+        var listed = (await agent.GetFromJsonAsync<List<ChatFileView>>($"{ChatUrl}/attachments", ApiTestContext.Json, Ct))!;
+        Assert.Equal([pdf, zip, png], listed.Select(file => file.Id));
+        Assert.All(listed, file => Assert.Equal(message.Id, file.ChatMessageId));
+        var zipped = await agent.GetByteArrayAsync(Download(zip), Ct);
+        using (var archive = new ZipArchive(new MemoryStream(zipped)))
+        {
+            Assert.Equal("docs/codename.txt", Assert.Single(archive.Entries).FullName);
+        }
+        await using (var mcp = await ConnectAsync(claimed.AgentToken))
+        {
+            var image = await mcp.CallToolAsync("get_attachment", new Dictionary<string, object?> { ["id"] = png }, cancellationToken: Ct);
+            Assert.True(image.IsError != true, Text(image));
+            Assert.Single(image.Content.OfType<ImageContentBlock>());
+        }
+        // Another project is not the run's: no listing there.
+        var other = await CreateProjectAsync("Ops", "ops", ProjectVisibility.Organization);
+        Assert.False((await agent.GetAsync($"/api/v1/orgs/{Slug}/projects/{other.Key}/chat/attachments", Ct)).IsSuccessStatusCode);
+
+        await FinishAsync(runner, runId, new RunnerFinishRequest("succeeded", 0, "BLUEBIRD.", null, null, null, null, null));
+
+        // The follow-up names the earlier files as part of the conversation, and its run gets them.
+        var followUp = await AskAsync(Owner, "And in the PDF?");
+        var followUpRunId = followUp.Messages[^1].RunId!.Value;
+        Assert.Contains("Files attached to it:", (await RunAsync(followUpRunId)).PromptSnapshot);
+        var next = await StartAsync(runner, followUpRunId);
+        using var nextAgent = TokenClient(next.AgentToken);
+        Assert.Equal(3, (await nextAgent.GetFromJsonAsync<List<ChatFileView>>($"{ChatUrl}/attachments", ApiTestContext.Json, Ct))!.Count);
+        Assert.Equal(HttpStatusCode.OK, (await nextAgent.GetAsync(Download(pdf), Ct)).StatusCode);
+
+        // Clearing the chat deletes its files.
+        Assert.Equal(HttpStatusCode.NoContent, (await Owner.DeleteAsync(ChatUrl, Ct)).StatusCode);
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE uploaded_by = '{OwnerId}' AND chat_message_id IS NOT NULL"));
+        Assert.Equal(HttpStatusCode.NotFound, (await Owner.GetAsync(Download(pdf), Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task unreadable_or_foreign_files_are_refused_with_a_reason_and_stay_uploads()
+    {
+        // Refused at upload, with the reason, when picked for chat.
+        var broken = await UploadAsync(Owner, "broken.zip", "application/zip", "not a zip"u8.ToArray());
+        Assert.Equal(HttpStatusCode.BadRequest, broken.StatusCode);
+        Assert.Contains("broken.zip is not a readable ZIP archive.", await broken.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        var empty = await UploadAsync(Owner, "empty.zip", "application/zip", Zip());
+        Assert.Contains("empty.zip is an empty ZIP archive.", await empty.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        var docx = await UploadAsync(Owner, "notes.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "PK"u8.ToArray());
+        Assert.Contains("cannot be read in chat", await docx.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        // An upload made for something else is checked again when it is sent; nothing is queued.
+        var fake = await UploadOkAsync(Owner, "fake.pdf", "application/pdf", "hello"u8.ToArray(), forChat: false);
+        var refused = await Owner.PostAsJsonAsync(ChatUrl, new { question = "Read it", attachmentIds = new[] { fake } }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("fake.pdf is not a readable PDF.", await refused.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        Assert.Empty((await ChatAsync(Owner)).Messages);
+
+        // Someone else's upload is not mine to send.
+        using var colleague = await MemberAsync(canOperateFactory: true);
+        var theirs = await UploadOkAsync(colleague, "theirs.pdf", "application/pdf", Pdf);
+        var foreign = await Owner.PostAsJsonAsync(ChatUrl, new { question = "Read theirs", attachmentIds = new[] { theirs } }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, foreign.StatusCode);
+        Assert.Contains("no longer uploaded", await foreign.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        // Too many at once.
+        var six = new List<Guid>();
+        for (var i = 0; i < 6; i++) six.Add(await UploadOkAsync(Owner, $"n{i}.txt", "text/plain", "note"u8.ToArray()));
+        var tooMany = await Owner.PostAsJsonAsync(ChatUrl, new { question = "All of them", attachmentIds = six }, ApiTestContext.Json, Ct);
+        Assert.Contains("at most 5 files", await tooMany.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        // A question refused because another is in flight hands its file back as an upload.
+        await AskAsync(Owner, "First");
+        var good = await UploadOkAsync(Owner, "brief.pdf", "application/pdf", Pdf);
+        var busy = await Owner.PostAsJsonAsync(ChatUrl, new { question = "Second", attachmentIds = new[] { good } }, ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, busy.StatusCode);
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE id = '{good}' AND status = 0 AND chat_message_id IS NULL"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE id = '{fake}' AND status = 0"));
+    }
+
+    [Fact]
+    public async Task dropping_the_oldest_question_deletes_its_files()
+    {
+        var file = await UploadOkAsync(Owner, "old.txt", "text/plain", "old notes"u8.ToArray());
+        var first = await AskWithFilesAsync(Owner, "Question 1", file);
+        var firstId = first.Messages[0].Id;
+        await ExecuteSqlAsync($"""
+            UPDATE automation.runs SET status = 5, finished_at = now() WHERE id = '{first.Messages[0].RunId}';
+            UPDATE automation.project_chat_messages SET status = 1, answer = 'A', answered_at = now(), asked_at = now() - interval '1 hour'
+            WHERE id = '{firstId}'
+            """);
+        for (var i = 2; i <= 10; i++)
+        {
+            await ExecuteSqlAsync($"""
+                INSERT INTO automation.project_chat_messages
+                    (id, organization_id, project_id, user_id, question, answer, status, asked_at, answered_at)
+                VALUES (gen_random_uuid(), '{OrganizationId}', '{Project.Id}', '{OwnerId}', 'Question {i}', 'Answer {i}', 1,
+                        now() - interval '{20 - i} minutes', now() - interval '{20 - i} minutes')
+                """);
+        }
+
+        var eleventh = await AskAsync(Owner, "Question 11");
+        Assert.DoesNotContain(eleventh.Messages, row => row.Id == firstId);
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE id = '{file}'"));
+    }
+
     private sealed record ChatView(IReadOnlyList<ChatMessageView> Messages, bool RunnerOnline);
 
     private sealed record ChatMessageView(
         Guid Id, string Question, string? Answer, string Status, string? RunStatus, string? Error,
-        Guid? RunId, DateTimeOffset AskedAt, DateTimeOffset? AnsweredAt);
+        Guid? RunId, DateTimeOffset AskedAt, DateTimeOffset? AnsweredAt, IReadOnlyList<ChatFileView> Attachments);
+
+    private sealed record ChatFileView(Guid Id, Guid? ChatMessageId, string FileName, string ContentType, long SizeBytes);
 }

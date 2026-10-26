@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using Aictiq.Modules.Tenancy;
+using Aictiq.Modules.WorkItems.Access;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel;
@@ -129,6 +130,8 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         // opaque attachment id into a bypass for a restricted wiki subtree; this mirrors the
         // HTTP download endpoint rather than giving MCP a broader read surface.
         if (attachment.WikiPageId is { } pageId && !await pages.CanReadAsync(pageId, attachment.ProjectId, user.UserId!, cancellationToken))
+            throw new McpAnswerException("attachment not found or no access");
+        if (!await ChatAttachmentAccess.CanReadAsync(attachment, user, chatGrants, cancellationToken))
             throw new McpAnswerException("attachment not found or no access");
 
         var blob = await storage.OpenReadAsync(attachment.ObjectKey, cancellationToken);

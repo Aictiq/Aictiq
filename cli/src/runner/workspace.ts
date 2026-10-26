@@ -12,6 +12,7 @@ import {
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { RunFailure, type ClaimedRun, type RunAttachment } from './types.js'
+import { extractZip, type ZipExtraction } from './zip.js'
 
 export const DefaultAttachmentMaxCount = 25
 export const DefaultAttachmentMaxBytes = 25 * 1024 * 1024
@@ -393,8 +394,11 @@ async function provisionAttachments(run: ClaimedRun, attachmentsDir: string, opt
     attachments = await options.attachments.list()
   } catch (error) {
     // A missing list endpoint or a transient instance error must not prevent a code run.
-    options.event(`Could not list item attachments: ${message(error)}`)
-    return run.prompt
+    options.event(`Could not list ${run.itemKey === null ? 'chat' : 'item'} attachments: ${message(error)}`)
+    // A chat question may hinge on its files, so the agent must know it has none of them.
+    return run.itemKey === null
+      ? `${run.prompt}\n\n## Attachments\n\nThe runner could not fetch the chat's files (${message(error)}). Tell the person you could not read them.\n`
+      : run.prompt
   }
   if (attachments.length === 0) return run.prompt
 
@@ -402,42 +406,75 @@ async function provisionAttachments(run: ClaimedRun, attachmentsDir: string, opt
   chmodSync(attachmentsDir, 0o700)
   let total = 0
   const names = new Set<string>()
-  const provisioned: Array<RunAttachment & { localName: string }> = []
+  const provisioned: Array<RunAttachment & { localName: string; zip?: { dir: string; result: ZipExtraction } }> = []
+  const missing: string[] = []
 
   for (const attachment of attachments) {
     if (provisioned.length >= maxCount) {
       options.event(`Skipped attachment "${attachment.fileName}" (limit: ${maxCount} files)`)
+      missing.push(`${attachment.fileName} (over the runner's limit of ${maxCount} files)`)
       continue
     }
     if (!Number.isSafeInteger(attachment.sizeBytes) || attachment.sizeBytes < 0 || total + attachment.sizeBytes > maxBytes) {
       options.event(`Skipped attachment "${attachment.fileName}" (would exceed ${formatBytes(maxBytes)} total)`)
+      missing.push(`${attachment.fileName} (would exceed the runner's ${formatBytes(maxBytes)} total)`)
       continue
     }
     try {
       const bytes = await options.attachments.download(attachment.id)
       if (bytes.byteLength > attachment.sizeBytes || total + bytes.byteLength > maxBytes) {
         options.event(`Skipped attachment "${attachment.fileName}" (download exceeds ${formatBytes(maxBytes)} total)`)
+        missing.push(`${attachment.fileName} (download exceeds the runner's ${formatBytes(maxBytes)} total)`)
         continue
       }
       const name = uniqueFileName(sanitiseFileName(attachment.fileName, attachment.id), names)
       writePrivate(join(attachmentsDir, name), bytes)
       total += bytes.byteLength
-      provisioned.push({ ...attachment, localName: name })
+      // A chat's ZIP is read for its contents, so they are laid out beside it; an item's stays
+      // as the file a person attached.
+      let zip: { dir: string; result: ZipExtraction } | undefined
+      if (attachment.chatMessageId && isZip(attachment)) {
+        const dir = join(attachmentsDir, uniqueFileName(`${name}.contents`, names))
+        const result = extractZip(bytes, dir)
+        zip = { dir, result }
+        options.event(`Extracted ${result.extracted.length} file${result.extracted.length === 1 ? '' : 's'} from "${name}"${result.skipped.length > 0 ? `, skipped ${result.skipped.length}` : ''}${result.error ? ` (${result.error})` : ''}`)
+      }
+      provisioned.push({ ...attachment, localName: name, zip })
     } catch (error) {
       // One unavailable blob is useful information, but never a reason to fail the run.
       options.event(`Failed to download attachment "${attachment.fileName}": ${message(error)}`)
+      missing.push(`${attachment.fileName} (download failed: ${message(error)})`)
     }
   }
 
-  if (provisioned.length === 0) return run.prompt
+  const notProvisioned = run.itemKey === null && missing.length > 0
+    ? `\n\nThese chat files could not be provisioned; tell the person you could not read them:\n\n${missing.map(line => `- ${line}`).join('\n')}\n`
+    : ''
+  if (provisioned.length === 0) return notProvisioned ? `${run.prompt}\n\n## Attachments${notProvisioned}` : run.prompt
   options.event(`Provisioned ${provisioned.length} attachment${provisioned.length === 1 ? '' : 's'}: ${provisioned.map(x => x.localName).join(', ')}`)
   const inventory = provisioned.map((attachment) => {
-    const source = attachment.commentId ? `comment ${attachment.commentId}` : 'item description'
+    const source = attachment.chatMessageId
+      ? `chat question ${attachment.chatMessageId}`
+      : attachment.commentId ? `comment ${attachment.commentId}` : 'item description'
     const url = `/api/v1/orgs/${encodeURIComponent(run.organizationSlug)}/attachments/${encodeURIComponent(attachment.id)}/download`
-    return `- ${join(attachmentsDir, attachment.localName)} - original: ${attachment.fileName}; ${attachment.contentType}; ${formatBytes(attachment.sizeBytes)}; from ${source}; replaces ${url}`
+    const line = `- ${join(attachmentsDir, attachment.localName)} - original: ${attachment.fileName}; ${attachment.contentType}; ${formatBytes(attachment.sizeBytes)}; from ${source}; replaces ${url}`
+    return attachment.zip ? `${line}\n${zipInventory(attachment.zip.result, attachment.zip.dir)}` : line
   }).join('\n')
   const images = provisioned.filter(attachment => attachment.contentType.startsWith('image/'))
-  return `${run.prompt}\n\n## Attachments\n\nThese files are outside the git checkout at \`${attachmentsDir}\`; do not add or commit them. ${images.length > 0 ? 'Look at these images before planning.' : ''}\n\n${inventory}\n`
+  return `${run.prompt}\n\n## Attachments\n\nThese files are outside the git checkout at \`${attachmentsDir}\`; do not add or commit them. ${images.length > 0 ? 'Look at these images before planning.' : ''}\n\n${inventory}\n${notProvisioned}`
+}
+
+function isZip(attachment: RunAttachment): boolean {
+  return attachment.contentType === 'application/zip' || attachment.fileName.toLowerCase().endsWith('.zip')
+}
+
+/** The archive's extracted files and what was left out, indented under the archive's own line. */
+function zipInventory(zip: ZipExtraction, dir: string): string {
+  if (zip.error) return `  - could not be extracted: ${zip.error}`
+  const lines = zip.extracted.map(file => `  - extracted: ${join(dir, file.path)} (${formatBytes(file.sizeBytes)})`)
+  lines.push(...zip.skipped.map(file => `  - not extracted: ${file.path} (${file.reason})`))
+  if (zip.extracted.length === 0) lines.unshift('  - no file could be extracted')
+  return lines.join('\n')
 }
 
 function limit(value: number | undefined, fallback: number): number {

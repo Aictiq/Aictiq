@@ -135,10 +135,17 @@ export class RunnerClient {
     return response?.token ?? null
   }
 
-  /** Lists committed attachments on an item, including attachments posted in its comments. */
+  /**
+   * Lists committed attachments on an item, including attachments posted in its comments, or
+   * for a project-chat run the files attached to the asker's chat.
+   */
   async listAttachments(run: ClaimedRun): Promise<RunAttachment[]> {
-    // A project-chat run has no item, so nothing is attached to it.
-    if (run.itemKey === null) return []
+    if (run.itemKey === null) {
+      return this.get<RunAttachment[]>(
+        `/orgs/${encodeURIComponent(run.organizationSlug)}/projects/${encodeURIComponent(run.projectKey)}/chat/attachments`,
+        run.agentToken,
+      )
+    }
     return this.get<RunAttachment[]>(
       `/orgs/${encodeURIComponent(run.organizationSlug)}/items/${encodeURIComponent(run.itemKey)}/attachments?include=comments`,
       run.agentToken,

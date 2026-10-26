@@ -9,6 +9,40 @@ import { apiFetch } from '@/utils/api'
 
 export type ProjectChatStatus = 'pending' | 'answered' | 'failed' | 'cancelled' | 'timedOut'
 
+/** A file sent with a question; downloadable by its sender only. */
+export interface ProjectChatAttachment {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+}
+
+/** Mirrors the server's chat file rules: images, PDFs, text and ZIP archives, five per question. */
+export const chatAttachmentAccept = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'application/zip',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.pdf',
+  '.zip',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.csv',
+].join(',')
+
+export const MAX_CHAT_ATTACHMENTS = 5
+
 export interface ProjectChatMessage {
   id: string
   question: string
@@ -22,6 +56,8 @@ export interface ProjectChatMessage {
   runId: string | null
   askedAt: string
   answeredAt: string | null
+  /** The files sent with the question, in the order they were attached. */
+  attachments: ProjectChatAttachment[]
 }
 
 export interface ProjectChatView {
@@ -31,15 +67,26 @@ export interface ProjectChatView {
   runnerOnline: boolean
 }
 
-const chatPath = (slug: string, projectKey: string) =>
-  `/orgs/${slug}/projects/${projectKey}/chat`
+const chatPath = (slug: string, projectKey: string) => `/orgs/${slug}/projects/${projectKey}/chat`
 
 export const getProjectChat = (slug: string, projectKey: string) =>
   apiFetch<ProjectChatView>(chatPath(slug, projectKey))
 
-/** 409 while another question is in progress; 400 when no eligible agent can be resolved. */
-export const askProjectChat = (slug: string, projectKey: string, question: string) =>
-  apiFetch<ProjectChatView>(chatPath(slug, projectKey), { method: 'POST', body: { question } })
+/**
+ * 409 while another question is in progress; 400 when no eligible agent can be resolved or a
+ * file cannot go along (`attachmentIds`), 402 when the files do not fit the storage allowance.
+ * `attachmentIds` are pending uploads made with `uploadAttachment(..., 'chat')`.
+ */
+export const askProjectChat = (
+  slug: string,
+  projectKey: string,
+  question: string,
+  attachmentIds: string[] = [],
+) =>
+  apiFetch<ProjectChatView>(chatPath(slug, projectKey), {
+    method: 'POST',
+    body: { question, attachmentIds },
+  })
 
 /** Clears the history and cancels a question in progress. */
 export const clearProjectChat = (slug: string, projectKey: string) =>
