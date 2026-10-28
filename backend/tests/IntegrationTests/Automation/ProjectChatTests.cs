@@ -849,6 +849,14 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         Assert.Equal([png, zip], copies.Select(x => x.Source));
         Assert.Equal(["screen.webp", "logs.zip"], copies.Select(x => x.Name));
         Assert.DoesNotContain(copies, x => x.Id == png || x.Id == zip);
+        // The item page shows the files where the description links them: the image inline, the ZIP as a download.
+        var item = await mcp.CallToolAsync("get_item", new Dictionary<string, object?> { ["key"] = key }, cancellationToken: Ct);
+        var description = JsonDocument.Parse(Text(item)).RootElement.GetProperty("descriptionMarkdown").GetString()!;
+        Assert.Contains("**Files from project chat**", description);
+        Assert.Contains($"![screen.webp](/api/v1/orgs/{Slug}/attachments/{copies[0].Id}/download)", description);
+        Assert.Contains($"[logs.zip](/api/v1/orgs/{Slug}/attachments/{copies[1].Id}/download)", description);
+        Assert.DoesNotContain($"![logs.zip]", description);
+        Assert.Equal(result.RootElement.GetProperty("version").GetUInt32(), JsonDocument.Parse(Text(item)).RootElement.GetProperty("version").GetUInt32());
 
         // Another member who can see the ticket lists and downloads them, the ZIP as the archive itself;
         // the asker is their uploader. The chat files stay private and in the chat.

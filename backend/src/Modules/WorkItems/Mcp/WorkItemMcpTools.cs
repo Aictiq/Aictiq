@@ -346,6 +346,15 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         var created = new McpCreatedItem(item.Key, item.Version, item.Type.ToString(), parent?.Key);
         if (files.Count == 0) return created;
         var (copied, failed) = await ChatAttachmentCopies.CopyAsync(db, storage, planLimits, clock, item, reporter, files, ct);
+        if (copied.Count > 0)
+        {
+            var slug = await tenancy.Organizations.AsNoTracking().Where(o => o.Id == item.OrganizationId).Select(o => o.Slug).SingleAsync(ct);
+            var section = ChatAttachmentCopies.Section(slug, copied);
+            item.DescriptionMarkdown = string.IsNullOrWhiteSpace(item.DescriptionMarkdown) ? section : $"{item.DescriptionMarkdown.TrimEnd()}\n\n{section}";
+            item.DescriptionHtml = WorkItemEndpoints.Render(item.DescriptionMarkdown);
+            await db.SaveChangesAsync(ct);
+            created = created with { Version = item.Version };
+        }
         return created with
         {
             Attachments = copied,

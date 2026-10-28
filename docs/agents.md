@@ -246,8 +246,9 @@ The result includes the real `key`, `version`, `type` and `parentKey` (null for 
 
 Both take `attachmentIds`: files shared in the asker's project chat (the ids the chat prompt
 lists, from the current or an earlier question). Each is copied onto the new item as its own
-attachment, ZIPs as archives, under the normal storage allowance, so anyone who can see the
-item can open it and it survives clearing the chat; the chat keeps its private files. An id
+attachment, ZIPs as archives, under the normal storage allowance, and linked under "Files from
+project chat" at the end of the description (images inline), so anyone who can see the item
+can open it and it survives clearing the chat; the chat keeps its private files. An id
 that is not one of that person's chat files in the project refuses the call and creates
 nothing. The result lists the copied `attachments`; a file that could not be copied (gone from
 storage, over the allowance) is listed under `attachmentFailures` with a `warning`, and the

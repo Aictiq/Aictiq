@@ -109,6 +109,21 @@ public static class ChatAttachmentCopies
         return (staged.Select(x => new Copied(x.Copy.Id, x.Source.Id, x.Copy.FileName, x.Copy.ContentType, x.Copy.SizeBytes)).ToList(), failed);
     }
 
+    /// <summary>
+    /// The item page shows an item's files where its description links them, so the copies are
+    /// linked there: images inline, everything else as a download. File names are user-controlled
+    /// and escaped so one cannot break out of its link.
+    /// </summary>
+    public static string Section(string organizationSlug, IReadOnlyList<Copied> copied) =>
+        "**Files from project chat**\n\n" + string.Join("\n\n", copied.Select(file =>
+        {
+            var link = $"[{Label(file.FileName)}](/api/v1/orgs/{organizationSlug}/attachments/{file.Id}/download)";
+            return AttachmentImages.IsImage(file.ContentType) ? $"!{link}" : link;
+        }));
+
+    private static string Label(string fileName) =>
+        string.Concat(fileName.Select(c => char.IsControl(c) ? "_" : "\\`*_[]()<>!#|".Contains(c) ? $"\\{c}" : c.ToString()));
+
     private static async Task DiscardAsync(WorkItemsDbContext db, IBlobStorage storage, IReadOnlyList<Attachment> copies)
     {
         foreach (var copy in copies)
