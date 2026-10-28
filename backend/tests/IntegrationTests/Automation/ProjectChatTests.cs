@@ -14,6 +14,8 @@ using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Paging;
+using Aictiq.SharedKernel.Storage;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -650,6 +652,14 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         return (await response.Content.ReadFromJsonAsync<ChatView>(ApiTestContext.Json, Ct))!;
     }
 
+    private async Task<string> ScalarTextAsync(string sql)
+    {
+        await using var connection = new Npgsql.NpgsqlConnection(Context.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new Npgsql.NpgsqlCommand(sql, connection);
+        return (string)(await command.ExecuteScalarAsync(Ct))!;
+    }
+
     private static string Download(Guid attachmentId) => $"/api/v1/orgs/{Slug}/attachments/{attachmentId}/download";
 
     [Fact]
@@ -786,6 +796,101 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         var eleventh = await AskAsync(Owner, "Question 11");
         Assert.DoesNotContain(eleventh.Messages, row => row.Id == firstId);
         Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE id = '{file}'"));
+    }
+
+    [Fact]
+    public async Task a_ticket_created_from_chat_gets_its_own_copies_of_the_shared_files()
+    {
+        var png = await UploadOkAsync(Owner, "screen.png", "image/png", Png);
+        var archive = Zip(("logs/error.txt", "NullReference at Checkout"));
+        var zip = await UploadOkAsync(Owner, "logs.zip", "application/zip", archive);
+        var first = await AskWithFilesAsync(Owner, "Why does checkout crash?", png, zip);
+        using var runner = RunnerClient(Runner.Secret);
+        var firstRunId = first.Messages[0].RunId!.Value;
+        await StartAsync(runner, firstRunId);
+        await FinishAsync(runner, firstRunId, new RunnerFinishRequest("succeeded", 0, "A null cart.", null, null, null, null, null));
+
+        // The files were shared a turn earlier; the run that creates the ticket is told how to attach them.
+        var second = await AskAsync(Owner, "Make a bug for it with the screenshot and logs");
+        var runId = second.Messages[^1].RunId!.Value;
+        var prompt = (await RunAsync(runId)).PromptSnapshot!;
+        Assert.Contains("pass their attachment ids listed above as attachmentIds", prompt);
+        Assert.Contains("When the person names which files to attach, attach exactly those.", prompt);
+        var claimed = await StartAsync(runner, runId);
+        var items = await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'");
+
+        await using var mcp = await ConnectAsync(claimed.AgentToken);
+        // Someone else's chat file, and a plain upload, are not this chat's to share: nothing is created.
+        using var colleague = await MemberAsync(canOperateFactory: true);
+        var theirs = await UploadOkAsync(colleague, "theirs.pdf", "application/pdf", Pdf);
+        await AskWithFilesAsync(colleague, "Their question", theirs);
+        var upload = await UploadOkAsync(Owner, "loose.txt", "text/plain", "loose"u8.ToArray());
+        foreach (var foreign in new[] { theirs, upload })
+        {
+            var refused = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+            {
+                ["project"] = Project.Key, ["title"] = "Not mine", ["attachmentIds"] = new[] { png, foreign },
+            }, cancellationToken: Ct);
+            Assert.Contains("No item was created", Text(refused));
+            Assert.Contains(foreign.ToString(), Text(refused));
+        }
+        Assert.Equal(items, await ScalarAsync($"SELECT count(*) FROM work.items WHERE project_id = '{Project.Id}'"));
+
+        var created = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+        {
+            ["project"] = Project.Key, ["title"] = "Checkout crashes on an empty cart", ["attachmentIds"] = new[] { png, zip },
+        }, cancellationToken: Ct);
+        Assert.True(created.IsError != true, Text(created));
+        using var result = JsonDocument.Parse(Text(created));
+        var key = result.RootElement.GetProperty("key").GetString()!;
+        Assert.False(result.RootElement.TryGetProperty("attachmentFailures", out _), Text(created));
+        var copies = result.RootElement.GetProperty("attachments").EnumerateArray()
+            .Select(x => (Id: x.GetProperty("id").GetGuid(), Source: x.GetProperty("sourceId").GetGuid(), Name: x.GetProperty("fileName").GetString())).ToList();
+        Assert.Equal([png, zip], copies.Select(x => x.Source));
+        Assert.Equal(["screen.webp", "logs.zip"], copies.Select(x => x.Name));
+        Assert.DoesNotContain(copies, x => x.Id == png || x.Id == zip);
+
+        // Another member who can see the ticket lists and downloads them, the ZIP as the archive itself;
+        // the asker is their uploader. The chat files stay private and in the chat.
+        var listed = (await colleague.GetFromJsonAsync<List<AttachmentView>>($"/api/v1/orgs/{Slug}/items/{key}/attachments", ApiTestContext.Json, Ct))!;
+        Assert.Equal(copies.Select(x => x.Id), listed.Select(x => x.Id));
+        Assert.All(listed, x => Assert.Equal(OwnerId, x.UploadedBy));
+        Assert.Equal(archive, await colleague.GetByteArrayAsync(Download(copies[1].Id), Ct));
+        Assert.Equal(HttpStatusCode.OK, (await colleague.GetAsync(Download(copies[0].Id), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await colleague.GetAsync(Download(zip), Ct)).StatusCode);
+        Assert.Equal(2, (await ChatAsync(Owner)).Messages[0].Attachments.Count);
+        Assert.Equal(HttpStatusCode.OK, (await Owner.GetAsync(Download(zip), Ct)).StatusCode);
+
+        // A chat file whose object is gone does not stop the ticket, and the result says which file it lost.
+        var storage = Context.Factory.Services.GetRequiredService<IBlobStorage>();
+        var pngKey = await ScalarTextAsync($"SELECT object_key FROM work.attachments WHERE id = '{png}'");
+        await storage.DeleteAsync(pngKey, Ct);
+        var partial = await mcp.CallToolAsync("create_item", new Dictionary<string, object?>
+        {
+            ["project"] = Project.Key, ["title"] = "Partly attached", ["attachmentIds"] = new[] { zip, png },
+        }, cancellationToken: Ct);
+        Assert.True(partial.IsError != true, Text(partial));
+        using var partialResult = JsonDocument.Parse(Text(partial));
+        var partialKey = partialResult.RootElement.GetProperty("key").GetString()!;
+        Assert.Equal(png, Assert.Single(partialResult.RootElement.GetProperty("attachmentFailures").EnumerateArray()).GetProperty("sourceId").GetGuid());
+        Assert.Contains($"{partialKey} was created, but 1 of 2 files could not be attached: screen.webp", partialResult.RootElement.GetProperty("warning").GetString());
+        Assert.Equal("logs.zip", Assert.Single((await Owner.GetFromJsonAsync<List<AttachmentView>>(
+            $"/api/v1/orgs/{Slug}/items/{partialKey}/attachments", ApiTestContext.Json, Ct))!).FileName);
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM work.attachments WHERE item_id IS NULL AND chat_message_id IS NULL AND uploaded_by = '{OwnerId}' AND id <> '{upload}'"));
+
+        // A subtask can carry files too.
+        var subtask = await mcp.CallToolAsync("create_subtask", new Dictionary<string, object?>
+        {
+            ["parentKey"] = key, ["title"] = "Reproduce with the logs", ["attachmentIds"] = new[] { zip },
+        }, cancellationToken: Ct);
+        Assert.True(subtask.IsError != true, Text(subtask));
+        Assert.Single(JsonDocument.Parse(Text(subtask)).RootElement.GetProperty("attachments").EnumerateArray());
+
+        // Clearing the chat deletes the chat files, never the ticket's copies.
+        Assert.Equal(HttpStatusCode.NoContent, (await Owner.DeleteAsync(ChatUrl, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Owner.GetAsync(Download(zip), Ct)).StatusCode);
+        Assert.Equal(archive, await colleague.GetByteArrayAsync(Download(copies[1].Id), Ct));
+        Assert.Equal(HttpStatusCode.OK, (await colleague.GetAsync(Download(copies[0].Id), Ct)).StatusCode);
     }
 
     private sealed record ChatView(IReadOnlyList<ChatMessageView> Messages, bool RunnerOnline);
