@@ -7,6 +7,7 @@ import console from 'node:console'
 import { mkdir, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { setTimeout } from 'node:timers'
+const { fetch } = globalThis
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.E2E_BASE_URL || 'http://localhost:5173'
