@@ -45,6 +45,11 @@ export interface WorkItemComment {
   revisions: CommentRevision[]
   /** The first comment of the thread this one answers; null when it starts a thread. */
   parentCommentId: string | null
+  /**
+   * Only on a create or edit: tags that fit more than one person, so nobody was told. The
+   * author has to pick the person from the list, which writes a tag naming only them.
+   */
+  ambiguousMentions?: string[] | null
 }
 
 export interface CommentPage {

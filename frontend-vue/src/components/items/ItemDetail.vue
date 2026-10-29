@@ -67,7 +67,7 @@ import { useItemModal } from '@/composables/useItemModal'
 import { useCommands } from '@/composables/useCommands'
 import { usePageTitle } from '@/composables/useDocumentTitle'
 import { since } from '@/lib/claims'
-import { mentionToken, type Mentionable } from '@/lib/mentions'
+import { type Mentionable, uniqueMentionToken } from '@/lib/mentions'
 import { factoryRunPath } from '@/router/paths'
 import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useToast } from '@/composables/useToast'
@@ -282,8 +282,19 @@ const mentionables = computed<Mentionable[]>(() =>
       name: member.displayName,
       avatarSrc: avatarUrl(member.userId, member.avatarKey),
       isAgent: member.isAgent,
+      detail: member.email,
     })),
 )
+// A tag that fits two people reaches neither; the API says which, and the author hears it.
+function warnAmbiguousMentions(saved: WorkItemComment) {
+  const tokens = saved.ambiguousMentions ?? []
+  if (tokens.length === 0) return
+  const tags = tokens.map((token) => `@${token}`).join(', ')
+  toast.warning(
+    tokens.length === 1 ? `${tags} matches more than one person.` : `${tags} each match more than one person.`,
+    'Nobody was notified for it. Edit the comment and pick the person from the @ list.',
+  )
+}
 const membersById = computed(
   () => new Map((projectMembers.data.value ?? []).map((member) => [member.userId, member])),
 )
@@ -906,6 +917,7 @@ async function addComment() {
   sending.value = true
   try {
     const created = await createComment(props.slug, props.itemKey, body)
+    warnAmbiguousMentions(created)
     const pending = [...pendingCommentFiles]
     pendingCommentFiles.clear()
     comment.value = ''
@@ -976,7 +988,7 @@ async function saveCommentEdit() {
   savingComment.value = true
   editCommentError.value = null
   try {
-    await updateComment(slug, key, target.id, body)
+    warnAmbiguousMentions(await updateComment(slug, key, target.id, body))
     await settleAttachments(slug, pending, body, { commentId: target.id })
     if (editingComment.value === target) closeCommentEdit()
     await client.invalidateQueries({ queryKey: [slug, key, 'comments'] })
@@ -1054,7 +1066,7 @@ function startReply(entry: WorkItemComment) {
   if (!keepDraft)
     reply.value =
       entry.parentCommentId && entry.author.id !== session.user?.id
-        ? `@${mentionToken(entry.author.displayName)} `
+        ? `@${uniqueMentionToken({ id: entry.author.id, name: entry.author.displayName }, mentionables.value)} `
         : ''
   // A box that is already open keeps its editor, which the autofocus will not move again.
   if (reopen) void nextTick(() => replyEditor.value?.focus())
@@ -1073,6 +1085,7 @@ async function sendReply() {
   replyError.value = null
   try {
     const created = await createComment(props.slug, props.itemKey, body, target.threadId)
+    warnAmbiguousMentions(created)
     const pending = [...pendingReplyFiles]
     closeReply()
     await settleAttachments(props.slug, pending, body, { commentId: created.id })

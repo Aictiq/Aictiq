@@ -281,6 +281,54 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
     }
 
     [Fact]
+    public async Task a_namesake_tag_reaches_only_the_person_picked_and_an_ambiguous_one_is_reported()
+    {
+        var (firstId, first) = await JoinAsync("Blago", "Culjak");
+        var (secondId, _) = await JoinAsync("Blago", "Culjak");
+        var (_, ivo) = await JoinAsync("Ivo", "Horvat");
+        var item = await CreateItemAsync("Namesakes");
+        static string Picked(string id) => $"@BlagoCuljak-{id.Replace("-", "")[..8]}";
+
+        // Typed by hand, the name fits both: nobody is tagged, and the author is told so.
+        var typed = await CommentAsync(ivo, item.Key, "@BlagoCuljak can you validate? @Olga FYI");
+        Assert.Equal([_ownerId], typed.Mentions);
+        Assert.Equal(["BlagoCuljak"], typed.AmbiguousMentions);
+        await HandleAddedAsync(typed.Id);
+        Assert.Single(await EmailsAsync());
+
+        // The picker's token names one of them.
+        var picked = await CommentAsync(ivo, item.Key, $"{Picked(secondId)} can you validate?");
+        Assert.Equal([secondId], picked.Mentions);
+        Assert.Empty(picked.AmbiguousMentions!);
+        await HandleAddedAsync(picked.Id);
+        var emails = await EmailsAsync();
+        Assert.Equal(2, emails.Count);
+        var toSecond = Assert.Single(emails, x => x.Template == "mention" && !x.To.StartsWith("threads-owner-", StringComparison.Ordinal));
+        Assert.Equal(secondId, await UserIdForEmailAsync(toSecond.To));
+
+        // An edit reports the same, and its picked tag reaches only that person.
+        var vague = await ivo.PatchAsJsonAsync(ItemPath(item.Key, $"comments/{typed.Id}"),
+            new UpdateCommentRequest("@BlagoCuljak can you validate? @Olga FYI, @blagoculjak"), ApiTestContext.Json, Ct);
+        Assert.True(vague.IsSuccessStatusCode, await vague.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(["BlagoCuljak"], (await vague.Content.ReadFromJsonAsync<CommentView>(ApiTestContext.Json, Ct))!.AmbiguousMentions);
+        var edit = await ivo.PatchAsJsonAsync(ItemPath(item.Key, $"comments/{typed.Id}"),
+            new UpdateCommentRequest($"{Picked(firstId)} can you validate? @Olga FYI"), ApiTestContext.Json, Ct);
+        Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync(Ct));
+        var edited = (await edit.Content.ReadFromJsonAsync<CommentView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(new[] { _ownerId, firstId }.Order(StringComparer.Ordinal), edited.Mentions);
+        Assert.Empty(edited.AmbiguousMentions!);
+        await HandleMentionsAddedAsync(typed.Id);
+        emails = await EmailsAsync();
+        Assert.Equal(3, emails.Count);
+        Assert.Equal(firstId, await UserIdForEmailAsync(emails[^1].To));
+
+        // One namesake tagging the other is not ambiguous: nobody tags themselves.
+        var answer = await CommentAsync(first, item.Key, "@BlagoCuljak over to you.");
+        Assert.Equal([secondId], answer.Mentions);
+        Assert.Empty(answer.AmbiguousMentions!);
+    }
+
+    [Fact]
     public async Task an_agents_comment_is_not_news_to_a_stakeholder_watching_the_item()
     {
         // JoinAsync's members may not operate the factory: they are stakeholders.
@@ -571,6 +619,15 @@ public sealed class CommentThreadTests(PostgresFixture postgres, GarageFixture g
         await using var reader = await command.ExecuteReaderAsync(Ct);
         while (await reader.ReadAsync(Ct)) rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
         return rows;
+    }
+
+    private async Task<string> UserIdForEmailAsync(string email)
+    {
+        await using var connection = new NpgsqlConnection(_context.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand("""SELECT id::text FROM identity."AspNetUsers" WHERE normalized_email = upper(@email)""", connection);
+        command.Parameters.AddWithValue("email", email);
+        return (string)(await command.ExecuteScalarAsync(Ct))!;
     }
 
     private async Task<(string UserId, HttpClient Client)> JoinAsync(string first, string last)

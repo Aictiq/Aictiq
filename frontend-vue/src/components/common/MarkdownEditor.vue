@@ -20,7 +20,7 @@ import { searchProject, type SearchItem } from '@/api/search'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { useResolvedItemKeys } from '@/composables/useResolvedItemKeys'
 import { useToast } from '@/composables/useToast'
-import { mentionToken, type Mentionable, searchMentionables } from '@/lib/mentions'
+import { hasNamesake, type Mentionable, searchMentionables, uniqueMentionToken } from '@/lib/mentions'
 import { planLimitRefusal } from '@/lib/billing'
 import { itemHref, itemReferencePattern } from '@/lib/markdown'
 import { orgSettingsPath } from '@/router/paths'
@@ -77,7 +77,9 @@ defineExpose({
 // ── Mentions ───────────────────────────────────────────────────────────────────────
 // "@" followed by the start of a name opens a list of the people who can see this item.
 // Picking one writes "@AnaKovač" as plain text: the Markdown stays readable anywhere, and
-// the server resolves the same token back to the person when the comment is saved.
+// the server resolves the same token back to the person when the comment is saved. Two
+// people with one name are told apart in the list by their detail, and in the token by the
+// start of the id ("@AnaKovač-5d7f9d82"), so the tag reaches only the one picked.
 const root = ref<HTMLElement | null>(null)
 const mention = ref<{ from: number; to: number; query: string; left: number; top: number } | null>(null)
 const mentionIndex = ref(0)
@@ -114,7 +116,7 @@ function pickMention(person: Mentionable) {
   editor.value
     ?.chain()
     .focus()
-    .insertContentAt({ from: range.from, to: range.to }, `@${mentionToken(person.name)} `)
+    .insertContentAt({ from: range.from, to: range.to }, `@${uniqueMentionToken(person, props.mentionables ?? [])} `)
     .run()
 }
 
@@ -516,7 +518,15 @@ onBeforeUnmount(() => editor.value?.destroy())
         @mouseenter="mentionIndex = index"
       >
         <UserAvatar :name="person.name" :src="person.avatarSrc" :is-agent="person.isAgent" size="sm" />
-        <span class="truncate">{{ person.name }}</span>
+        <span class="min-w-0">
+          <span class="block truncate">{{ person.name }}</span>
+          <span
+            v-if="hasNamesake(person, mentionables ?? [])"
+            class="text-muted-foreground block truncate text-xs"
+            data-testid="mention-detail"
+            >{{ person.detail || `@${uniqueMentionToken(person, mentionables ?? [])}` }}</span
+          >
+        </span>
       </li>
     </ul>
   </div>
