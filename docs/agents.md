@@ -234,7 +234,7 @@ administrator can clear that for an agent: it can still work items, but may not 
 | Refining | `submit_refinement` (refine runs only) |
 | Follow-up playbooks | `submit_stage_verdict` (follow-up playbook runs only) |
 
-`create_item(project, title, description?, team?, type?, parentKey?)` accepts an optional
+`create_item(project, title, description?, team?, type?, parentKey?, attachmentIds?)` accepts an optional
 Markdown description and a type: `Epic`, `Feature`, `Story`, `Task` or `Bug` (case-insensitive).
 Omitting `type` keeps the existing Bug default. `parentKey` must name an accessible, writable
 item in the same project. Epics have no parent; Features require an Epic; Stories may stand
@@ -242,7 +242,17 @@ alone or belong to an Epic/Feature; Bugs may stand alone or belong to an Epic/Fe
 Tasks require a Story/Bug. Ask for missing or ambiguous required parents before creation;
 invalid types and parents are refused without creating an item or substituting a type.
 The result includes the real `key`, `version`, `type` and `parentKey` (null for roots).
-`create_subtask(parentKey, title, team?)` still creates a Task under a Story or Bug.
+`create_subtask(parentKey, title, team?, attachmentIds?)` still creates a Task under a Story or Bug.
+
+Both take `attachmentIds`: files shared in the asker's project chat (the ids the chat prompt
+lists, from the current or an earlier question). Each is copied onto the new item as its own
+attachment, ZIPs as archives, under the normal storage allowance, and linked under "Files from
+project chat" at the end of the description (images inline), so anyone who can see the item
+can open it and it survives clearing the chat; the chat keeps its private files. An id
+that is not one of that person's chat files in the project refuses the call and creates
+nothing. The result lists the copied `attachments`; a file that could not be copied (gone from
+storage, over the allowance) is listed under `attachmentFailures` with a `warning`, and the
+item is still created.
 
 These creation tools are the only writes a project-chat run's token may make, within its
 current project only. That token has no `write` scope, and each created item records the

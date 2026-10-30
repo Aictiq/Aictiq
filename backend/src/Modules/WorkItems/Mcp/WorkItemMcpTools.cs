@@ -23,7 +23,14 @@ public sealed record McpItem(string Key, string Title, WorkItemType Type, string
     string? AssigneeId, string? ClaimedBy, DateTimeOffset? ClaimHeartbeatAt, decimal? RemainingHours);
 
 public sealed record McpCreatedItem(string Key, uint Version, string Type,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ParentKey);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ParentKey)
+{
+    /// <summary>Chat files copied onto the new item; absent when none were asked for.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public IReadOnlyList<ChatAttachmentCopies.Copied>? Attachments { get; init; }
+    /// <summary>Asked-for files the item did not get, each with why. The item exists regardless.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public IReadOnlyList<ChatAttachmentCopies.Failed>? AttachmentFailures { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Warning { get; init; }
+}
 
 /// <summary>
 /// Agent-facing work-item operations.  They deliberately use the same contexts and tenant
@@ -273,18 +280,22 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
 
     // These compact aliases keep the complete documented v1 work-item tool surface
     // available to clients; richer validation remains in the matching REST endpoint.
+    private const string ChatAttachmentIdsDescription = "Optional attachment ids of files shared in this project's chat (the ids its prompt lists, from this or earlier questions). Each is copied onto the new item as its own attachment, ZIPs as archives; the chat keeps its files. An id that is not one of the asker's chat files in this project creates nothing. The result lists the attached files and any attachmentFailures.";
+
     [McpServerTool(Name = "create_item")]
-    [Description("Creates an Epic, Feature, Story, Task or Bug in a project (default Bug). Features require an Epic parent; Tasks require a Story or Bug parent. Ask for a missing or ambiguous required parent before calling. Without team, Stories, Bugs and Tasks follow their parent's team or the project's default; Epics and Features remain unteamed. Returns the real key, type and parentKey.")]
+    [Description("Creates an Epic, Feature, Story, Task or Bug in a project (default Bug). Features require an Epic parent; Tasks require a Story or Bug parent. Ask for a missing or ambiguous required parent before calling. Without team, Stories, Bugs and Tasks follow their parent's team or the project's default; Epics and Features remain unteamed. Returns the real key, type and parentKey, and the attachments it copied from chat.")]
     public Task<object?> CreateItem(string project, string title, string? description = null,
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it to use the existing defaults for this type and parent.")] string? team = null,
         [Description("Epic, Feature, Story, Task or Bug (case-insensitive). Omit for Bug.")] string? type = null,
         [Description("Existing parent item key in this project. Epics cannot have a parent; Features require an Epic; Stories allow an Epic or Feature; Bugs allow an Epic, Feature or Story; Tasks require a Story or Bug.")] string? parentKey = null,
-        CancellationToken cancellationToken = default) => CreateBasic(project, title, parentKey, team, ParseType(type), cancellationToken, description);
+        [Description(ChatAttachmentIdsDescription)] IReadOnlyList<Guid>? attachmentIds = null,
+        CancellationToken cancellationToken = default) => CreateBasic(project, title, parentKey, team, ParseType(type), cancellationToken, description, attachmentIds);
     [McpServerTool(Name = "create_subtask")]
     [Description("Creates a Task under a parent item. Without team it takes the parent's team, or the project's default team if the parent has none.")]
     public Task<object?> CreateSubtask(string parentKey, string title,
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it to follow the parent's team.")] string? team = null,
-        CancellationToken cancellationToken = default) => CreateBasic(null, title, parentKey, team, WorkItemType.Task, cancellationToken);
+        [Description(ChatAttachmentIdsDescription)] IReadOnlyList<Guid>? attachmentIds = null,
+        CancellationToken cancellationToken = default) => CreateBasic(null, title, parentKey, team, WorkItemType.Task, cancellationToken, attachmentIds: attachmentIds);
     [McpServerTool(Name = "update_item")] public async Task<bool> UpdateItem(string key, uint version, string? title = null, string? description = null, CancellationToken cancellationToken = default) { if (title is { Length: > 500 }) throw new McpException("title must be 500 characters or fewer."); if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer."); var item = await TryWritableAsync(key, cancellationToken); if (item is null || item.Version != version) return false; if (!string.IsNullOrWhiteSpace(title)) item.Title = title.Trim(); if (description is not null) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } item.UpdatedAt = clock.GetUtcNow(); await db.SaveChangesAsync(cancellationToken); return true; }
     // http(s) only, like the REST endpoint: a stored javascript: or file: URL is rendered as a
     // link on the item page, and a private address is a way to point a person at a neighbour.
@@ -300,10 +311,13 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         throw new McpException("type must be Epic, Feature, Story, Task or Bug.");
     }
 
-    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, WorkItemType type, CancellationToken ct, string? description = null)
+    private async Task<object?> CreateBasic(string? project, string title, string? parentKey, string? team, WorkItemType type, CancellationToken ct,
+        string? description = null, IReadOnlyList<Guid>? attachmentIds = null)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 500) throw new McpException("title must contain 1 to 500 characters.");
         if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer.");
+        var fileIds = (attachmentIds ?? []).Distinct().ToArray();
+        if (fileIds.Length > ChatAttachmentCopies.MaxPerItem) throw new McpException($"attachmentIds may name at most {ChatAttachmentCopies.MaxPerItem} files.");
         // Creating needs the Member role on the project - resolved through Tenancy, never by
         // finding some item that happens to carry the key - and a parent needs to be writable.
         WorkItem? parent = parentKey is null ? null : await WritableAsync(parentKey, ct);
@@ -314,6 +328,11 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         var reporter = await ChatReporterAsync(writable, ct) ?? user.UserId!;
         var parentError = await WorkItemEndpoints.ValidateParentAsync(db, null, type, parent?.Id, writable.Id, ct);
         if (parentError is not null) throw new McpAnswerException(parentError);
+        // Only the reporter's own chat files in this project, checked before the item exists so
+        // a wrong id creates nothing rather than an item missing what it was asked to carry.
+        var (files, missing) = await ChatAttachmentCopies.FindAsync(db, writable.Id, reporter, fileIds, ct);
+        if (missing.Count > 0)
+            throw new McpAnswerException($"attachment {string.Join(", ", missing)} is not a file shared in this person's chat in project {writable.Key}. No item was created.");
         var projectKey = writable.Key; Guid? projectId = writable.Id;
         // As REST does: a project nobody has created an item in yet may have no workflow.
         await WorkflowEndpoints.EnsureDefaultAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
@@ -323,7 +342,27 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
             : await TeamAsync(team, projectId.Value, projectKey, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await WorkItemEndpoints.NextNumberAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = reporter, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; if (!string.IsNullOrWhiteSpace(description)) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return new McpCreatedItem(item.Key, item.Version, item.Type.ToString(), parent?.Key);
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = projectId.Value, ProjectKey = projectKey, Number = number, Type = type, Title = title.Trim(), StateId = state, TeamId = teamId, ParentId = parent?.Id, Rank = "m", CreatedBy = reporter, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() }; if (!string.IsNullOrWhiteSpace(description)) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } db.Items.Add(item); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        var created = new McpCreatedItem(item.Key, item.Version, item.Type.ToString(), parent?.Key);
+        if (files.Count == 0) return created;
+        var (copied, failed) = await ChatAttachmentCopies.CopyAsync(db, storage, planLimits, clock, item, reporter, files, ct);
+        if (copied.Count > 0)
+        {
+            var slug = await tenancy.Organizations.AsNoTracking().Where(o => o.Id == item.OrganizationId).Select(o => o.Slug).SingleAsync(ct);
+            var section = ChatAttachmentCopies.Section(slug, copied);
+            item.DescriptionMarkdown = string.IsNullOrWhiteSpace(item.DescriptionMarkdown) ? section : $"{item.DescriptionMarkdown.TrimEnd()}\n\n{section}";
+            item.DescriptionHtml = WorkItemEndpoints.Render(item.DescriptionMarkdown);
+            await db.SaveChangesAsync(ct);
+            created = created with { Version = item.Version };
+        }
+        return created with
+        {
+            Attachments = copied,
+            AttachmentFailures = failed.Count == 0 ? null : failed,
+            Warning = failed.Count == 0 ? null
+                : $"{item.Key} was created, but {failed.Count} of {files.Count} files could not be attached: "
+                  + string.Join("; ", failed.Select(x => $"{x.FileName} ({x.Reason})")) + ".",
+        };
     }
     /// <summary>
     /// For a project-chat run's token, which has no write scope: the person whose question the

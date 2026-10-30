@@ -281,6 +281,6 @@ public static class AttachmentEndpoints
 
     private static IResult OwnerProblem() => Results.ValidationProblem(new Dictionary<string, string[]> { ["owner"] = ["Exactly one of itemId, commentId, or pageId is required."] });
     private static AttachmentView View(Attachment x) => new(x.Id, x.ProjectId, x.ItemId, x.CommentId, x.WikiPageId, x.FileName, x.ContentType, x.SizeBytes, x.UploadedBy, x.CreatedAt);
-    private static string ObjectKey(Guid orgId, Guid projectId, Guid attachmentId, string fileName) =>
+    internal static string ObjectKey(Guid orgId, Guid projectId, Guid attachmentId, string fileName) =>
         $"org/{orgId}/project/{projectId}/attachments/{attachmentId}/{Uri.EscapeDataString(fileName)}";
 }
