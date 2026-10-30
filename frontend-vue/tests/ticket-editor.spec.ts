@@ -268,6 +268,26 @@ describe('ticket suggestions in the Markdown editor', () => {
     expect(searchProject).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="mention-list"]').exists()).toBe(false)
   })
+
+  it('tells namesakes apart in the list and tags only the one picked', async () => {
+    await mountEditor({
+      mentionables: [
+        { id: '5d7f9d82-aaaa-4bbb-8ccc-000000000001', name: 'Blago Culjak', detail: 'blago@hotmail.test' },
+        { id: '8993c280-aaaa-4bbb-8ccc-000000000002', name: 'Blago Culjak', detail: 'blago@gmail.test' },
+        { id: 'u3', name: 'Ana Kovač', detail: 'ana@test.local' },
+      ],
+    })
+    await typeText('@Bla')
+    const details = wrapper.findAll('[data-testid="mention-detail"]').map((detail) => detail.text())
+    expect(details.sort()).toEqual(['blago@gmail.test', 'blago@hotmail.test'])
+    await wrapper.get('.tiptap').trigger('keydown', { key: 'ArrowDown' })
+    await wrapper.get('.tiptap').trigger('keydown', { key: 'Enter' })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(editor.state.doc.textContent).toBe('@BlagoCuljak-8993c280 ')
+
+    await typeText('@Ana')
+    expect(wrapper.find('[data-testid="mention-detail"]').exists()).toBe(false)
+  })
 })
 
 describe('ticket links in the Markdown editor', () => {

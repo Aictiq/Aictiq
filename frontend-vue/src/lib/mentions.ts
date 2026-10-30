@@ -4,6 +4,8 @@ export interface Mentionable {
   name: string
   avatarSrc?: string | null
   isAgent?: boolean
+  /** Shown beside the name when someone else has the same one, e.g. their email. */
+  detail?: string | null
 }
 
 /**
@@ -13,6 +15,26 @@ export interface Mentionable {
  */
 export function mentionToken(name: string) {
   return name.replace(/[^\p{L}\p{N}-]+/gu, '')
+}
+
+/** True when someone other than `person` among `people` writes the same token. */
+export function hasNamesake(person: Mentionable, people: Mentionable[]) {
+  const token = mentionToken(person.name).toLowerCase()
+  return people.some(
+    (other) => other.id !== person.id && mentionToken(other.name).toLowerCase() === token,
+  )
+}
+
+/**
+ * What to write after "@" so the tag names exactly `person`. A namesake among `people` would
+ * make the plain token fit both, which the API refuses to guess at, so it gets the first eight
+ * hex digits of the person's id: "@AnaKovač-5d7f9d82". The API reads the same suffix
+ * (CommentEndpoints.IdSuffix).
+ */
+export function uniqueMentionToken(person: Mentionable, people: Mentionable[]) {
+  const token = mentionToken(person.name)
+  if (!hasNamesake(person, people)) return token
+  return `${token}-${person.id.replace(/-/g, '').slice(0, 8)}`
 }
 
 /** Lower case without accents, so "sar" finds Šarić. */
