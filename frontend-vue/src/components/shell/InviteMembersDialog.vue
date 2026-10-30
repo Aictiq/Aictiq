@@ -168,12 +168,13 @@ async function copy(link: InvitationLink) {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-lg">
+    <!-- A zero-minimum column lets long links truncate instead of widening every grid row. -->
+    <DialogContent class="max-h-[calc(100dvh-2rem)] grid-cols-1 overflow-y-auto sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>Invite people</DialogTitle>
         <DialogDescription>
-          Paste addresses separated by commas, spaces or new lines. Everyone gets the same
-          role; you can change it once they are here.
+          Paste addresses separated by commas, spaces or new lines. Everyone gets the same role; you
+          can change it once they are here.
         </DialogDescription>
       </DialogHeader>
 
@@ -271,9 +272,9 @@ async function copy(link: InvitationLink) {
             </option>
           </select>
           <p class="text-muted-foreground text-xs">
-            They join as a member of this project: they see its board, add items and comment.
-            They cannot start, cancel or read AI runs. Like any member, they also see projects
-            visible to the whole organization, so keep those private if that matters.
+            They join as a member of this project: they see its board, add items and comment. They
+            cannot start, cancel or read AI runs. Like any member, they also see projects visible to
+            the whole organization, so keep those private if that matters.
           </p>
         </div>
       </form>
@@ -285,7 +286,7 @@ async function copy(link: InvitationLink) {
           class="text-destructive flex items-start gap-1.5 text-xs"
         >
           <TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          <span>
+          <span class="min-w-0 break-words">
             <span class="font-medium">{{ failure.email }}</span> - {{ failure.message }}
             <RouterLink
               v-if="failure.upgrade"
