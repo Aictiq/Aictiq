@@ -160,6 +160,17 @@ Organization channels and defaults (org admins; `read` scope for `GET`, `admin` 
 The org-wide kinds are `transitioned`, `sprintStarted`, `sprintCompleted`, `runSucceeded`,
 `runFailed` and `runNeedsInput`.
 
+## Comment mentions
+
+`@Name` in a comment tags a person who can see the project. The token is their display
+name with everything but letters, digits and hyphens removed (`@AnaKovač` for "Ana
+Kovač"), or their first name alone when that fits only one person. The author is never a
+candidate. When two people share a name, add a hyphen and the first eight hex digits of
+the person's user ID (`@AnaKovač-5d7f9d82`); the web app's `@` list writes this for you.
+A token that still fits more than one person tags nobody. `POST` and `PATCH` on a comment
+return it in `ambiguousMentions`, so the author can pick the right person and edit the
+comment. The field is filled only in those two responses.
+
 ## Comment reactions
 
 Comments and replies support the fixed set 👍 👎 ❤️ 🎉 👀 ✅. Use

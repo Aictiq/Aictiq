@@ -18,7 +18,8 @@ public sealed record CommentRevisionView(Guid Id, string BodyMarkdown, string Bo
 public sealed record CommentView(Guid Id, CommentAuthorView Author, string BodyMarkdown, string BodyHtml,
     DateTimeOffset CreatedAt, DateTimeOffset? EditedAt, DateTimeOffset? DeletedAt,
     IReadOnlyList<string> Mentions, IReadOnlyList<CommentReactionView> Reactions,
-    IReadOnlyList<CommentRevisionView> Revisions, Guid? ParentCommentId = null, bool CanReact = false);
+    IReadOnlyList<CommentRevisionView> Revisions, Guid? ParentCommentId = null, bool CanReact = false,
+    IReadOnlyList<string>? AmbiguousMentions = null);
 /// <param name="ParentCommentId">The comment being answered. A reply to a reply joins the
 /// same thread, under its first comment.</param>
 public sealed record CreateCommentRequest(string? BodyMarkdown, Guid? ParentCommentId = null);
@@ -30,6 +31,8 @@ public static class CommentEndpoints
     // Letters in any script: a mention of @IvanaKovačević must not stop at the "č".
     private static readonly Regex Mention = new(@"(?<![\w@])@(?<name>[\p{L}\p{N}][\p{L}\p{N}-]{0,63})", RegexOptions.Compiled);
     private static readonly Regex NotMentionable = new(@"[^\p{L}\p{N}-]+", RegexOptions.Compiled);
+    // "@AnaKovač-5d7f9d82": a name and the first hex digits of the person's id, for namesakes.
+    private static readonly Regex IdSuffix = new(@"^(?<name>.+)-(?<id>[0-9a-fA-F]{8})$", RegexOptions.Compiled);
 
     public static IEndpointRouteBuilder MapCommentEndpoints(this IEndpointRouteBuilder api)
     {
@@ -91,7 +94,7 @@ public static class CommentEndpoints
                 return Results.Problem("A deleted comment's thread cannot be replied to.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
         }
         var markdown = request.BodyMarkdown!.Trim();
-        var mentions = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
+        var (mentions, ambiguous) = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
         var now = clock.GetUtcNow();
         var comment = new Comment { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, ParentCommentId = thread?.Id, AuthorId = user.UserId!, BodyMarkdown = markdown, BodyHtml = WorkItemEndpoints.Render(markdown), MentionedUserIds = mentions.ToArray(), CreatedAt = now };
         comment.Added(item, mentions, thread, now);
@@ -100,7 +103,7 @@ public static class CommentEndpoints
         foreach (var mentionedUserId in mentions)
             await ItemWatcherRules.AddAsync(db, item, mentionedUserId, ItemWatchReason.Mentioned, now, ct);
         await db.SaveChangesAsync(ct);
-        return Results.Created($"/api/v1/orgs/{item.OrganizationId}/items/{item.Key}/comments/{comment.Id}", (await ViewsAsync(db, directory, user.UserId!, [comment], ct))[0]);
+        return Results.Created($"/api/v1/orgs/{item.OrganizationId}/items/{item.Key}/comments/{comment.Id}", (await ViewsAsync(db, directory, user.UserId!, [comment], ct))[0] with { AmbiguousMentions = ambiguous });
     }
 
     private static async Task<IResult> Edit(string itemKey, Guid commentId, UpdateCommentRequest request,
@@ -116,12 +119,13 @@ public static class CommentEndpoints
         if (comment.DeletedAt is not null) return Results.Problem("A deleted comment cannot be edited.", statusCode: StatusCodes.Status409Conflict, type: ProblemTypes.Conflict);
         if (Validate(request.BodyMarkdown) is { } invalid) return invalid;
         var markdown = request.BodyMarkdown!.Trim();
+        IReadOnlyList<string> ambiguous = [];
         if (markdown != comment.BodyMarkdown)
         {
             var now = clock.GetUtcNow();
             db.CommentRevisions.Add(new CommentRevision { CommentId = comment.Id, BodyMarkdown = comment.BodyMarkdown, BodyHtml = comment.BodyHtml, EditedBy = user.UserId!, EditedAt = now });
             comment.BodyMarkdown = markdown; comment.BodyHtml = WorkItemEndpoints.Render(markdown);
-            var mentions = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
+            (var mentions, ambiguous) = await ResolveMentionsAsync(markdown, item, user.UserId!, access, directory, ct);
             var added = mentions.Except(comment.MentionedUserIds, StringComparer.Ordinal).ToArray();
             comment.MentionedUserIds = mentions.ToArray();
             var thread = added.Length > 0 && comment.ParentCommentId is { } rootId
@@ -134,7 +138,7 @@ public static class CommentEndpoints
             await db.SaveChangesAsync(ct);
             await CommentChangedAsync(realtime, item, commentId, ct);
         }
-        return Results.Ok((await ViewsAsync(db, directory, user.UserId!, [comment], ct))[0]);
+        return Results.Ok((await ViewsAsync(db, directory, user.UserId!, [comment], ct))[0] with { AmbiguousMentions = ambiguous });
     }
 
     private static async Task<IResult> Delete(string itemKey, Guid commentId, WorkItemsDbContext db, IProjectAccess access,
@@ -244,39 +248,56 @@ public static class CommentEndpoints
     }
 
     /// <summary>
-    /// The project members <paramref name="markdown"/> tags. Agents count only when the author may
-    /// operate the factory: anyone else's agent mention could not ask it anything, and recording
-    /// it would hide the author's own comment from them (<see cref="FactoryVisibility"/>).
+    /// The project members <paramref name="markdown"/> tags, and the tokens that fit more than
+    /// one of them. Those are kept out of the mentions but returned, so the author learns that
+    /// nobody was told instead of waiting for an answer that never comes. Agents count only
+    /// when the author may operate the factory: anyone else's agent mention could not ask it
+    /// anything, and recording it would hide the author's own comment from them
+    /// (<see cref="FactoryVisibility"/>). The author is never a candidate, so a second account
+    /// under the same name does not make their tag of the other one ambiguous.
     /// </summary>
-    private static async Task<IReadOnlyList<string>> ResolveMentionsAsync(string markdown, WorkItem item, string authorId,
-        IProjectAccess access, IUserDirectory directory, CancellationToken ct)
+    private static async Task<(IReadOnlyList<string> Mentions, IReadOnlyList<string> Ambiguous)> ResolveMentionsAsync(
+        string markdown, WorkItem item, string authorId, IProjectAccess access, IUserDirectory directory, CancellationToken ct)
     {
         var tokens = Mention.Matches(markdown).Select(x => x.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (tokens.Length == 0) return [];
-        var people = await directory.GetAsync(await access.ListProjectMemberIdsAsync(item.ProjectId, ct), ct);
+        if (tokens.Length == 0) return ([], []);
+        var people = (await directory.GetAsync(await access.ListProjectMemberIdsAsync(item.ProjectId, ct), ct)).Values
+            .Where(x => x.Id != authorId).ToArray();
         if (!await access.CanOperateFactoryAsync(authorId, item.OrganizationId, ct))
-            people = people.Where(x => !x.Value.IsAgent).ToDictionary();
+            people = people.Where(x => !x.IsAgent).ToArray();
         var matched = new HashSet<string>(StringComparer.Ordinal);
+        var ambiguous = new List<string>();
         foreach (var token in tokens)
         {
             // The whole name first: "@Ana" is Ana when there is one, even beside an Ana Horvat.
-            var candidates = people.Values.Where(person => MatchesMention(MentionToken(person.DisplayName), token)).Select(person => person.Id).Distinct().ToArray();
+            var candidates = Fitting(person => MatchesMention(MentionToken(person.DisplayName), token));
             if (candidates.Length == 0)
-                candidates = people.Values.Where(person => MatchesMention(FirstNameToken(person.DisplayName), token)).Select(person => person.Id).Distinct().ToArray();
+                candidates = Fitting(person => MatchesMention(FirstNameToken(person.DisplayName), token));
+            if (candidates.Length == 0 && IdSuffix.Match(token) is { Success: true } suffixed)
+                candidates = Fitting(person => MatchesMention(MentionToken(person.DisplayName), suffixed.Groups["name"].Value)
+                    && IdStartsWith(person.Id, suffixed.Groups["id"].Value));
             if (candidates.Length == 1) matched.Add(candidates[0]);
+            else if (candidates.Length > 1) ambiguous.Add(token);
         }
-        return matched.Order(StringComparer.Ordinal).ToArray();
+        return (matched.Order(StringComparer.Ordinal).ToArray(), ambiguous);
+
+        string[] Fitting(Func<UserSummary, bool> fits) => people.Where(fits).Select(person => person.Id).Distinct().ToArray();
     }
 
     /// <summary>
     /// A token names someone by their whole display name with everything but letters, digits
     /// and hyphens dropped (the picker writes "@AnaKovač" for "Ana Kovač"), or by their first
-    /// name alone. The caller drops a token that fits more than one person.
+    /// name alone. When two people share a name the picker adds the start of the chosen one's
+    /// id, "@AnaKovač-5d7f9d82", which <see cref="IdSuffix"/> reads. A token that still fits
+    /// more than one person is reported back to the author, never guessed at.
     /// </summary>
     private static string MentionToken(string displayName) => NotMentionable.Replace(displayName, "");
 
     private static string FirstNameToken(string displayName) =>
         MentionToken(displayName.Trim().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "");
+
+    private static bool IdStartsWith(string id, string prefix) =>
+        id.Replace("-", "", StringComparison.Ordinal).StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 
     private static bool MatchesMention(string candidate, string token) =>
         candidate.Length > 0 && string.Equals(candidate, token, StringComparison.OrdinalIgnoreCase);
