@@ -190,6 +190,22 @@ describe('ProjectChatPanel', () => {
     expect(api.getProjectChat).toHaveBeenCalledTimes(2)
   })
 
+  it('names the default runner when it is the one that is offline', async () => {
+    const queued = message({
+      status: 'pending',
+      runStatus: 'queued',
+      answer: null,
+      answeredAt: null,
+    })
+    api.getProjectChat.mockResolvedValue({ ...chat([queued], false), runnerName: 'hetzner-vm' })
+    const wrapper = await mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.find('[data-testid="project-chat-no-runner"]').text()).toBe(
+      "hetzner-vm, this project's default runner, is offline. Your question will start when it connects.",
+    )
+  })
+
   it('shows why a question failed', async () => {
     api.getProjectChat.mockResolvedValue(
       chat([

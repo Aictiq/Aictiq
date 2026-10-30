@@ -3,7 +3,13 @@ import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { CircleCheck, Loader2, MessageCircleQuestion, Sparkles, TriangleAlert } from '@lucide/vue'
 import { transitionItem, type WorkItem } from '@/api/items'
-import { listPlaybooks, playbookHarnesses, type Playbook } from '@/api/playbooks'
+import {
+  getFactorySettings,
+  listPlaybooks,
+  playbookHarnesses,
+  type FactorySettings,
+  type Playbook,
+} from '@/api/playbooks'
 import {
   confirmRefinement,
   getRefinement,
@@ -16,7 +22,12 @@ import RefineRunPicker from '@/components/items/RefineRunPicker.vue'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import { refinementLabels } from '@/lib/refinement'
-import { readRefineRunChoice, runnerCanRun, writeRefineRunChoice } from '@/lib/runs'
+import {
+  preselectedRunnerId,
+  readRefineRunChoice,
+  runnerCanRun,
+  writeRefineRunChoice,
+} from '@/lib/runs'
 import { factoryRunPath, projectSettingsPath } from '@/router/paths'
 import { useOrganizationsStore } from '@/stores/organizations'
 
@@ -68,6 +79,13 @@ const runnerChoices = useQuery({
   queryFn: () => listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
   enabled: canRefine,
 })
+// The project's default runner, preselected when nothing is remembered.
+const factorySettings = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'factory-settings']),
+  queryFn: () =>
+    getFactorySettings(props.slug, props.projectKey).catch(() => null as FactorySettings | null),
+  enabled: canRefine,
+})
 const runners = computed(() => runnerChoices.data.value ?? [])
 const playbookHarness = computed(
   () =>
@@ -88,18 +106,26 @@ watch(
 )
 
 watch(
-  [() => playbooks.data.value, () => runnerChoices.data.value, choiceReady],
-  ([projectPlaybooks, choices, ready]) => {
-    if (ready || !projectPlaybooks || !choices) return
+  [
+    () => playbooks.data.value,
+    () => runnerChoices.data.value,
+    () => factorySettings.data.value,
+    choiceReady,
+  ],
+  ([projectPlaybooks, choices, projectSettings, ready]) => {
+    if (ready || !projectPlaybooks || !choices || projectSettings === undefined) return
     // The choice this project used last, if it still names things that exist and fit.
     const remembered = readRefineRunChoice(props.projectKey)
     harness.value =
       remembered?.harness && (playbookHarnesses as readonly string[]).includes(remembered.harness)
         ? remembered.harness
         : playbookHarness.value
-    const rememberedRunner = choices.find((runner) => runner.id === remembered?.runnerId)
-    runnerId.value =
-      rememberedRunner && runnerCanRun(rememberedRunner, harness.value) ? rememberedRunner.id : null
+    runnerId.value = preselectedRunnerId(
+      choices,
+      harness.value,
+      remembered?.runnerId,
+      projectSettings?.defaultRunnerId,
+    )
     choiceReady.value = true
   },
   { immediate: true },

@@ -63,8 +63,10 @@ export interface ProjectChatMessage {
 export interface ProjectChatView {
   /** Oldest first, at most 10. */
   messages: ProjectChatMessage[]
-  /** Any usable runner that offers the harness is online right now. */
+  /** Any usable runner that offers the harness is online right now: the default runner, when there is one. */
   runnerOnline: boolean
+  /** The project's default runner, when questions go to it. Absent from older servers. */
+  runnerName?: string | null
 }
 
 const chatPath = (slug: string, projectKey: string) => `/orgs/${slug}/projects/${projectKey}/chat`

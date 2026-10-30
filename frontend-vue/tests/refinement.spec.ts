@@ -207,8 +207,10 @@ describe('RefinementPanel', () => {
     canOperateFactory = true,
     enabled = true,
     runners: unknown[] = [],
+    defaultRunnerId: string | null = null,
   ) {
     const calls = stubFetch([
+      ['GET', /\/factory-settings\/?$/, { defaultRunnerId }],
       ['GET', /\/refinement-settings\/$/, settings(enabled)],
       ['GET', /\/projects\/PROJ\/playbooks$/, playbooks],
       ['GET', /\/runners\/choices$/, runners],
@@ -453,5 +455,25 @@ describe('RefinementPanel', () => {
       harness: 'codex',
     })
     gone.wrapper.unmount()
+  })
+
+  it('preselects the project default runner unless a runner is remembered', async () => {
+    const store = stubStorage()
+    // Neither has reported its harnesses yet, so either may take the playbook's.
+    const runners = [runnerChoice('a', []), runnerChoice('b', [])]
+    const fallback = await mountPanel(null, false, true, true, runners, 'b')
+    expect(
+      (fallback.wrapper.find('[data-testid="refine-run-runner"]').element as HTMLSelectElement)
+        .value,
+    ).toBe('b')
+    fallback.wrapper.unmount()
+
+    store.set('aictiq.refine.PROJ', JSON.stringify({ runnerId: 'a', harness: null }))
+    const remembered = await mountPanel(null, false, true, true, runners, 'b')
+    expect(
+      (remembered.wrapper.find('[data-testid="refine-run-runner"]').element as HTMLSelectElement)
+        .value,
+    ).toBe('a')
+    remembered.wrapper.unmount()
   })
 })

@@ -536,6 +536,10 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasDefaultValue("main")
                         .HasColumnName("default_branch");
 
+                    b.Property<Guid?>("DefaultRunnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("default_runner_id");
+
                     b.Property<string>("LocalPathHint")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")

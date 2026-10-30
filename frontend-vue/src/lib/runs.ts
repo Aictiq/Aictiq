@@ -487,6 +487,23 @@ export function writeRefineRunChoice(projectKey: string, choice: RefineRunChoice
 export const runnerCanRun = (runner: { harnesses: string[] }, harness: string | null) =>
   !harness || runner.harnesses.length === 0 || runner.harnesses.includes(harness)
 
+/**
+ * The runner a run dialog preselects: the one remembered for the project, else the project's
+ * default runner, as long as it is still a choice and can run the harness. Null is any free runner.
+ */
+export function preselectedRunnerId<T extends { id: string; harnesses: string[] }>(
+  choices: T[],
+  harness: string | null,
+  rememberedId: string | null | undefined,
+  defaultId: string | null | undefined,
+): string | null {
+  for (const id of [rememberedId, defaultId]) {
+    const runner = id ? choices.find((choice) => choice.id === id) : undefined
+    if (runner && runnerCanRun(runner, harness)) return runner.id
+  }
+  return null
+}
+
 // ── An agent's record ───────────────────────────────────────────────────────────────
 
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'timedOut'])

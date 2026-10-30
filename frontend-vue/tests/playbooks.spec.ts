@@ -110,6 +110,7 @@ describe('the project factory settings endpoint', () => {
       defaultBranch: 'main',
       localPathHint: '/srv/aictiq',
       defaultAgentId: 'agent-1',
+      defaultRunnerId: 'runner-1',
       version: 0,
     }
 

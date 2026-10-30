@@ -79,6 +79,8 @@ export interface FactorySettings {
   defaultBranch: string
   localPathHint: string | null
   defaultAgentId: string | null
+  /** Null is any free runner. Absent from older servers. */
+  defaultRunnerId?: string | null
   updatedAt: string | null
   version: number | null
 }
@@ -89,6 +91,7 @@ export interface SaveFactorySettingsBody {
   defaultBranch: string
   localPathHint: string | null
   defaultAgentId: string | null
+  defaultRunnerId: string | null
   version: number | null
 }
 

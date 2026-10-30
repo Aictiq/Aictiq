@@ -70,11 +70,11 @@ public sealed class UpdatePlaybookRequest
 public sealed record FactorySettingsView(
     Guid ProjectId, short RepoSource, string? RepoFullName,
     string DefaultBranch, string? LocalPathHint, string? DefaultAgentId,
-    DateTimeOffset? UpdatedAt, uint Version);
+    DateTimeOffset? UpdatedAt, uint Version, Guid? DefaultRunnerId = null);
 
 public sealed record UpdateFactorySettingsRequest(
     short RepoSource, string? RepoFullName, string? DefaultBranch,
-    string? LocalPathHint, string? DefaultAgentId, uint Version);
+    string? LocalPathHint, string? DefaultAgentId, uint Version, Guid? DefaultRunnerId = null);
 
 public static class PlaybookEndpoints
 {
@@ -436,9 +436,15 @@ public static class PlaybookEndpoints
         if (request.DefaultAgentId is { } agentId
             && !await IsAssignableAgentAsync(projectId, agentId, access, agents, ct))
             errors["defaultAgentId"] = ["The default agent must be an active agent that can see this project."];
-        if (errors.Count > 0) return Validation(errors);
 
         var row = await db.ProjectSettings.SingleOrDefaultAsync(settings => settings.ProjectId == projectId, ct);
+        // Another organization's runners are outside the query filter, so they read as missing.
+        // A runner disabled since it was chosen may stay; choosing one now may not.
+        if (request.DefaultRunnerId is { } runnerId && runnerId != row?.DefaultRunnerId
+            && !await db.Runners.AnyAsync(r => r.Id == runnerId && r.DeletedAt == null && r.DisabledAt == null, ct))
+            errors["defaultRunnerId"] = ["Choose an enabled runner of this organization."];
+        if (errors.Count > 0) return Validation(errors);
+
         if (row is null)
         {
             if (request.Version != 0) return Conflict();
@@ -460,6 +466,7 @@ public static class PlaybookEndpoints
         row.DefaultBranch = branch;
         row.LocalPathHint = request.RepoSource == (short)ProjectRepositorySource.RunnerLocal ? path : null;
         row.DefaultAgentId = request.DefaultAgentId;
+        row.DefaultRunnerId = request.DefaultRunnerId;
         row.UpdatedAt = clock.GetUtcNow();
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
@@ -535,7 +542,7 @@ public static class PlaybookEndpoints
 
     private static FactorySettingsView ToView(ProjectFactorySettings row) => new(
         row.ProjectId, (short)row.RepoSource, row.RepoFullName, row.DefaultBranch,
-        row.LocalPathHint, row.DefaultAgentId, row.UpdatedAt, row.Version);
+        row.LocalPathHint, row.DefaultAgentId, row.UpdatedAt, row.Version, row.DefaultRunnerId);
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static IResult Validation(Dictionary<string, string[]> errors) =>
