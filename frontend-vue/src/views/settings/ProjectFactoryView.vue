@@ -12,6 +12,7 @@ import {
   type RepositorySource,
 } from '@/api/playbooks'
 import { listProjectMembers } from '@/api/projects'
+import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
 import EmptyState from '@/components/common/EmptyState.vue'
 import RefinementSettingsForm from '@/components/settings/RefinementSettingsForm.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
@@ -49,6 +50,7 @@ const canOperateFactory = computed(
 const settings = ref<FactorySettings | null>(null)
 const bindings = ref<RepoBinding[]>([])
 const agents = ref<Agent[]>([])
+const runners = ref<RunnerChoice[]>([])
 const loading = ref(true)
 const failed = ref(false)
 const saving = ref(false)
@@ -58,6 +60,14 @@ const repoFullName = ref('')
 const defaultBranch = ref('main')
 const localPathHint = ref('')
 const defaultAgentId = ref('')
+/** Empty is any free runner. */
+const defaultRunnerId = ref('')
+/** A saved runner the list does not show: disabled since, or the list could not be read. */
+const unlistedRunner = computed(
+  () =>
+    defaultRunnerId.value !== '' &&
+    !runners.value.some((runner) => runner.id === defaultRunnerId.value),
+)
 const automaticAgentHint = computed(() => {
   const organizationDefault = agents.value.find((agent) => agent.isDefault)
   if (organizationDefault) {
@@ -108,6 +118,7 @@ function apply(value: FactorySettings) {
   defaultBranch.value = value.defaultBranch
   localPathHint.value = value.localPathHint ?? ''
   defaultAgentId.value = value.defaultAgentId ?? ''
+  defaultRunnerId.value = value.defaultRunnerId ?? ''
 }
 
 async function load() {
@@ -118,13 +129,17 @@ async function load() {
   loading.value = true
   failed.value = false
   try {
-    const [loadedSettings, loadedBindings, members, organizationAgents] = await Promise.all([
-      getFactorySettings(project.slug.value, project.projectKey.value),
-      availableBindings(),
-      listProjectMembers(project.slug.value, project.projectKey.value),
-      listAgents(project.slug.value),
-    ])
+    const [loadedSettings, loadedBindings, members, organizationAgents, runnerChoices] =
+      await Promise.all([
+        getFactorySettings(project.slug.value, project.projectKey.value),
+        availableBindings(),
+        listProjectMembers(project.slug.value, project.projectKey.value),
+        listAgents(project.slug.value),
+        // Factory operators read the roster; anyone else still sees the saved choice.
+        listRunnerChoices(project.slug.value).catch(() => [] as RunnerChoice[]),
+      ])
     bindings.value = loadedBindings
+    runners.value = runnerChoices
     const assignable = new Set(
       members.filter((member) => member.isAgent).map((member) => member.userId),
     )
@@ -152,6 +167,7 @@ async function save() {
       defaultBranch: defaultBranch.value.trim() || 'main',
       localPathHint: repoSource.value === 1 ? localPathHint.value.trim() || null : null,
       defaultAgentId: defaultAgentId.value || null,
+      defaultRunnerId: defaultRunnerId.value || null,
       version: settings.value.version,
     })
     apply(saved)
@@ -172,7 +188,7 @@ async function save() {
 <template>
   <SettingsSection
     title="Factory"
-    description="Tell runners where this project's code lives and which agent to use by default."
+    description="Tell runners where this project's code lives and which agent and runner to use by default."
   >
     <UiPageState v-if="loading" state="loading" />
     <EmptyState
@@ -346,6 +362,25 @@ async function save() {
           data-testid="automatic-agent-hint"
         >
           {{ automaticAgentHint }}
+        </p>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="factory-default-runner" class="text-sm font-medium">Default runner</label>
+        <select
+          id="factory-default-runner"
+          v-model="defaultRunnerId"
+          class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm disabled:opacity-50"
+          :disabled="!mayManage"
+        >
+          <option value="">Any free runner</option>
+          <option v-if="unlistedRunner" :value="defaultRunnerId">Saved runner</option>
+          <option v-for="runner in runners" :key="runner.id" :value="runner.id">
+            {{ runner.name }}{{ runner.isOnline ? '' : ' (offline)' }}
+          </option>
+        </select>
+        <p class="text-muted-foreground text-xs">
+          Project chat and new runs use this runner when none is chosen.
         </p>
       </div>
 

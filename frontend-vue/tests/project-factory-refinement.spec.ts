@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { getFactorySettings, type FactorySettings } from '@/api/playbooks'
+import { getFactorySettings, updateFactorySettings, type FactorySettings } from '@/api/playbooks'
 import { listAgents, type Agent } from '@/api/agents'
 import { listProjectMembers, type ProjectMember } from '@/api/projects'
+import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
 import RefinementSettingsForm from '@/components/settings/RefinementSettingsForm.vue'
 import { projectScopeKey } from '@/composables/useSettingsScope'
 import { useOrganizationsStore } from '@/stores/organizations'
@@ -19,6 +20,7 @@ vi.mock('@/api/playbooks', () => ({
 vi.mock('@/api/github', () => ({ listGitHubBindings: vi.fn(async () => []) }))
 vi.mock('@/api/projects', () => ({ listProjectMembers: vi.fn(async () => []) }))
 vi.mock('@/api/agents', () => ({ listAgents: vi.fn(async () => []) }))
+vi.mock('@/api/runners', () => ({ listRunnerChoices: vi.fn(async () => []) }))
 
 const settings: FactorySettings = {
   projectId: 'p1',
@@ -38,6 +40,63 @@ beforeEach(() => {
   vi.mocked(getFactorySettings).mockResolvedValue(settings)
   vi.mocked(listAgents).mockResolvedValue([])
   vi.mocked(listProjectMembers).mockResolvedValue([])
+  vi.mocked(listRunnerChoices).mockResolvedValue([])
+})
+
+describe('default runner', () => {
+  const runner = (id: string, name: string, isOnline = true) =>
+    ({ id, name, harnesses: ['claude'], isOnline }) as RunnerChoice
+
+  it('offers any free runner first, then the organization runners, and saves the choice', async () => {
+    vi.mocked(listRunnerChoices).mockResolvedValue([
+      runner('r1', 'hetzner-vm'),
+      runner('r2', 'laptop', false),
+    ])
+    vi.mocked(updateFactorySettings).mockImplementation(async (_slug, _key, body) => ({
+      ...settings,
+      ...body,
+      version: 2,
+    }))
+    const { wrapper } = await mountFactory('')
+
+    const select = wrapper.get('#factory-default-runner')
+    expect(select.findAll('option').map((option) => option.text())).toEqual([
+      'Any free runner',
+      'hetzner-vm',
+      'laptop (offline)',
+    ])
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(wrapper.text()).toContain(
+      'Project chat and new runs use this runner when none is chosen.',
+    )
+
+    await select.setValue('r2')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(updateFactorySettings).mock.calls[0]![2]).toMatchObject({
+      defaultRunnerId: 'r2',
+    })
+    expect((select.element as HTMLSelectElement).value).toBe('r2')
+
+    await select.setValue('')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(updateFactorySettings).mock.calls[1]![2]).toMatchObject({
+      defaultRunnerId: null,
+    })
+  })
+
+  it('keeps a saved runner the roster does not list', async () => {
+    vi.mocked(getFactorySettings).mockResolvedValue({ ...settings, defaultRunnerId: 'r9' })
+    const { wrapper } = await mountFactory('')
+
+    const select = wrapper.get('#factory-default-runner')
+    expect((select.element as HTMLSelectElement).value).toBe('r9')
+    expect(select.findAll('option').map((option) => option.text())).toEqual([
+      'Any free runner',
+      'Saved runner',
+    ])
+  })
 })
 
 describe('automatic agent hint', () => {

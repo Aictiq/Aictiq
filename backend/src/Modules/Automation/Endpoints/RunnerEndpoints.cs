@@ -424,6 +424,10 @@ public static partial class RunnerEndpoints
         runner.DisabledAt ??= now;
         runner.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        // A project whose default it was goes back to any free runner, rather than naming one
+        // that is gone. Dispatch ignores a deleted runner too, should this update not land.
+        await db.ProjectSettings.Where(settings => settings.DefaultRunnerId == runnerId)
+            .ExecuteUpdateAsync(set => set.SetProperty(settings => settings.DefaultRunnerId, (Guid?)null), cancellationToken);
         return Results.NoContent();
     }
 

@@ -369,6 +369,20 @@ public sealed class RunDispatcher(
         }
 
         var playbook = await FindPlaybookAsync(null, project.Id, ct);
+        var harness = playbook?.Harness ?? ProjectChat.DefaultHarness;
+        // The project's default runner takes the question, as if it were chosen in Start run.
+        // One deleted or disabled since no longer applies: any free runner takes it.
+        Guid? runnerId = null;
+        if (settings?.DefaultRunnerId is { } defaultRunner
+            && await db.Runners.AnyAsync(r => r.Id == defaultRunner && r.DeletedAt == null && r.DisabledAt == null, ct))
+        {
+            if (await RunnerErrorAsync(defaultRunner, harness, project.Key, settings, ct) is { } runnerError)
+            {
+                return DispatchResult.Invalid("runnerId", $"{runnerError} Change the default runner under Factory settings.");
+            }
+            runnerId = defaultRunner;
+        }
+
         var history = await db.ProjectChatMessages.AsNoTracking()
             .Where(row => row.ProjectId == project.Id && row.UserId == userId)
             .OrderByDescending(row => row.AskedAt)
@@ -399,9 +413,10 @@ public sealed class RunDispatcher(
             PlaybookId = Guid.Empty,
             Kind = RunKind.ProjectChat,
             AgentUserId = agentUserId,
+            RequestedRunnerId = runnerId,
             RequiredTags = (await fleetMode.GetAsync(organizationId, ct)).Active ? FleetTags.Union(playbook?.RequiredTags) : [],
             RequestedBy = userId,
-            Harness = playbook?.Harness ?? ProjectChat.DefaultHarness,
+            Harness = harness,
             PromptSnapshot = prompt,
             BranchName = settings?.DefaultBranch ?? "main",
             WorkOnDefaultBranch = true,

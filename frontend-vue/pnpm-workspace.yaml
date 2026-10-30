@@ -30,6 +30,12 @@ auditConfig:
     # it. The fix, 2.4.0, was published 2026-10-22 and is still inside minimumReleaseAge;
     # replace this with a body-parser override once it is older than two days.
     - GHSA-27r3-jxmh-p828
+    # decode-uri-component <=0.5.0 quadratic-time decode of long percent-encoded runs. Our
+    # 0.2.2 comes only through stylus (source-map-resolve), an optional peer of Vite that
+    # shadcn-vue's dev-only CLI pulls in; we have no .styl files, so nothing calls it. The
+    # fix, 0.5.1, is ESM-only, and source-map-resolve's require() of it would get no
+    # function, so it cannot be forced in. Drop once stylus leaves the tree.
+    - GHSA-qr28-fpjm-wq7f
 
 # GHSA-jqcg-44mw-7w3h (proxy-addr, via shadcn-vue's MCP SDK) and GHSA-68fv-2mgg-jv7q
 # (source-map-js, via the Vue compiler and postcss): force the patched releases, which

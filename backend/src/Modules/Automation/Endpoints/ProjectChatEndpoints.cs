@@ -11,8 +11,9 @@ using Microsoft.Extensions.Options;
 namespace Aictiq.Modules.Automation.Endpoints;
 
 /// <param name="Messages">The caller's own chat in this project, oldest first, at most <see cref="ProjectChat.MaxPairs"/>.</param>
-/// <param name="RunnerOnline">An enabled runner that offers the chat's harness is online now, so a queued question can start.</param>
-public sealed record ProjectChatView(IReadOnlyList<ProjectChatMessageView> Messages, bool RunnerOnline);
+/// <param name="RunnerOnline">An enabled runner that offers the chat's harness is online now, so a queued question can start: the project's default runner, when questions go to it.</param>
+/// <param name="RunnerName">The project's default runner, when questions go to it rather than to any free runner.</param>
+public sealed record ProjectChatView(IReadOnlyList<ProjectChatMessageView> Messages, bool RunnerOnline, string? RunnerName = null);
 
 /// <param name="Answer">The agent's answer as Markdown, once it has one.</param>
 /// <param name="RunStatus">While the question is pending: where its run stands (queued, assigned or running).</param>
@@ -226,7 +227,7 @@ public static class ProjectChatEndpoints
         var pendingRuns = pendingRunIds.Count == 0
             ? []
             : await db.Runs.AsNoTracking().Where(run => pendingRunIds.Contains(run.Id))
-                .Select(run => new { run.Id, run.Status, run.Harness })
+                .Select(run => new { run.Id, run.Status, run.Harness, run.RequestedRunnerId })
                 .ToDictionaryAsync(run => run.Id, ct);
 
         // The harness a question runs on: the one in flight, else what the next one would borrow.
@@ -235,7 +236,13 @@ public static class ProjectChatEndpoints
                 .Select(playbook => playbook.Harness).FirstOrDefaultAsync(ct)
             ?? ProjectChat.DefaultHarness;
         var runners = await db.Runners.AsNoTracking().Where(r => r.DeletedAt == null && r.DisabledAt == null).ToListAsync(ct);
-        var runnerOnline = runners.Any(r => RunnerEndpoints.IsOnline(r, options, now)
+        // The runner a question goes to: the one in flight was sent to, else the project's default.
+        var pinnedId = pendingRuns.Count > 0
+            ? pendingRuns.Values.Select(run => run.RequestedRunnerId).FirstOrDefault()
+            : await db.ProjectSettings.AsNoTracking().Where(settings => settings.ProjectId == projectId)
+                .Select(settings => settings.DefaultRunnerId).FirstOrDefaultAsync(ct);
+        var pinned = runners.FirstOrDefault(r => r.Id == pinnedId);
+        var runnerOnline = (pinned is null ? runners : [pinned]).Any(r => RunnerEndpoints.IsOnline(r, options, now)
             && (r.Capabilities is null || r.Capabilities.Harnesses.Any(h => h.Name == harness)));
 
         return new ProjectChatView(
@@ -247,7 +254,7 @@ public static class ProjectChatEndpoints
                 row.Error, row.RunId, row.AskedAt, row.AnsweredAt,
                 files[row.Id].Select(file => new ProjectChatAttachmentView(file.Id, file.FileName, file.ContentType, file.SizeBytes)).ToList()))
                 .ToList(),
-            runnerOnline);
+            runnerOnline, pinned?.Name);
     }
 
     private static IResult Validation(string field, string error) =>

@@ -38,6 +38,7 @@ import {
   formatScheduledTime,
   fromDateTimeLocalValue,
   localTimeZone,
+  preselectedRunnerId,
   readRunChoice,
   runnerCanRun,
   toDateTimeLocalValue,
@@ -211,8 +212,13 @@ watch(
         remembered?.agentId && assignable.value.some((a) => a.userId === remembered.agentId)
           ? remembered.agentId
           : (defaultAgent ?? organizationDefaultAgent ?? assignable.value[0]?.userId ?? null)
-      const rememberedRunner = runnerChoices.find((runner) => runner.id === remembered?.runnerId)
-      runnerId.value = rememberedRunner && runnerCanRun(rememberedRunner, playbookHarness.value) ? rememberedRunner.id : null
+      // The remembered runner, else the project's default runner.
+      runnerId.value = preselectedRunnerId(
+        runnerChoices,
+        playbookHarness.value,
+        remembered?.runnerId,
+        settings?.defaultRunnerId,
+      )
     } catch {
       loadFailed.value = true
     } finally {

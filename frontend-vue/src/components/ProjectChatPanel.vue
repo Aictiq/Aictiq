@@ -99,6 +99,7 @@ function describe(failure: unknown): string {
       fields.sizeBytes?.[0] ??
       fields.fileName?.[0] ??
       fields.agentId?.[0] ??
+      fields.runnerId?.[0] ??
       (typeof failure.problem?.detail === 'string' ? failure.problem.detail : null) ??
       failure.title
     )
@@ -452,7 +453,13 @@ onBeforeUnmount(() => {
               class="text-xs text-amber-700 dark:text-amber-400"
               data-testid="project-chat-no-runner"
             >
-              No runner is online. Your question will start when a runner connects.
+              <template v-if="view.runnerName">
+                {{ view.runnerName }}, this project's default runner, is offline. Your question will
+                start when it connects.
+              </template>
+              <template v-else>
+                No runner is online. Your question will start when a runner connects.
+              </template>
             </p>
           </div>
 

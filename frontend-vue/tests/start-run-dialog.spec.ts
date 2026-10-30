@@ -343,6 +343,50 @@ describe('StartRunDialog', () => {
     expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn2')
   })
 
+  it('preselects the project default runner when nothing is remembered', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2', defaultRunnerId: 'rn2' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
+    })
+
+    const wrapper = await mountDialog()
+
+    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn2')
+  })
+
+  it('keeps the remembered runner ahead of the project default runner', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2', defaultRunnerId: 'rn2' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
+    })
+    storage.set('aictiq.run.PROJ', JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn1' }))
+
+    const wrapper = await mountDialog()
+
+    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn1')
+  })
+
+  it('falls back to any free runner when the default runner is gone', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2', defaultRunnerId: 'deleted' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
+    })
+
+    const wrapper = await mountDialog()
+
+    const select = wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement
+    expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Any free runner')
+  })
+
   it('sends no run when the project has no playbook, and says where to make one', async () => {
     const fetchMock = stubFetch({
       '/playbooks': [],

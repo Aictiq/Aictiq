@@ -60,7 +60,7 @@ public enum ProjectRepositorySource : short
     RunnerLocal = 1,
 }
 
-/// <summary>Where a runner gets one project's repository and which agent it uses by default.</summary>
+/// <summary>Where a runner gets one project's repository and which agent and runner it uses by default.</summary>
 public sealed class ProjectFactorySettings : TenantEntity, IAudited
 {
     public Guid ProjectId { get; init; }
@@ -69,6 +69,11 @@ public sealed class ProjectFactorySettings : TenantEntity, IAudited
     public string DefaultBranch { get; set; } = "main";
     public string? LocalPathHint { get; set; }
     public string? DefaultAgentId { get; set; }
+    /// <summary>
+    /// The runner project chat and new runs go to when nobody chose one; null is any free runner.
+    /// Deleting the runner clears it.
+    /// </summary>
+    public Guid? DefaultRunnerId { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public uint Version { get; private set; }
 }
