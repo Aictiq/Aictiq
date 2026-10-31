@@ -10,12 +10,15 @@ public static class RunPromptComposer
 {
     public static string Compose(string agentDisplayName, string itemKey, string projectKey,
         string projectName, string branchName, string playbookName, string playbookMarkdown,
-        bool workOnDefaultBranch = false, MentionPrompt? mention = null, ReworkPrompt? rework = null)
+        bool workOnDefaultBranch = false, MentionPrompt? mention = null, ReworkPrompt? rework = null,
+        RepositoryPrompt? repositories = null)
     {
         var playbook = string.IsNullOrWhiteSpace(playbookMarkdown)
             ? "(The playbook page is empty.)"
             : playbookMarkdown.Trim();
-        var delivery = workOnDefaultBranch
+        var delivery = repositories is { Checkouts.Count: > 0 } && !workOnDefaultBranch
+            ? "Report progress by editing one comment on the item; open one pull request per repository you changed when the work is reviewable, and link each on the item."
+            : workOnDefaultBranch
             ? $"Report progress by editing one comment on the item; when the work is verified, commit and push directly to origin {branchName}. Do not create an item branch or open a pull request. If a push is rejected, fetch and reconcile the remote changes, then rerun relevant checks; never force-push."
             : "Report progress by editing one comment on the item; open a pull request when the work is reviewable and link it on the item.";
         return SecurityPreamble.Include($"""
@@ -30,8 +33,47 @@ public static class RunPromptComposer
 
             Before planning, read the item itself with get_item("{itemKey}") over the aictiq MCP server.
             {VisualProof(itemKey, workOnDefaultBranch)}
-            """ + (mention is null ? "" : "\n\n" + Request(mention, branchName, workOnDefaultBranch))
+            """ + (repositories is null ? "" : "\n\n" + Repositories(repositories, itemKey, branchName, workOnDefaultBranch))
+            + (mention is null ? "" : "\n\n" + Request(mention, branchName, workOnDefaultBranch))
             + (rework is null ? "" : "\n\n" + Rework(rework, branchName)));
+    }
+
+    /// <summary>
+    /// Where a multi-repository or monorepo run's code is. The checkouts are fixed by the server; the
+    /// ticket may not move the agent into another repository than these.
+    /// </summary>
+    private static string Repositories(RepositoryPrompt repositories, string itemKey, string branchName, bool workOnDefaultBranch)
+    {
+        if (repositories.Checkouts.Count == 0)
+        {
+            return $"""
+                # Working directory
+
+                This project is a monorepo. You start in `{repositories.WorkingDirectory}` inside the checkout; the rest of the repository is there too. Keep your changes inside `{repositories.WorkingDirectory}` unless the ticket says otherwise.
+                """;
+        }
+        var lines = string.Join("\n", repositories.Checkouts.Select(repo =>
+        {
+            var where = repo.WorkingDirectory is { } directory ? $"; work in `repo/{repo.Alias}/{directory}`" : "";
+            var what = repo.RepoFullName ?? repo.LocalPathHint ?? "the runner's local clone";
+            return $"- `{repo.Alias}`: `repo/{repo.Alias}/` ({what}, default branch {repo.DefaultBranch}){where}";
+        }));
+        var step = repositories.Steps > 1
+            ? $"\nThis run is step {repositories.Step} of {repositories.Steps} of the ticket's repository plan."
+              + (repositories.Done.Count > 0 ? $" Already done: {string.Join(", ", repositories.Done)}." : "")
+              + (repositories.Later.Count > 0 ? $" Later runs handle {string.Join(", ", repositories.Later)}: leave those repositories alone." : "")
+            : "";
+        var delivery = workOnDefaultBranch
+            ? $"Commit and push each changed repository directly to its default branch."
+            : $"Use the branch {branchName} in every repository you change, and open one pull request per changed repository. Mention {itemKey} in each pull request, and once they are all open, edit each pull request's description to link the others. Report every pull request URL in your final message.";
+        return $"""
+            # Repositories
+
+            This run has more than one checkout. Each repository is its own git repository under `repo/`:
+            {lines}
+            {step}
+            Change only the repositories listed here. {delivery}
+            """;
     }
 
     /// <summary>
@@ -112,3 +154,12 @@ public sealed record MentionPrompt(
 /// <param name="Round">This rework's number for the item, from 1.</param>
 public sealed record ReworkPrompt(
     string StageName, Guid StageRunId, string Findings, Guid FollowsUpRunId, string? PullRequestUrl, int Round, int MaxRounds);
+
+/// <summary>Where a run's code is, when it is not the project's one repository at its root.</summary>
+/// <param name="Checkouts">A multi-repository run's checkouts; empty for a single checkout started in <paramref name="WorkingDirectory"/>.</param>
+/// <param name="Step">This run's step of the repository plan, from 1.</param>
+/// <param name="Done">Repositories earlier steps finished.</param>
+/// <param name="Later">Repositories later steps will handle.</param>
+public sealed record RepositoryPrompt(
+    IReadOnlyList<Domain.RunRepository> Checkouts, string? WorkingDirectory, int Step, int Steps,
+    IReadOnlyList<string> Done, IReadOnlyList<string> Later);

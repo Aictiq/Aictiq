@@ -29,7 +29,8 @@ public sealed record RunnerClaimRequest(IReadOnlyList<string>? Harnesses, int Sl
 /// it is not offered the run again until its mappings or roots change. Absent: it only cannot take
 /// the run now (another organization holds the machine).
 /// </param>
-public sealed record RunnerReleaseRequest(string? Reason);
+/// <param name="Repository">With <c>no-local-repository</c> on a multi-repository run: the alias of the checkout it could not find.</param>
+public sealed record RunnerReleaseRequest(string? Reason, string? Repository = null);
 
 /// <param name="AgentToken">The per-run agent token's secret. Exists once, like every token secret;
 /// it is revoked when the run finishes and dies with <paramref name="MaxMinutes"/> even if the runner never reports.</param>
@@ -38,7 +39,17 @@ public sealed record RunnerRunClaimed(Guid RunId, Guid? ItemId, string? ItemKey,
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId, RunRepoView Repo,
     string DefaultBranch, string BranchName, int MaxMinutes, string? AictiqUrl, string AgentToken,
     string? AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
-    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null);
+    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null,
+    string? WorkingDirectory = null, IReadOnlyList<RunRepoEntry>? Repos = null);
+
+/// <summary>
+/// One checkout of a multi-repository run, into <c>repo/&lt;alias&gt;/</c>. The claim's own
+/// <see cref="RunnerRunClaimed.Repo"/> still describes the primary repository for older runners.
+/// </summary>
+/// <param name="Source"><c>github</c> or <c>local</c>, as <see cref="RunRepoView.Source"/>.</param>
+/// <param name="WorkingDirectory">Where the agent starts inside this checkout when it is the run's only one.</param>
+public sealed record RunRepoEntry(string Alias, string Source, string? RepoFullName, string? CloneToken,
+    string? LocalPathHint, string DefaultBranch, string? WorkingDirectory, bool Primary);
 
 /// <summary>
 /// Set on a continue run: the runner resumes <paramref name="SessionId"/> in the workspace it
@@ -79,9 +90,13 @@ public sealed record RunnerLogRequest(IReadOnlyList<RunnerLogChunk>? Chunks);
 /// <param name="At">When the line was produced. Null means it arrives at the server's clock.</param>
 public sealed record RunnerLogChunk(int Seq, RunLogStream Stream, string? Text, DateTimeOffset? At);
 
+/// <param name="PullRequestUrls">Every pull request a multi-repository run opened or updated; <paramref name="PullRequestUrl"/> is the first.</param>
 public sealed record RunnerFinishRequest(string? Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
     decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null,
-    string? WorkspacePath = null, string? BranchName = null);
+    string? WorkspacePath = null, string? BranchName = null, IReadOnlyList<string>? PullRequestUrls = null);
+
+/// <param name="Alias">The checkout of a multi-repository run to refresh; null for the primary repository.</param>
+public sealed record RunnerRepoTokenRequest(string? Alias);
 
 /// <summary>
 /// The half of the runner protocol that concerns runs: claim, release, started, log,
@@ -152,6 +167,9 @@ public static partial class RunProtocolEndpoints
             .Select(r => r.Capabilities)
             .SingleOrDefaultAsync(ct);
         var servable = new Dictionary<Guid, bool>();
+        var projectKeys = new Dictionary<Guid, string>();
+        // An older CLI checks out one repository: it never gets a run with several, or a sub-package.
+        var multiRepo = reported?.MultiRepo == true;
 
         while (true)
         {
@@ -229,7 +247,7 @@ public static partial class RunProtocolEndpoints
                 command.Parameters.AddWithValue("harnesses", harnesses);
                 command.Parameters.AddWithValue("runnerId", runnerId);
                 command.Parameters.AddWithValue("now", clock.GetUtcNow());
-                AddProjectParameters(command, projects);
+                AddProjectParameters(command, projects, multiRepo, await UnservedRunsAsync());
                 claimedRunId = await command.ExecuteScalarAsync(ct) as Guid?;
             }
 
@@ -302,6 +320,18 @@ public static partial class RunProtocolEndpoints
                     ? new("github", repoFullName,
                         await repoCredentials.GetCloneTokenAsync(run.ProjectId, repoFullName, ct), null)
                     : new("local", null, null, settings?.LocalPathHint);
+            List<RunRepoEntry>? repos = null;
+            if (run.Repositories.Count > 0)
+            {
+                repos = [];
+                foreach (var checkout in run.Repositories)
+                {
+                    var github = !RepositoryPlans.NeedsLocal(checkout);
+                    repos.Add(new RunRepoEntry(checkout.Alias, github ? "github" : "local", checkout.RepoFullName,
+                        github ? await repoCredentials.GetCloneTokenAsync(run.ProjectId, checkout.RepoFullName!, ct) : null,
+                        checkout.LocalPathHint, checkout.DefaultBranch, checkout.WorkingDirectory, checkout.Primary));
+                }
+            }
 
             await realtime.PublishAsync(run.ProjectId, "run.changed", new
             {
@@ -372,7 +402,8 @@ public static partial class RunProtocolEndpoints
                 run.Harness, SecurityPreamble.Include(run.PromptSnapshot), run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
-                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp, SecurityPreamble.Text), false);
+                options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp, SecurityPreamble.Text,
+                run.WorkingDirectory, repos), false);
         }
 
         // The projects this runner may claim runs of, among those with runs queued: every project
@@ -403,6 +434,33 @@ public static partial class RunProtocolEndpoints
 
         Task<Dictionary<Guid, ProjectServing>> ProjectServingAsync(Guid[] projectIds) =>
             ProjectServing.LoadAsync(db, access, projectIds, ct);
+
+        // Queued multi-repository runs with a checkout this runner plainly cannot find on its machine.
+        async Task<Guid[]> UnservedRunsAsync()
+        {
+            if (!multiRepo)
+            {
+                return [];
+            }
+            var queued = await db.Runs.AsNoTracking()
+                .Where(r => r.Status == RunStatus.Queued && r.RepositoryAliases.Length > 0)
+                .Select(r => new { r.Id, r.ProjectId, r.Repositories })
+                .Take(500)
+                .ToListAsync(ct);
+            var unserved = new List<Guid>();
+            foreach (var row in queued)
+            {
+                if (!projectKeys.TryGetValue(row.ProjectId, out var key))
+                {
+                    key = projectKeys[row.ProjectId] = (await access.GetProjectAsync(row.ProjectId, ct))?.Key ?? "";
+                }
+                if (RepositoryRouting.MissingRepository(reported, key, row.Repositories) is not null)
+                {
+                    unserved.Add(row.Id);
+                }
+            }
+            return [.. unserved];
+        }
 
         // Fleet mode: the run must want only tags this runner has, the runner must have a free
         // slot of its maxParallel, and among the online runners that could take it the one with
@@ -452,7 +510,7 @@ public static partial class RunProtocolEndpoints
                 command.Parameters.AddWithValue("runnerId", runnerId);
                 command.Parameters.AddWithValue("now", now);
                 command.Parameters.AddWithValue("tags", myTags);
-                AddProjectParameters(command, projects);
+                AddProjectParameters(command, projects, multiRepo, await UnservedRunsAsync());
                 await using var reader = await command.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
@@ -470,9 +528,24 @@ public static partial class RunProtocolEndpoints
             var candidateIds = candidates.Select(c => c.Id).ToArray();
             var projectOf = await db.Runs.AsNoTracking()
                 .Where(r => candidateIds.Contains(r.Id))
-                .Select(r => new { r.Id, r.ProjectId, r.DeclinedRunnerIds })
+                .Select(r => new { r.Id, r.ProjectId, r.DeclinedRunnerIds, r.Repositories, r.WorkingDirectory })
                 .ToDictionaryAsync(r => r.Id, ct);
             var serving = await ProjectServingAsync(projectOf.Values.Select(r => r.ProjectId).Distinct().ToArray());
+            foreach (var projectId in projectOf.Values.Select(r => r.ProjectId).Distinct())
+            {
+                if (!projectKeys.ContainsKey(projectId))
+                {
+                    projectKeys[projectId] = (await access.GetProjectAsync(projectId, ct))?.Key ?? "";
+                }
+            }
+            bool OtherServes(Runner other, Guid runId)
+            {
+                var row = projectOf[runId];
+                return row.Repositories.Count == 0 && row.WorkingDirectory is null
+                    ? serving[row.ProjectId].Serves(other.Capabilities)
+                    : other.Capabilities?.MultiRepo == true
+                        && RepositoryRouting.MissingRepository(other.Capabilities, projectKeys[row.ProjectId], row.Repositories) is null;
+            }
             var grace = TimeSpan.FromSeconds(options.Value.FleetBalanceGraceSeconds);
             var eligible = candidates
                 .Where(run => run.Requested == runnerId
@@ -480,7 +553,7 @@ public static partial class RunProtocolEndpoints
                     || !others.Any(other => FleetTags.Satisfies(other.Tags, run.Required)
                         && (other.Runner.Capabilities?.Harnesses.Any(h => h.Name == run.Harness) ?? false)
                         && !projectOf[run.Id].DeclinedRunnerIds.Contains(other.Runner.Id)
-                        && serving[projectOf[run.Id].ProjectId].Serves(other.Runner.Capabilities)))
+                        && OtherServes(other.Runner, run.Id)))
                 .Select(run => run.Id)
                 .ToArray();
             if (eligible.Length == 0)
@@ -517,17 +590,25 @@ public static partial class RunProtocolEndpoints
                               WHERE r.id = requested_runner_id AND r.disabled_at IS NULL))
           AND (continues_run_id IS NULL OR requested_runner_id = @runnerId)
           AND NOT (@runnerId = ANY(declined_runner_ids))
-          AND (continues_run_id IS NOT NULL OR @anyProject OR project_id = ANY(@projects))
+          AND (continues_run_id IS NOT NULL OR @anyProject OR project_id = ANY(@projects) OR cardinality(repository_aliases) > 0)
+          AND ((cardinality(repository_aliases) = 0 AND working_directory IS NULL) OR @multiRepo)
+          AND NOT (id = ANY(@unservedRuns))
         """;
 
     /// <summary>
     /// Binds <see cref="ClaimablePredicate"/>'s project filter. A continue run is exempt: it goes
     /// back to the machine that holds its workspace whatever that machine now maps.
     /// </summary>
-    private static void AddProjectParameters(NpgsqlCommand command, Guid[]? projects)
+    /// <remarks>
+    /// A run with several checkouts is judged by its own repositories rather than its project's
+    /// primary one, and only a runner that reports <see cref="RunnerCapabilities.MultiRepo"/> takes it.
+    /// </remarks>
+    private static void AddProjectParameters(NpgsqlCommand command, Guid[]? projects, bool multiRepo, Guid[] unservedRuns)
     {
         command.Parameters.AddWithValue("anyProject", projects is null);
         command.Parameters.AddWithValue("projects", projects ?? []);
+        command.Parameters.AddWithValue("multiRepo", multiRepo);
+        command.Parameters.AddWithValue("unservedRuns", unservedRuns);
     }
 
     /// <summary>
@@ -553,10 +634,13 @@ public static partial class RunProtocolEndpoints
             NoLocalRepository => true,
             _ => (bool?)null,
         };
-        if (declined is null)
+        if (declined is null
+            || (request?.Repository is { } missing && (declined != true || !run.RepositoryAliases.Contains(missing, StringComparer.Ordinal))))
         {
             return Results.ValidationProblem(
-                new Dictionary<string, string[]> { ["reason"] = [$"Leave it out, or {NoLocalRepository}."] },
+                declined is null
+                    ? new Dictionary<string, string[]> { ["reason"] = [$"Leave it out, or {NoLocalRepository}."] }
+                    : new Dictionary<string, string[]> { ["repository"] = ["Name one of the run's checkouts, with no-local-repository."] },
                 type: ProblemTypes.Validation);
         }
         // No other runner may take a continue or a run a person sent here, so handing it back
@@ -594,9 +678,18 @@ public static partial class RunProtocolEndpoints
             }
         }
 
+        // Which repository was missing, for the run view: the run waits for a runner that has it.
+        var handedBack = declined != true ? null : request?.Repository is { } alias
+            ? $"A runner handed the run back: it has no local clone of the repository {alias}."
+            : "A runner handed the run back: it has no local clone of the project's repository.";
+        if (handedBack is not null)
+        {
+            loggers.CreateLogger(typeof(RunProtocolEndpoints)).LogInformation("Run {RunId}: {Reason}", run.Id, handedBack);
+        }
+
         await realtime.PublishAsync(run.ProjectId, "run.changed", new
         {
-            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued",
+            runId = run.Id, itemId = run.ItemId, itemKey = run.ItemKey, status = "queued", reason = handedBack,
         }, ct);
         return Results.NoContent();
     }
@@ -817,7 +910,13 @@ public static partial class RunProtocolEndpoints
         var logger = loggers.CreateLogger(typeof(RunProtocolEndpoints));
         var outcome = request.Outcome?.Trim() ?? "";
         var summary = Blank(request.Summary);
-        var pullRequestUrl = Blank(request.PullRequestUrl);
+        var pullRequestUrls = (request.PullRequestUrls ?? []).Select(Blank).OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var pullRequestUrl = Blank(request.PullRequestUrl) ?? pullRequestUrls.FirstOrDefault();
+        if (pullRequestUrl is not null && !pullRequestUrls.Contains(pullRequestUrl, StringComparer.OrdinalIgnoreCase) && pullRequestUrls.Length > 0)
+        {
+            pullRequestUrls = [pullRequestUrl, .. pullRequestUrls];
+        }
         var failureReason = Blank(request.FailureReason);
         if (FinishErrors(outcome, summary, pullRequestUrl, failureReason, request) is { Count: > 0 } errors)
         {
@@ -866,6 +965,7 @@ public static partial class RunProtocolEndpoints
 
         run.OutcomeSummary = summary;
         run.PullRequestUrl = pullRequestUrl;
+        run.PullRequestUrls = pullRequestUrls;
         run.ExitCode = request.ExitCode;
         run.CostUsd = request.CostUsd;
         run.InputTokens = request.InputTokens;
@@ -920,7 +1020,7 @@ public static partial class RunProtocolEndpoints
     }
 
     private static async Task<IResult> RepoTokenAsync(
-        Guid runId, HttpContext http, AutomationDbContext db, IRepositoryCredentials repoCredentials,
+        Guid runId, RunnerRepoTokenRequest? request, HttpContext http, AutomationDbContext db, IRepositoryCredentials repoCredentials,
         CancellationToken ct)
     {
         var runnerId = RunnerId(http);
@@ -933,6 +1033,21 @@ public static partial class RunProtocolEndpoints
         if (!run.IsLive)
         {
             return Conflict("This run is already finished.");
+        }
+
+        if (request?.Alias is { } alias)
+        {
+            // A checkout of a multi-repository run: the repository it was dispatched with, nothing else.
+            if (run.Repositories.FirstOrDefault(repo => repo.Alias == alias) is not { } checkout)
+            {
+                return NotFound();
+            }
+            return Results.Ok(new
+            {
+                token = RepositoryPlans.NeedsLocal(checkout)
+                    ? null
+                    : await repoCredentials.GetCloneTokenAsync(run.ProjectId, checkout.RepoFullName!, ct),
+            });
         }
 
         var settings = await db.ProjectSettings.AsNoTracking()
@@ -990,6 +1105,13 @@ public static partial class RunProtocolEndpoints
                      && uri is { Scheme: "http" or "https" })))
         {
             errors["pullRequestUrl"] = ["An absolute http(s) URL of at most 2,048 characters."];
+        }
+
+        if (request.PullRequestUrls is { } urls && (urls.Count > ProjectRepository.MaxRepositories + 1
+            || urls.Any(url => url is null || url.Length > Run.MaxPullRequestUrlLength
+                || !(Uri.TryCreate(url.Trim(), UriKind.Absolute, out var each) && each is { Scheme: "http" or "https" }))))
+        {
+            errors["pullRequestUrls"] = ["At most 21 absolute http(s) URLs of at most 2,048 characters each."];
         }
 
         if (failureReason is { Length: > Run.MaxFailureReasonLength })

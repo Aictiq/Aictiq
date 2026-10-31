@@ -9,11 +9,13 @@ import {
   getFactorySettings,
   updateFactorySettings,
   type FactorySettings,
+  type ProjectRepository,
   type RepositorySource,
 } from '@/api/playbooks'
 import { listProjectMembers } from '@/api/projects'
 import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
 import EmptyState from '@/components/common/EmptyState.vue'
+import MultiRepoSettings from '@/components/settings/MultiRepoSettings.vue'
 import RefinementSettingsForm from '@/components/settings/RefinementSettingsForm.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
@@ -22,9 +24,11 @@ import { Input } from '@/components/ui/input'
 import { useProjectScope } from '@/composables/useSettingsScope'
 import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
+import { planLimitMessage } from '@/lib/billing'
+import { multiRepoErrors } from '@/lib/repositories'
 import { runnerMapCommand, runnerRootCommand } from '@/lib/runners'
 import { factorySetupPath, projectSettingsPath } from '@/router/paths'
-import { ApiError, ConflictError } from '@/utils/api'
+import { ApiError, ConflictError, ValidationError } from '@/utils/api'
 
 const project = useProjectScope()
 const route = useRoute()
@@ -62,6 +66,14 @@ const localPathHint = ref('')
 const defaultAgentId = ref('')
 /** Empty is any free runner. */
 const defaultRunnerId = ref('')
+const multiRepoEnabled = ref(false)
+const primaryAlias = ref('')
+const primaryWorkingDirectory = ref('')
+const additionalRepositories = ref<ProjectRepository[]>([])
+const multiRepoFieldErrors = ref<string[]>([])
+const multiRepo = ref<InstanceType<typeof MultiRepoSettings> | null>(null)
+const multiRepoAvailability = computed(() => settings.value?.multiRepoAvailability ?? 'hidden')
+const multiRepoValid = computed(() => multiRepo.value?.valid ?? true)
 /** A saved runner the list does not show: disabled since, or the list could not be read. */
 const unlistedRunner = computed(
   () =>
@@ -119,6 +131,33 @@ function apply(value: FactorySettings) {
   localPathHint.value = value.localPathHint ?? ''
   defaultAgentId.value = value.defaultAgentId ?? ''
   defaultRunnerId.value = value.defaultRunnerId ?? ''
+  multiRepoEnabled.value = value.multiRepoEnabled ?? false
+  primaryAlias.value = value.primaryAlias ?? ''
+  primaryWorkingDirectory.value = value.primaryWorkingDirectory ?? ''
+  additionalRepositories.value = (value.additionalRepositories ?? []).map((repo) => ({ ...repo }))
+  multiRepoFieldErrors.value = []
+}
+
+/** Only sent while the plan allows it: a downgraded project keeps its setup untouched. */
+function multiRepoBody() {
+  if (multiRepoAvailability.value !== 'available') return {}
+  return {
+    multiRepoEnabled: multiRepoEnabled.value,
+    ...(multiRepoEnabled.value
+      ? {
+          primaryAlias: primaryAlias.value.trim(),
+          primaryWorkingDirectory: primaryWorkingDirectory.value.trim() || null,
+          additionalRepositories: additionalRepositories.value.map((repo) => ({
+            alias: repo.alias.trim(),
+            repoSource: repo.repoSource,
+            repoFullName: repo.repoSource === 0 ? repo.repoFullName?.trim() || null : null,
+            localPathHint: repo.repoSource === 1 ? repo.localPathHint?.trim() || null : null,
+            defaultBranch: repo.defaultBranch.trim() || 'main',
+            workingDirectory: repo.workingDirectory?.trim() || null,
+          })),
+        }
+      : {}),
+  }
 }
 
 async function load() {
@@ -158,8 +197,9 @@ async function load() {
 watch([project.slug, project.projectKey], load, { immediate: true })
 
 async function save() {
-  if (!settings.value || !mayManage.value || !validRepository.value) return
+  if (!settings.value || !mayManage.value || !validRepository.value || !multiRepoValid.value) return
   saving.value = true
+  multiRepoFieldErrors.value = []
   try {
     const saved = await updateFactorySettings(project.slug.value, project.projectKey.value, {
       repoSource: repoSource.value,
@@ -168,6 +208,7 @@ async function save() {
       localPathHint: repoSource.value === 1 ? localPathHint.value.trim() || null : null,
       defaultAgentId: defaultAgentId.value || null,
       defaultRunnerId: defaultRunnerId.value || null,
+      ...multiRepoBody(),
       version: settings.value.version,
     })
     apply(saved)
@@ -177,7 +218,16 @@ async function save() {
       toast.error(new Error('Someone changed these settings first. The latest values are shown.'))
       await load()
     } else {
-      toast.error(error)
+      const refusal = planLimitMessage(error)
+      if (refusal) {
+        // A free or evaluation organization asked for multiple repositories: say so where they are.
+        multiRepoFieldErrors.value = [refusal]
+      } else {
+        if (error instanceof ValidationError) {
+          multiRepoFieldErrors.value = multiRepoErrors(error.fieldErrors)
+        }
+        toast.error(error)
+      }
     }
   } finally {
     saving.value = false
@@ -340,6 +390,20 @@ async function save() {
         />
       </div>
 
+      <MultiRepoSettings
+        ref="multiRepo"
+        v-model:enabled="multiRepoEnabled"
+        v-model:primary-alias="primaryAlias"
+        v-model:primary-working-directory="primaryWorkingDirectory"
+        v-model:repositories="additionalRepositories"
+        :availability="multiRepoAvailability"
+        :may-manage="mayManage"
+        :bindings="bindings"
+        :slug="project.slug.value"
+        :project-key="project.projectKey.value"
+        :errors="multiRepoFieldErrors"
+      />
+
       <div class="space-y-1.5">
         <label for="factory-default-agent" class="text-sm font-medium">Default agent</label>
         <select
@@ -391,7 +455,7 @@ async function save() {
         Project Admins manage factory settings.
       </p>
       <div v-else class="flex justify-end">
-        <Button type="submit" :disabled="saving || !validRepository">
+        <Button type="submit" :disabled="saving || !validRepository || !multiRepoValid">
           <Loader2 v-if="saving" class="animate-spin" aria-hidden="true" />
           Save factory settings
         </Button>

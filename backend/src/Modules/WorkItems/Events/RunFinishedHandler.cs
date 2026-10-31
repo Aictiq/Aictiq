@@ -93,23 +93,26 @@ public sealed class RunFinishedHandler(
         // A stopped chain's run let the item go long ago; a claim now is somebody else's.
         if (item.ClaimedBy is not null && (!@event.ChainStopped || item.ClaimedBy == @event.AgentId)) item.ReleaseStaleClaim(now);
 
-        if (!string.IsNullOrEmpty(@event.PullRequestUrl))
+        // A multi-repository run reports a pull request per changed repository; each is linked.
+        var pullRequests = @event.PullRequestUrls.Count > 0 ? @event.PullRequestUrls
+            : string.IsNullOrEmpty(@event.PullRequestUrl) ? [] : [@event.PullRequestUrl];
+        foreach (var pullRequestUrl in pullRequests.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var provider = @event.PullRequestUrl.Contains("github.com", StringComparison.OrdinalIgnoreCase) ? "github" : "url";
+            var provider = pullRequestUrl.Contains("github.com", StringComparison.OrdinalIgnoreCase) ? "github" : "url";
             var linkExists = await db.ItemLinks.AnyAsync(x => x.ItemId == item.Id && x.Provider == provider &&
-                x.Kind == ItemLinkKind.PullRequest && x.ExternalId == @event.PullRequestUrl, cancellationToken);
+                x.Kind == ItemLinkKind.PullRequest && x.ExternalId == pullRequestUrl, cancellationToken);
             if (!linkExists)
             {
                 db.ItemLinks.Add(new ItemLink
                 {
                     OrganizationId = @event.OrganizationId, ItemId = item.Id, Kind = ItemLinkKind.PullRequest,
-                    Provider = provider, ExternalId = @event.PullRequestUrl, Url = @event.PullRequestUrl,
+                    Provider = provider, ExternalId = pullRequestUrl, Url = pullRequestUrl,
                     Title = $"Pull request for run {@event.RunId}", Meta = JsonSerializer.Serialize(new { @event.RunId }), CreatedAt = now,
                 });
                 db.ItemHistory.Add(new ItemHistory
                 {
                     OrganizationId = @event.OrganizationId, ItemId = item.Id, ActorId = actorId, At = now,
-                    Field = "pull-request-linked", NewValue = JsonSerializer.Serialize(new { runId = @event.RunId, url = @event.PullRequestUrl }), EventId = @event.EventId,
+                    Field = "pull-request-linked", NewValue = JsonSerializer.Serialize(new { runId = @event.RunId, url = pullRequestUrl }), EventId = @event.EventId,
                 });
             }
         }
@@ -143,9 +146,13 @@ public sealed class RunFinishedHandler(
         var thread = @event.TriggerCommentId is { } triggerId
             ? await AgentReplies.ThreadAsync(db, item.Id, triggerId, cancellationToken)
             : null;
-        if (thread is not null && !string.IsNullOrEmpty(@event.PullRequestUrl))
+        if (thread is not null && pullRequests.Count == 1)
         {
             markdown += $" · [Pull request]({@event.PullRequestUrl})";
+        }
+        else if (thread is not null && pullRequests.Count > 1)
+        {
+            markdown += " · " + string.Join(" · ", pullRequests.Select((url, index) => $"[Pull request {index + 1}]({url})"));
         }
         if (@event.Chat)
         {

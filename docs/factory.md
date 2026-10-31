@@ -782,6 +782,11 @@ If the organization drops off its paid plan while fleet mode is on, the settings
 runs dispatch as if fleet mode were off: required tags are ignored, so nothing waits on them,
 and the fleet settings show a notice until the plan is paid again.
 
+## 10. Monorepos and multiple repositories (paid hosted plans)
+
+A ticket can span several repositories, or stay inside one package of a monorepo. See
+[Monorepos and multiple repositories](/guide/multiple-repositories).
+
 ## Retention
 
 Run records stay as item history, with outcome summaries, failure reasons, prompt

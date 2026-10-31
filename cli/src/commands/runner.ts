@@ -142,14 +142,19 @@ export function runnerCommand(globals: () => GlobalOptions): Command {
     .description(
       'Map a project key to a local clone, for projects whose repository source is local',
     )
-    .argument('<projectKey>', 'Project key, e.g. ACME')
+    .argument(
+      '<projectKey>',
+      'Project key, e.g. ACME; ACME/<alias> maps one more repository of a multi-repository project',
+    )
     .argument('[path]', 'Path of the clone (default: the current directory); omit with --remove')
     .option('--remove', 'Remove the mapping')
     .option('--org <slug>', 'The organization the mapping is for, when this machine runs for several')
     .action((projectKey: string, path: string | undefined, options: { remove?: boolean; org?: string }) => {
       const config = requireConfig()
       const profile = selectProfile(config, options.org ?? globals().org)
-      const key = projectKey.toUpperCase()
+      // A multi-repository project's other repositories map as KEY/alias; aliases are lower case.
+      const [project = '', alias] = projectKey.split('/', 2)
+      const key = alias === undefined ? project.toUpperCase() : `${project.toUpperCase()}/${alias.toLowerCase()}`
       if (options.remove) {
         delete profile.workspaces[key]
       } else {
@@ -801,6 +806,7 @@ async function probe(
       ? { workspaces: Object.keys(profile.workspaces).sort(), repoRoots: [...profile.repoRoots] }
       : {}),
     ...(tags.length > 0 ? { tags: [...tags] } : {}),
+    multiRepo: true,
   }
 }
 

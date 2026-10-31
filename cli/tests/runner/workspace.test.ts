@@ -14,12 +14,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   defaultWorkspaceRoot,
+  locateLocalRepositories,
   provisionWorkspace,
   pruneKeptWorkspaces,
   reattachWorkspace,
   type WorkspaceOptions,
 } from '../../src/runner/workspace.js'
-import { RunFailure, type ClaimedRun } from '../../src/runner/types.js'
+import { RunFailure, type ClaimedRun, type RunRepoEntry } from '../../src/runner/types.js'
 import { makeZip } from './zip-fixture.js'
 
 const zip = makeZip([
@@ -670,5 +671,158 @@ describe('kept workspaces', () => {
       .toEqual(['other-worktree'])
     expect(existsSync(join(root, 'other-clone'))).toBe(true)
     expect(existsSync(join(root, 'run-1'))).toBe(true)
+  })
+})
+
+describe('multi-repository workspaces', () => {
+  const token = 'ghs_backendTokenSecret456'
+  const entry = (overrides: Partial<RunRepoEntry>): RunRepoEntry => ({
+    alias: 'backend',
+    source: 'github',
+    repoFullName: 'owner/app',
+    cloneToken: token,
+    localPathHint: null,
+    defaultBranch: 'main',
+    workingDirectory: null,
+    primary: false,
+    ...overrides,
+  })
+  const multi = (repos: RunRepoEntry[], overrides: Partial<ClaimedRun> = {}) =>
+    claimed({ repos, ...overrides })
+
+  it('checks out a GitHub and a local repository under repo/<alias>/ on the run branch, each with its own token variable', async () => {
+    const ws = await provisionWorkspace(
+      multi([entry({ alias: 'backend' }), entry({ alias: 'frontend', source: 'local', repoFullName: null, cloneToken: null, primary: true })]),
+      options({ repositories: { APP: local }, githubBaseUrl: `file://${scratch}` }),
+    )
+
+    const backend = join(ws.checkout, 'backend')
+    const frontend = join(ws.checkout, 'frontend')
+    expect(ws.checkout).toBe(join(ws.runDir, 'repo'))
+    expect(ws.cwd).toBe(ws.checkout)
+    expect(ws.checkouts?.map((c) => [c.alias, c.path, c.source])).toEqual([
+      ['backend', backend, null],
+      ['frontend', frontend, local],
+    ])
+    for (const dir of [backend, frontend]) {
+      expect(git(dir, 'branch', '--show-current').trim()).toBe('aictiq/app-12-fix-the-bug')
+    }
+    expect(ws.env).toEqual({ AICTIQ_GIT_TOKEN_1: token })
+    const config = readFileSync(join(backend, '.git', 'config'), 'utf8')
+    expect(config).toContain('AICTIQ_GIT_TOKEN_1')
+    expect(config).not.toContain(token)
+    const filled = execFileSync('git', ['credential', 'fill'], {
+      cwd: backend,
+      env: { ...gitEnv, AICTIQ_GIT_TOKEN_1: token },
+      input: 'protocol=https\nhost=github.com\n\n',
+      encoding: 'utf8',
+    })
+    expect(filled).toContain(`password=${token}`)
+
+    await ws.cleanup()
+    expect(existsSync(ws.runDir)).toBe(false)
+    // The local repository's worktree went with it.
+    expect(git(local, 'worktree', 'list')).not.toContain(frontend)
+  })
+
+  it('starts a single-repository run in its working directory', async () => {
+    const seed = join(scratch, 'seed')
+    mkdirSync(join(seed, 'packages', 'api'), { recursive: true })
+    writeFileSync(join(seed, 'packages', 'api', 'index.ts'), 'export {}\n')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '-m', 'api')
+    git(seed, 'push', 'origin', 'HEAD:main')
+
+    const ws = await provisionWorkspace(
+      multi([entry({ workingDirectory: 'packages/api' })]),
+      options({ githubBaseUrl: `file://${scratch}` }),
+    )
+    expect(ws.cwd).toBe(join(ws.checkout, 'backend', 'packages', 'api'))
+    await ws.cleanup()
+
+    const legacy = await provisionWorkspace(
+      claimed({ workingDirectory: 'packages/api' }, { source: 'github', repoFullName: 'owner/app', cloneToken: token }),
+      options({ githubBaseUrl: `file://${scratch}` }),
+    )
+    expect(legacy.cwd).toBe(join(legacy.checkout, 'packages', 'api'))
+    await legacy.cleanup()
+  })
+
+  it('refuses a working directory that is missing or leaves the checkout', async () => {
+    const missing = await failure(
+      provisionWorkspace(multi([entry({ workingDirectory: 'packages/nope' })]), options({ githubBaseUrl: `file://${scratch}` })),
+    )
+    expect(missing.reason).toBe('working-directory-missing')
+    expect(missing.repository).toBe('backend')
+
+    const escape = await failure(
+      provisionWorkspace(multi([entry({ workingDirectory: '../..' })]), options({ githubBaseUrl: `file://${scratch}` })),
+    )
+    expect(escape.reason).toBe('workspace-failed')
+    expect(existsSync(join(root, claimed().runId))).toBe(false)
+  })
+
+  it('refreshes each repository’s token by alias and fails naming the one it cannot get', async () => {
+    const asked: (string | undefined)[] = []
+    const error = await failure(
+      provisionWorkspace(
+        multi([entry({ cloneToken: null }), entry({ alias: 'sdk', cloneToken: null })]),
+        options({
+          githubBaseUrl: `file://${scratch}`,
+          refreshCloneToken: async (alias) => {
+            asked.push(alias)
+            return alias === 'backend' ? token : null
+          },
+        }),
+      ),
+    )
+    expect(asked).toEqual(['backend', 'sdk'])
+    expect(error.reason).toBe('repo-token-missing')
+    expect(error.repository).toBe('sdk')
+    expect(error.message).toContain('sdk')
+    expect(existsSync(join(root, claimed().runId))).toBe(false)
+  })
+
+  it('looks up another local repository as KEY/alias and names it when it is missing', async () => {
+    const run = multi([
+      entry({ alias: 'app', source: 'local', repoFullName: null, cloneToken: null, primary: true }),
+      entry({ alias: 'sdk', source: 'local', repoFullName: null, cloneToken: null }),
+    ])
+    const error = await failure(locateLocalRepositories(run, options(), gitEnv))
+    expect(error.reason).toBe('no-local-repository')
+    expect(error.repository).toBe('sdk')
+    expect(error.message).toContain('repository sdk of project APP')
+    expect(error.message).toContain('"APP/sdk"')
+
+    await locateLocalRepositories(run, options({ repositories: { APP: local, 'APP/sdk': local } }), gitEnv)
+  })
+
+  it('refuses an alias that is not a plain directory name', async () => {
+    const error = await failure(provisionWorkspace(multi([entry({ alias: '../x' })]), options()))
+    expect(error.reason).toBe('workspace-failed')
+  })
+
+  it('reattaches every checkout with fresh tokens and removes the worktrees of a kept workspace', async () => {
+    const ws = await provisionWorkspace(
+      multi([entry({}), entry({ alias: 'web', source: 'local', repoFullName: null, cloneToken: null, primary: true })]),
+      options({ githubBaseUrl: `file://${scratch}` }),
+    )
+    ws.retain('sess-9')
+    const kept = JSON.parse(readFileSync(join(ws.runDir, 'kept.json'), 'utf8'))
+    expect(kept.worktrees).toEqual([{ path: join(ws.checkout, 'web'), source: local }])
+
+    const resumed = await reattachWorkspace(
+      multi([entry({ cloneToken: null }), entry({ alias: 'web', source: 'local', repoFullName: null, cloneToken: null, primary: true })], {
+        runId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a77',
+        resume: { continuesRunId: claimed().runId, sessionId: 'sess-9', failureReason: null },
+      }),
+      'Continue.',
+      options({ refreshCloneToken: async (alias) => (alias === 'backend' ? 'ghs_fresh' : null) }),
+    )
+    expect(resumed.env).toEqual({ AICTIQ_GIT_TOKEN_1: 'ghs_fresh' })
+    expect(resumed.checkouts?.map((c) => c.source)).toEqual([null, local])
+    await resumed.cleanup()
+    expect(existsSync(ws.runDir)).toBe(false)
+    expect(git(local, 'worktree', 'list')).not.toContain(join(ws.checkout, 'web'))
   })
 })

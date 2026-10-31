@@ -31,6 +31,7 @@ public sealed class AutomationOrganizationDeletedHandler(
         // Rules before playbooks: the FK is RESTRICT. Firings cascade with their rule.
         await db.Rules.Where(r => r.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectSettings.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.ProjectRepositories.Where(r => r.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.Refinements.Where(r => r.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.RunMentions.Where(m => m.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.ChainSteps.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);

@@ -73,6 +73,12 @@ public sealed record RunFinished(
     /// </summary>
     public bool ChainStopped { get; init; }
 
+    /// <summary>
+    /// Every pull request of a multi-repository run, one per changed repository, the first being
+    /// <c>PullRequestUrl</c>. Empty for a run with one repository, which reports only that one.
+    /// </summary>
+    public IReadOnlyList<string> PullRequestUrls { get; init; } = [];
+
     /// <summary>What the playbook chain does next, or why it ended; added to the outcome comment.</summary>
     public string? ChainNote { get; init; }
 

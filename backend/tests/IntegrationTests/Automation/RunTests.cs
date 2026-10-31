@@ -730,10 +730,17 @@ public sealed record RunView(
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
     RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
-    IReadOnlyList<string>? RequiredTags = null);
+    IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<string>? Repositories = null,
+    IReadOnlyList<string>? PullRequestUrls = null, IReadOnlyList<RunRepositoryStepView>? RepositorySteps = null,
+    string? WorkingDirectory = null);
+
+public sealed record RunRepositoryStepView(
+    IReadOnlyList<string> Aliases, IReadOnlyList<string> After, bool WaitForMerge, string State, Guid? RunId,
+    IReadOnlyList<string> PullRequestUrls);
 
 public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
-    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null);
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null,
+    string? Repository = null);
 
 public sealed record RunScaleUpView(DateTimeOffset? LastCalledAt, string? Error, int AfterSeconds);
 
@@ -754,7 +761,11 @@ public sealed record RunnerRunClaimed(
     string OrganizationSlug, string Harness, string Prompt, Guid? PlaybookRevisionId,
     RunnerRunRepo Repo, string DefaultBranch, string BranchName, int MaxMinutes,
     string AictiqUrl, string AgentToken, string AgentTokenDisplay, int HeartbeatIntervalSeconds, bool WorkOnDefaultBranch = false,
-    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null);
+    RunResumeView? Resume = null, RunFollowUpView? FollowUp = null, string? SystemPrompt = null,
+    string? WorkingDirectory = null, IReadOnlyList<RunnerRunRepoEntry>? Repos = null);
+
+public sealed record RunnerRunRepoEntry(string Alias, string Source, string? RepoFullName, string? CloneToken,
+    string? LocalPathHint, string DefaultBranch, string? WorkingDirectory, bool Primary);
 
 public sealed record RunResumeView(Guid ContinuesRunId, string SessionId, string? FailureReason);
 
@@ -771,6 +782,6 @@ public sealed record RunnerLogChunk(long Seq, string Stream, string Text, DateTi
 public sealed record RunnerFinishRequest(
     string Outcome, int? ExitCode, string? Summary, string? PullRequestUrl,
     decimal? CostUsd, long? InputTokens, long? OutputTokens, string? FailureReason, string? SessionId = null,
-    string? WorkspacePath = null, string? BranchName = null);
+    string? WorkspacePath = null, string? BranchName = null, IReadOnlyList<string>? PullRequestUrls = null);
 
 public sealed record RunnerRunHeartbeatRequest(string? SessionId, string? WorkspacePath = null);

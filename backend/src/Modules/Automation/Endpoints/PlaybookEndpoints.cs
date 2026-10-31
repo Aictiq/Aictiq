@@ -16,7 +16,8 @@ public sealed record PlaybookView(
     Guid Id, Guid ProjectId, string Name, Guid? WikiPageId, string Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
     string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false,
-    IReadOnlyList<Guid>? StagePlaybookIds = null, IReadOnlyList<string>? RequiredTags = null);
+    IReadOnlyList<Guid>? StagePlaybookIds = null, IReadOnlyList<string>? RequiredTags = null,
+    IReadOnlyList<RepositoryStep>? RepositorySteps = null);
 
 /// <summary>A playbook's follow-up playbooks, in the order they run; empty removes them all.</summary>
 public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybookIds);
@@ -29,7 +30,7 @@ public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybook
 public sealed record CreatePlaybookRequest(
     string? Name, Guid? WikiPageId, string? Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null, bool WorkOnDefaultBranch = false,
-    IReadOnlyList<string>? RequiredTags = null);
+    IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<RepositoryStep>? RepositorySteps = null);
 
 /// <param name="InFactorySection">
 /// False for a playbook from before its page had to live in the Factory section: saving new
@@ -59,6 +60,8 @@ public sealed class UpdatePlaybookRequest
     public bool? WorkOnDefaultBranch { get; init; }
     /// <summary>Fleet mode: the playbook's required tags, replacing the old ones. Null leaves them.</summary>
     public IReadOnlyList<string>? RequiredTags { get; init; }
+    /// <summary>Multiple repositories: the playbook's repository steps, replacing the old ones. Null leaves them; empty clears them.</summary>
+    public IReadOnlyList<RepositoryStep>? RepositorySteps { get; init; }
     /// <summary>New instructions: a new revision of the playbook's Factory page, or a new page there when it has none.</summary>
     public string? InstructionsMarkdown { get; init; }
     public uint Version { get; init; }
@@ -67,14 +70,28 @@ public sealed class UpdatePlaybookRequest
     [JsonIgnore] public bool HasOnFailureStateId { get; private set; }
 }
 
+/// <param name="MultiRepoAvailability"><c>hidden</c> (self-hosted, no billing), <c>upgrade</c> (not a paid hosted plan) or <c>available</c>.</param>
+/// <param name="PrimaryAlias">The primary repository's alias: the one stored, or one derived from its name.</param>
+/// <param name="AdditionalRepositories">Repositories beyond the primary one, which stays in the fields above.</param>
 public sealed record FactorySettingsView(
     Guid ProjectId, short RepoSource, string? RepoFullName,
     string DefaultBranch, string? LocalPathHint, string? DefaultAgentId,
-    DateTimeOffset? UpdatedAt, uint Version, Guid? DefaultRunnerId = null);
+    DateTimeOffset? UpdatedAt, uint Version, Guid? DefaultRunnerId = null,
+    bool MultiRepoEnabled = false, string MultiRepoAvailability = "hidden",
+    string PrimaryAlias = "main", string? PrimaryWorkingDirectory = null,
+    IReadOnlyList<ProjectRepositoryView>? AdditionalRepositories = null);
 
+/// <param name="RepoSource">0 a GitHub binding, 1 a repository on the runner's machine.</param>
+public sealed record ProjectRepositoryView(
+    string Alias, short RepoSource, string? RepoFullName, string? LocalPathHint, string? DefaultBranch, string? WorkingDirectory);
+
+/// <param name="MultiRepoEnabled">The multiple-repositories switch; null leaves it.</param>
+/// <param name="AdditionalRepositories">Replaces the repositories beyond the primary one; null leaves them.</param>
 public sealed record UpdateFactorySettingsRequest(
     short RepoSource, string? RepoFullName, string? DefaultBranch,
-    string? LocalPathHint, string? DefaultAgentId, uint Version, Guid? DefaultRunnerId = null);
+    string? LocalPathHint, string? DefaultAgentId, uint Version, Guid? DefaultRunnerId = null,
+    bool? MultiRepoEnabled = null, string? PrimaryAlias = null, string? PrimaryWorkingDirectory = null,
+    IReadOnlyList<ProjectRepositoryView>? AdditionalRepositories = null);
 
 public static class PlaybookEndpoints
 {
@@ -170,6 +187,8 @@ public static class PlaybookEndpoints
             request.InstructionsMarkdown is null ? request.WikiPageId : null, required: true, projectId, factoryPages, ct);
         var requiredTags = FleetTags.Normalize(request.RequiredTags);
         if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
+        var repositorySteps = RepositoryPlans.Normalize(request.RepositorySteps);
+        if (RepositoryPlans.Validate(repositorySteps) is { } stepsError) errors["repositorySteps"] = [stepsError];
         if (errors.Count > 0) return Validation(errors);
         // ux_playbooks_project_name would refuse the row anyway, but only after its page was written.
         if (await NameTakenAsync(db, projectId, request.Name!, null, ct))
@@ -193,6 +212,7 @@ public static class PlaybookEndpoints
             MaxMinutes = request.MaxMinutes,
             WorkOnDefaultBranch = request.WorkOnDefaultBranch,
             RequiredTags = requiredTags!,
+            RepositorySteps = repositorySteps,
             CreatedBy = user.UserId!,
             CreatedAt = now,
             UpdatedAt = now,
@@ -233,6 +253,8 @@ public static class PlaybookEndpoints
             request.InstructionsMarkdown is null ? request.WikiPageId : null, required: pageId is null, projectId, factoryPages, ct);
         var requiredTags = request.RequiredTags is null ? row.RequiredTags : FleetTags.Normalize(request.RequiredTags);
         if (requiredTags is null) errors["requiredTags"] = [FleetTags.Rule];
+        var repositorySteps = request.RepositorySteps is null ? row.RepositorySteps : RepositoryPlans.Normalize(request.RepositorySteps);
+        if (RepositoryPlans.Validate(repositorySteps) is { } stepsError) errors["repositorySteps"] = [stepsError];
         if (errors.Count > 0) return Validation(errors);
         if (await NameTakenAsync(db, projectId, name, row.Id, ct))
             return Conflict("A playbook with this name already exists in this project.");
@@ -254,6 +276,7 @@ public static class PlaybookEndpoints
         row.MaxMinutes = maxMinutes;
         row.WorkOnDefaultBranch = request.WorkOnDefaultBranch ?? row.WorkOnDefaultBranch;
         row.RequiredTags = requiredTags!;
+        row.RepositorySteps = repositorySteps;
         row.UpdatedAt = clock.GetUtcNow();
         db.Entry(row).Property(playbook => playbook.Version).OriginalValue = request.Version;
         try { await db.SaveChangesAsync(ct); }
@@ -401,21 +424,29 @@ public static class PlaybookEndpoints
             ToView(row));
     }
 
-    private static Task<IResult> GetSettingsAsync(HttpContext http, AutomationDbContext db, CancellationToken ct) =>
-        GetSettingsCoreAsync(http.ResolvedProjectId()!.Value, db, ct);
+    private static Task<IResult> GetSettingsAsync(HttpContext http, AutomationDbContext db, IPlanLimits plans,
+        ICurrentTenant tenant, CancellationToken ct) =>
+        GetSettingsCoreAsync(http.ResolvedProjectId()!.Value, db, plans, tenant, ct);
 
-    private static async Task<IResult> GetSettingsCoreAsync(Guid projectId, AutomationDbContext db, CancellationToken ct)
+    private static async Task<IResult> GetSettingsCoreAsync(Guid projectId, AutomationDbContext db, IPlanLimits plans,
+        ICurrentTenant tenant, CancellationToken ct)
     {
         var row = await db.ProjectSettings.AsNoTracking()
             .SingleOrDefaultAsync(settings => settings.ProjectId == projectId, ct);
-        return Results.Ok(row is null
-            ? new FactorySettingsView(projectId, (short)ProjectRepositorySource.RunnerLocal, null, "main", null, null, null, 0)
-            : ToView(row));
+        var availability = await plans.GetMultiRepoAvailabilityAsync(tenant.OrganizationId!.Value, ct);
+        var additional = await db.ProjectRepositories.AsNoTracking()
+            .Where(repo => repo.ProjectId == projectId).OrderBy(repo => repo.Position).ToListAsync(ct);
+        return Results.Ok(ToView(row ?? new ProjectFactorySettings
+        {
+            OrganizationId = tenant.OrganizationId!.Value,
+            ProjectId = projectId,
+            RepoSource = ProjectRepositorySource.RunnerLocal,
+        }, availability, additional));
     }
 
     private static async Task<IResult> PutSettingsAsync(
         UpdateFactorySettingsRequest request, HttpContext http, AutomationDbContext db,
-        ICurrentTenant tenant, IProjectAccess access, IAgentIdentities agents,
+        ICurrentTenant tenant, IProjectAccess access, IAgentIdentities agents, IPlanLimits plans,
         TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
@@ -443,6 +474,37 @@ public static class PlaybookEndpoints
         if (request.DefaultRunnerId is { } runnerId && runnerId != row?.DefaultRunnerId
             && !await db.Runners.AnyAsync(r => r.Id == runnerId && r.DeletedAt == null && r.DisabledAt == null, ct))
             errors["defaultRunnerId"] = ["Choose an enabled runner of this organization."];
+
+        // Multiple repositories: the switch and its list change only on a paid hosted plan. A project
+        // that downgraded keeps both, and saves its other settings as before.
+        var existing = await db.ProjectRepositories.Where(repo => repo.ProjectId == projectId)
+            .OrderBy(repo => repo.Position).ToListAsync(ct);
+        var additional = request.AdditionalRepositories is null ? null : ValidateRepositories(request.AdditionalRepositories, errors);
+        var primaryAlias = Blank(request.PrimaryAlias)?.ToLowerInvariant();
+        if (primaryAlias is not null && !RepositoryPlans.IsAlias(primaryAlias))
+            errors["primaryAlias"] = [RepositoryPlans.AliasRule];
+        var (primaryDirectory, primaryDirectoryError) = RepositoryPlans.CleanWorkingDirectory(request.PrimaryWorkingDirectory);
+        if (primaryDirectoryError is not null) errors["primaryWorkingDirectory"] = [primaryDirectoryError];
+        var aliasAfter = primaryAlias ?? (row is null ? null : RepositoryPlans.PrimaryAlias(row));
+        if (additional is not null && aliasAfter is not null && additional.Any(repo => repo.Alias == aliasAfter))
+            errors["additionalRepositories"] = [$"{aliasAfter} is the primary repository's alias already."];
+        var multiRepoChanges = (request.MultiRepoEnabled == true && row?.MultiRepoEnabled != true)
+            || (primaryAlias is not null && primaryAlias != row?.PrimaryAlias)
+            || (request.PrimaryWorkingDirectory is not null && primaryDirectory != row?.PrimaryWorkingDirectory)
+            || (additional is not null && !SameRepositories(additional, existing));
+        if (multiRepoChanges)
+        {
+            var availability = await plans.GetMultiRepoAvailabilityAsync(tenant.OrganizationId!.Value, ct);
+            if (availability == MultiRepoAvailability.Hidden)
+                errors["multiRepoEnabled"] = ["Multiple repositories are not available on this installation."];
+            else if (availability == MultiRepoAvailability.UpgradeRequired)
+                return Results.Problem(
+                    title: "Plan limit reached.",
+                    detail: "Multiple repositories and monorepo sub-packages are part of the paid Hosted plan. Upgrade this organization to turn them on.",
+                    type: ProblemTypes.PlanLimit,
+                    statusCode: StatusCodes.Status402PaymentRequired,
+                    extensions: new Dictionary<string, object?> { ["limit"] = "multi_repo" });
+        }
         if (errors.Count > 0) return Validation(errors);
 
         if (row is null)
@@ -467,11 +529,104 @@ public static class PlaybookEndpoints
         row.LocalPathHint = request.RepoSource == (short)ProjectRepositorySource.RunnerLocal ? path : null;
         row.DefaultAgentId = request.DefaultAgentId;
         row.DefaultRunnerId = request.DefaultRunnerId;
+        if (request.MultiRepoEnabled is { } enabled) row.MultiRepoEnabled = enabled;
+        if (primaryAlias is not null) row.PrimaryAlias = primaryAlias;
+        // Turning the switch on fixes the derived alias, so renaming the repository later renames no checkout.
+        if (row.MultiRepoEnabled && row.PrimaryAlias is null) row.PrimaryAlias = RepositoryPlans.PrimaryAlias(row);
+        if (request.PrimaryWorkingDirectory is not null) row.PrimaryWorkingDirectory = primaryDirectory;
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (additional is not null && !SameRepositories(additional, existing))
+        {
+            db.ProjectRepositories.RemoveRange(existing);
+            // The unique alias index is checked per statement: removals go out before the new rows.
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return Conflict(); }
+            existing = [.. additional.Select((repo, index) => new ProjectRepository
+            {
+                OrganizationId = tenant.OrganizationId!.Value,
+                ProjectId = projectId,
+                Position = index,
+                Alias = repo.Alias,
+                RepoSource = repo.RepoSource,
+                RepoFullName = repo.RepoFullName,
+                LocalPathHint = repo.LocalPathHint,
+                DefaultBranch = repo.DefaultBranch,
+                WorkingDirectory = repo.WorkingDirectory,
+            })];
+            db.ProjectRepositories.AddRange(existing);
+        }
         row.UpdatedAt = clock.GetUtcNow();
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
-        return Results.Ok(ToView(row));
+        await transaction.CommitAsync(ct);
+        var view = await plans.GetMultiRepoAvailabilityAsync(tenant.OrganizationId!.Value, ct);
+        return Results.Ok(ToView(row, view, existing));
     }
+
+    /// <summary>The additional repositories as they are stored, or null with the reason in <paramref name="errors"/>.</summary>
+    private static List<ProjectRepository>? ValidateRepositories(
+        IReadOnlyList<ProjectRepositoryView> repositories, Dictionary<string, string[]> errors)
+    {
+        if (repositories.Count > ProjectRepository.MaxRepositories)
+        {
+            errors["additionalRepositories"] = [$"Use at most {ProjectRepository.MaxRepositories} additional repositories."];
+            return null;
+        }
+        var result = new List<ProjectRepository>();
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < repositories.Count; index++)
+        {
+            var input = repositories[index];
+            var key = $"additionalRepositories[{index}]";
+            var alias = Blank(input.Alias)?.ToLowerInvariant();
+            if (!RepositoryPlans.IsAlias(alias))
+            {
+                errors[$"{key}.alias"] = [RepositoryPlans.AliasRule];
+                continue;
+            }
+            if (!aliases.Add(alias!))
+            {
+                errors[$"{key}.alias"] = [$"{alias} is used twice."];
+                continue;
+            }
+            if (!Enum.IsDefined(typeof(ProjectRepositorySource), input.RepoSource))
+            {
+                errors[$"{key}.repoSource"] = ["Choose GitHub binding or runner local."];
+                continue;
+            }
+            var source = (ProjectRepositorySource)input.RepoSource;
+            var repo = Blank(input.RepoFullName);
+            var path = Blank(input.LocalPathHint);
+            if (source == ProjectRepositorySource.GitHubBinding && repo is null)
+                errors[$"{key}.repoFullName"] = ["A GitHub repository is required for this source."];
+            else if (repo?.Length > 500)
+                errors[$"{key}.repoFullName"] = ["Use 500 characters or fewer."];
+            if (path?.Length > 2000)
+                errors[$"{key}.localPathHint"] = ["Use 2000 characters or fewer."];
+            var branch = Blank(input.DefaultBranch) ?? "main";
+            if (branch.Length > 255)
+                errors[$"{key}.defaultBranch"] = ["A default branch of 1-255 characters is required."];
+            var (directory, directoryError) = RepositoryPlans.CleanWorkingDirectory(input.WorkingDirectory);
+            if (directoryError is not null)
+                errors[$"{key}.workingDirectory"] = [directoryError];
+            result.Add(new ProjectRepository
+            {
+                Alias = alias!,
+                RepoSource = source,
+                RepoFullName = source == ProjectRepositorySource.GitHubBinding ? repo : null,
+                LocalPathHint = source == ProjectRepositorySource.RunnerLocal ? path : null,
+                DefaultBranch = branch,
+                WorkingDirectory = directory,
+            });
+        }
+        return result;
+    }
+
+    private static bool SameRepositories(IReadOnlyList<ProjectRepository> wanted, IReadOnlyList<ProjectRepository> stored) =>
+        wanted.Count == stored.Count && wanted.Zip(stored).All(pair =>
+            pair.First.Alias == pair.Second.Alias && pair.First.RepoSource == pair.Second.RepoSource
+            && pair.First.RepoFullName == pair.Second.RepoFullName && pair.First.LocalPathHint == pair.Second.LocalPathHint
+            && pair.First.DefaultBranch == pair.Second.DefaultBranch && pair.First.WorkingDirectory == pair.Second.WorkingDirectory);
 
     private static Task<bool> NameTakenAsync(AutomationDbContext db, Guid projectId, string name, Guid? exceptId, CancellationToken ct)
     {
@@ -538,11 +693,23 @@ public static class PlaybookEndpoints
     private static PlaybookView ToView(Playbook row, IReadOnlyList<Guid> stagePlaybookIds) => new(
         row.Id, row.ProjectId, row.Name, row.WikiPageId, row.Harness,
         row.OnSuccessStateId, row.OnFailureStateId, row.MaxMinutes, row.IsDefault,
-        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds, row.RequiredTags);
+        row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds, row.RequiredTags,
+        row.RepositorySteps);
 
-    private static FactorySettingsView ToView(ProjectFactorySettings row) => new(
+    private static FactorySettingsView ToView(ProjectFactorySettings row, MultiRepoAvailability availability,
+        IReadOnlyList<ProjectRepository> additional) => new(
         row.ProjectId, (short)row.RepoSource, row.RepoFullName, row.DefaultBranch,
-        row.LocalPathHint, row.DefaultAgentId, row.UpdatedAt, row.Version, row.DefaultRunnerId);
+        row.LocalPathHint, row.DefaultAgentId, row.Version == 0 ? null : row.UpdatedAt, row.Version, row.DefaultRunnerId,
+        row.MultiRepoEnabled, AvailabilityName(availability), RepositoryPlans.PrimaryAlias(row), row.PrimaryWorkingDirectory,
+        [.. additional.Select(repo => new ProjectRepositoryView(repo.Alias, (short)repo.RepoSource, repo.RepoFullName,
+            repo.LocalPathHint, repo.DefaultBranch, repo.WorkingDirectory))]);
+
+    internal static string AvailabilityName(MultiRepoAvailability availability) => availability switch
+    {
+        MultiRepoAvailability.Available => "available",
+        MultiRepoAvailability.UpgradeRequired => "upgrade",
+        _ => "hidden",
+    };
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static IResult Validation(Dictionary<string, string[]> errors) =>

@@ -79,6 +79,8 @@ export interface RunnerCapabilities {
   claudeUsagePoll?: boolean
   /** `--tag` on `runner start` (or `runner enroll`): what fleet mode routes runs by. Absent when there are none. */
   tags?: string[]
+  /** This CLI checks out a run's several repositories (`repos` on the claim); only such a runner is sent one. */
+  multiRepo?: boolean
 }
 
 /** What `POST /runner/enroll` answers: a runner the enrollment token created, and its `jrn_` secret. */
@@ -107,6 +109,23 @@ export interface RunRepo {
   localPathHint: string | null
 }
 
+/**
+ * One repository of a multi-repository run, checked out at `repo/<alias>/`. The run's branch is
+ * made in each from its own `defaultBranch`.
+ */
+export interface RunRepoEntry {
+  alias: string
+  source: 'github' | 'local'
+  repoFullName: string | null
+  cloneToken: string | null
+  localPathHint: string | null
+  defaultBranch: string
+  /** The sub-directory (e.g. a monorepo package) the agent starts in, relative to the checkout. */
+  workingDirectory: string | null
+  /** The project's own repository, which a runner may also map under the bare project key. */
+  primary: boolean
+}
+
 /** Metadata for an item attachment which the runner can make available beside its checkout. */
 export interface RunAttachment {
   id: string
@@ -133,6 +152,16 @@ export interface ClaimedRun {
   systemPrompt?: string | null
   playbookRevisionId: string | null
   repo: RunRepo
+  /**
+   * A single-checkout run's sub-directory: the harness starts in `repo/<workingDirectory>`.
+   * Absent on older servers and for runs without one.
+   */
+  workingDirectory?: string | null
+  /**
+   * Set for a run over several repositories: each is checked out at `repo/<alias>/` and `repo`
+   * only describes the primary. Absent or null for an ordinary single-checkout run.
+   */
+  repos?: RunRepoEntry[] | null
   defaultBranch: string
   branchName: string
   /** Absent on older servers: keep the branch-and-PR workflow. */
@@ -204,6 +233,8 @@ export interface FinishReport {
   exitCode?: number | null
   summary?: string | null
   pullRequestUrl?: string | null
+  /** Every pull request of a multi-repository run, one per changed repository; `pullRequestUrl` is the first. */
+  pullRequestUrls?: string[]
   costUsd?: number | null
   inputTokens?: number | null
   outputTokens?: number | null
@@ -316,9 +347,12 @@ export interface HarnessAdapter {
 /** A failure the runner reports as the run's `failureReason` rather than crashing on. */
 export class RunFailure extends Error {
   readonly reason: string
-  constructor(reason: string, message: string) {
+  /** The alias of the multi-repository run's checkout the failure is about, when it is about one. */
+  readonly repository: string | undefined
+  constructor(reason: string, message: string, repository?: string) {
     super(message)
     this.name = 'RunFailure'
     this.reason = reason
+    this.repository = repository
   }
 }

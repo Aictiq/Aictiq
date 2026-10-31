@@ -73,6 +73,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("project_id");
 
+                    b.PrimitiveCollection<string[]>("RepositoryAliases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("repository_aliases")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<Guid?>("RunId")
                         .HasColumnType("uuid")
                         .HasColumnName("run_id");
@@ -90,6 +97,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
+
+                    b.PrimitiveCollection<string[]>("WaitForMergeUrls")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("wait_for_merge_urls")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.HasKey("Id")
                         .HasName("pk_chain_steps");
@@ -109,7 +123,7 @@ namespace Aictiq.Modules.Automation.Migrations
                         {
                             t.HasCheckConstraint("ck_chain_steps_decided", "(status = 0) = (decided_at IS NULL)");
 
-                            t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1)");
+                            t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1, 2)");
 
                             t.HasCheckConstraint("ck_chain_steps_started", "(status = 1) = (run_id IS NOT NULL)");
 
@@ -351,6 +365,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("project_id");
 
+                    b.Property<string>("RepositorySteps")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("repository_steps")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.PrimitiveCollection<string[]>("RequiredTags")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -545,9 +566,23 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("local_path_hint");
 
+                    b.Property<bool>("MultiRepoEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("multi_repo_enabled");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
+
+                    b.Property<string>("PrimaryAlias")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("primary_alias");
+
+                    b.Property<string>("PrimaryWorkingDirectory")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("primary_working_directory");
 
                     b.Property<string>("RepoFullName")
                         .HasMaxLength(500)
@@ -646,6 +681,77 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasDatabaseName("ix_refinement_settings_playbook_id");
 
                     b.ToTable("refinement_settings", "automation");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectRepository", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Alias")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("alias");
+
+                    b.Property<string>("DefaultBranch")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasDefaultValue("main")
+                        .HasColumnName("default_branch");
+
+                    b.Property<string>("LocalPathHint")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("local_path_hint");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("RepoFullName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("repo_full_name");
+
+                    b.Property<short>("RepoSource")
+                        .HasColumnType("smallint")
+                        .HasColumnName("repo_source");
+
+                    b.Property<string>("WorkingDirectory")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("working_directory");
+
+                    b.HasKey("Id")
+                        .HasName("pk_project_repositories");
+
+                    b.HasIndex("ProjectId", "Alias")
+                        .IsUnique()
+                        .HasDatabaseName("ux_project_repositories_project_alias");
+
+                    b.ToTable("project_repositories", "automation", t =>
+                        {
+                            t.HasCheckConstraint("ck_project_repositories_alias", "alias ~ '^[a-z0-9][a-z0-9._-]{0,39}$'");
+
+                            t.HasCheckConstraint("ck_project_repositories_default_branch", "length(btrim(default_branch)) BETWEEN 1 AND 255");
+
+                            t.HasCheckConstraint("ck_project_repositories_github_repo", "repo_source <> 0 OR repo_full_name IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_project_repositories_repo_source", "repo_source IN (0, 1)");
+                        });
                 });
 
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.Rule", b =>
@@ -935,9 +1041,38 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("character varying(2048)")
                         .HasColumnName("pull_request_url");
 
+                    b.PrimitiveCollection<string[]>("PullRequestUrls")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("pull_request_urls")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<DateTimeOffset>("QueuedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("queued_at");
+
+                    b.Property<string>("Repositories")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("repositories")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.PrimitiveCollection<string[]>("RepositoryAliases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("repository_aliases")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<string>("RepositoryPlan")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("repository_plan");
+
+                    b.Property<Guid?>("RepositoryRootRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("repository_root_run_id");
 
                     b.Property<string>("RequestedBy")
                         .HasMaxLength(64)
@@ -1011,6 +1146,11 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("work_on_default_branch");
 
+                    b.Property<string>("WorkingDirectory")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("working_directory");
+
                     b.Property<string>("WorkspacePath")
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)")
@@ -1038,6 +1178,10 @@ namespace Aictiq.Modules.Automation.Migrations
                     b.HasIndex(new[] { "AgentTokenId" }, "ix_runs_project_chat_token")
                         .HasDatabaseName("ix_runs_project_chat_token")
                         .HasFilter("kind = 4 AND agent_token_id IS NOT NULL");
+
+                    b.HasIndex(new[] { "RepositoryRootRunId" }, "ix_runs_repository_root")
+                        .HasDatabaseName("ix_runs_repository_root")
+                        .HasFilter("repository_root_run_id IS NOT NULL");
 
                     b.HasIndex(new[] { "ContinuesRunId" }, "ux_runs_continues")
                         .IsUnique()

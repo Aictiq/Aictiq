@@ -104,17 +104,33 @@ public sealed class BillingPlanLimits(BillingDbContext db, IOrganizationPlanUsag
     /// paid for it, so it is offered the upgrade like the free tiers. Self-hosted instances are
     /// not offered fleet mode yet; support may come later.
     /// </summary>
-    public async Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken ct = default)
+    public async Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken ct = default) =>
+        await PaidHostedAsync(organizationId, ct) switch
+        {
+            null => FleetModeAvailability.Hidden,
+            true => FleetModeAvailability.Available,
+            false => FleetModeAvailability.UpgradeRequired,
+        };
+
+    /// <summary>The same rule as <see cref="GetFleetModeAvailabilityAsync"/>: paid hosted only, hidden on self-hosted.</summary>
+    public async Task<MultiRepoAvailability> GetMultiRepoAvailabilityAsync(Guid organizationId, CancellationToken ct = default) =>
+        await PaidHostedAsync(organizationId, ct) switch
+        {
+            null => MultiRepoAvailability.Hidden,
+            true => MultiRepoAvailability.Available,
+            false => MultiRepoAvailability.UpgradeRequired,
+        };
+
+    /// <summary>Null where paid features are not offered at all; otherwise whether a paid hosted subscription is charging.</summary>
+    private async Task<bool?> PaidHostedAsync(Guid organizationId, CancellationToken ct)
     {
-        if (SelfHosted || !options.Value.IsSaas) return FleetModeAvailability.Hidden;
+        if (SelfHosted || !options.Value.IsSaas) return null;
         using var scope = tenant.Use(organizationId);
         var subscription = await db.Subscriptions.AsNoTracking()
             .Select(x => new { x.Status, x.Plan })
             .SingleOrDefaultAsync(ct);
         return subscription is { } row && row.Status.IsBilling()
-            && row.Plan is not (PlanCodes.Free or PlanCodes.HostedFree or PlanCodes.SelfHosted)
-                ? FleetModeAvailability.Available
-                : FleetModeAvailability.UpgradeRequired;
+            && row.Plan is not (PlanCodes.Free or PlanCodes.HostedFree or PlanCodes.SelfHosted);
     }
 
     /// <summary>

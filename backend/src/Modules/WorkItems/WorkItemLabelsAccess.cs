@@ -1,3 +1,4 @@
+using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.SharedKernel.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,5 +18,21 @@ internal sealed class WorkItemLabelsAccess(WorkItemsDbContext db) : IWorkItemLab
             .Where(label => label.ProjectId == projectId && distinct.Contains(label.Id))
             .Select(label => label.Id).Distinct().CountAsync(cancellationToken);
         return found == distinct.Length;
+    }
+
+    public async Task<IReadOnlyList<string>> ItemLabelNamesAsync(Guid itemId, CancellationToken cancellationToken = default) =>
+        await db.ItemLabels.AsNoTracking().Where(x => x.ItemId == itemId)
+            .Join(db.Labels.AsNoTracking(), link => link.LabelId, label => label.Id, (link, label) => label.Name)
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyDictionary<string, string>> PullRequestStatesAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var links = await db.ItemLinks.AsNoTracking()
+            .Where(x => x.ItemId == itemId && x.Kind == ItemLinkKind.PullRequest && x.State != null)
+            .Select(x => new { x.Url, x.State })
+            .ToListAsync(cancellationToken);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in links) result[link.Url.TrimEnd('/')] = link.State!;
+        return result;
     }
 }

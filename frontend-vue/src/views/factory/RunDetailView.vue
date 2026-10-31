@@ -11,6 +11,7 @@ import KeyChip from '@/components/common/KeyChip.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import RunLog from '@/components/factory/RunLog.vue'
+import RunRepositorySteps from '@/components/factory/RunRepositorySteps.vue'
 import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
 import UiPageState from '@/components/UiPageState.vue'
@@ -45,6 +46,7 @@ import {
   toDateTimeLocalValue,
 } from '@/lib/runs'
 import { ApiError } from '@/utils/api'
+import { pullRequestLabel } from '@/lib/repositories'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 
 /**
@@ -174,6 +176,12 @@ async function startNext(how: 'continue' | 'retry') {
 
 const mayRetry = computed(() => (run.value ? canRetryRun(run.value) : false))
 const chain = computed(() => run.value?.chain ?? null)
+/** Every pull request, one per changed repository; older servers report only the first. */
+const pullRequests = computed(() => {
+  const urls = run.value?.pullRequestUrls ?? []
+  if (urls.length > 0) return urls
+  return run.value?.pullRequestUrl ? [run.value.pullRequestUrl] : []
+})
 const chainTotal = computed(() => {
   if (!chain.value) return null
   const totals = chainTotals(chain.value)
@@ -496,6 +504,10 @@ const tokens = computed(() => {
               >
             </dd>
           </div>
+          <div v-if="run.repositories?.length" data-testid="run-repositories">
+            <dt class="inline">Repositories&nbsp;</dt>
+            <dd class="text-foreground inline font-mono">{{ run.repositories.join(', ') }}</dd>
+          </div>
           <div v-if="run.branchName && !run.continuesRunId" data-testid="run-branch">
             <dt class="inline">Branch&nbsp;</dt>
             <dd class="text-foreground inline font-mono">{{ run.branchName }}</dd>
@@ -535,9 +547,9 @@ const tokens = computed(() => {
           </div>
         </dl>
 
-        <div v-if="run.pullRequestUrl" class="mt-3">
+        <div v-if="pullRequests.length === 1" class="mt-3">
           <a
-            :href="run.pullRequestUrl"
+            :href="pullRequests[0]"
             target="_blank"
             rel="noreferrer"
             class="text-primary inline-flex items-center gap-1.5 text-sm underline underline-offset-2"
@@ -547,6 +559,19 @@ const tokens = computed(() => {
             Pull request
           </a>
         </div>
+        <ul v-else-if="pullRequests.length > 1" class="mt-3 space-y-1" data-testid="run-pr-links">
+          <li v-for="url in pullRequests" :key="url">
+            <a
+              :href="url"
+              target="_blank"
+              rel="noreferrer"
+              class="text-primary inline-flex items-center gap-1.5 text-sm underline underline-offset-2"
+            >
+              <ExternalLink class="size-3.5" aria-hidden="true" />
+              Pull request {{ pullRequestLabel(url) }}
+            </a>
+          </li>
+        </ul>
 
         <p v-if="run.outcomeSummary" class="border-border mt-3 rounded border px-2.5 py-2 text-sm">
           {{ run.outcomeSummary }}
@@ -559,6 +584,13 @@ const tokens = computed(() => {
           {{ run.failureReason }}
         </p>
       </div>
+
+      <RunRepositorySteps
+        v-if="run.repositorySteps"
+        :slug="slug"
+        :steps="run.repositorySteps"
+        :current-run-id="run.id"
+      />
 
       <section v-if="chain" class="border-border rounded-lg border" data-testid="run-chain">
         <header class="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-3 pb-2">

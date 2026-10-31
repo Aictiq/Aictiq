@@ -99,8 +99,16 @@ export class RunnerClient {
    * With `no-local-repository` the instance stops offering it to this runner until the runner's
    * mappings or roots change, and answers 409 for a run no other runner may take.
    */
-  async release(runId: string, reason?: 'no-local-repository'): Promise<void> {
-    await this.send(`/runner/runs/${runId}/release`, reason ? { reason } : undefined)
+  /** `repository` names the alias of a multi-repository run's checkout this machine does not have. */
+  async release(
+    runId: string,
+    reason?: 'no-local-repository',
+    repository?: string | null,
+  ): Promise<void> {
+    await this.send(
+      `/runner/runs/${runId}/release`,
+      reason ? { reason, ...(repository ? { repository } : {}) } : undefined,
+    )
   }
 
   async started(runId: string): Promise<void> {
@@ -130,8 +138,12 @@ export class RunnerClient {
     await this.send(`/runner/runs/${runId}/finish`, report)
   }
 
-  async repoToken(runId: string): Promise<string | null> {
-    const response = await this.send<{ token: string | null }>(`/runner/runs/${runId}/repo-token`)
+  /** A fresh token for the primary repository, or for `alias` of a multi-repository run. */
+  async repoToken(runId: string, alias?: string | null): Promise<string | null> {
+    const response = await this.send<{ token: string | null }>(
+      `/runner/runs/${runId}/repo-token`,
+      alias ? { alias } : undefined,
+    )
     return response?.token ?? null
   }
 

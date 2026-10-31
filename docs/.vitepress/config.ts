@@ -39,6 +39,7 @@ export default defineConfig({
         items: [
           { text: 'Connecting an agent', link: '/agents' },
           { text: 'AI software factory', link: '/factory' },
+          { text: 'Multiple repositories', link: '/guide/multiple-repositories' },
           { text: 'The aictiq CLI', link: '/cli' },
           { text: 'REST API', link: '/api' },
           { text: 'Outgoing webhooks', link: '/webhooks' }

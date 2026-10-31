@@ -54,7 +54,21 @@ public sealed record RunView(
     DateTimeOffset? ScheduledFor = null, string? WorkspacePath = null,
     Guid? TriggerCommentId = null, Guid? FollowsUpRunId = null, string? BranchName = null,
     RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
-    IReadOnlyList<string>? RequiredTags = null);
+    IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<string>? Repositories = null,
+    IReadOnlyList<string>? PullRequestUrls = null, IReadOnlyList<RunRepositoryStepView>? RepositorySteps = null,
+    string? WorkingDirectory = null);
+
+/// <summary>
+/// One step of a multi-repository run's graph, as the run page shows it.
+/// </summary>
+/// <param name="State">
+/// <c>pending</c> (an earlier step has not finished), <c>waiting</c> (queued behind the item),
+/// <c>waiting-for-merge</c>, <c>queued</c>, <c>running</c>, <c>succeeded</c>, <c>failed</c>,
+/// <c>cancelled</c> or <c>dropped</c>.
+/// </param>
+public sealed record RunRepositoryStepView(
+    IReadOnlyList<string> Aliases, IReadOnlyList<string> After, bool WaitForMerge, string State, Guid? RunId,
+    IReadOnlyList<string> PullRequestUrls);
 
 /// <summary>
 /// What a queued run waits for, so the run page can say it rather than "waiting for a runner".
@@ -79,8 +93,10 @@ public sealed record RunView(
 /// <param name="RequiredTags">Fleet mode: the tags the run requires, while they decide which runners count.</param>
 /// <param name="ScaleUp">Fleet mode: what the scale-from-zero webhook last did, when one is set up.</param>
 /// <param name="ProjectKey">The project a runner needs a local repository for, when that is what the run waits on.</param>
+/// <param name="Repository">On a multi-repository run, the checkout no runner has a local clone of.</param>
 public sealed record RunWaitView(string Reason, IReadOnlyList<string> Runners, int Ahead,
-    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null);
+    IReadOnlyList<string>? RequiredTags = null, RunScaleUpView? ScaleUp = null, string? ProjectKey = null,
+    string? Repository = null);
 
 /// <param name="LastCalledAt">When the webhook was last called, or null when it has not been yet.</param>
 /// <param name="Error">Why that call failed, or null when it succeeded.</param>
@@ -282,10 +298,64 @@ public static class RunEndpoints
         var view = ToView(run, people, includeDetails: isOperator, names).PrivateTo(run, userId);
         // A project chat has no item, so no chain of continues to walk.
         view = run.Kind == RunKind.ProjectChat ? view : await WithChainAsync(db, run, view, ct);
+        view = run.RepositoryPlan is null ? view : view with { RepositorySteps = await RepositoryStepsAsync(db, run, ct) };
         // Runner names are the operators' business, like the runner list they come from.
         return Results.Ok(isOperator
             ? view with { Waiting = await WaitingAsync(db, access, run, await fleetMode.GetAsync(tenant.OrganizationId!.Value, ct), options.Value, clock.GetUtcNow(), ct) }
             : view);
+    }
+
+    /// <summary>
+    /// Each step of the graph <paramref name="run"/> belongs to, with the run that did it or the
+    /// chain step that waits to: the steps run in waves, the repositories with nothing left to
+    /// wait for together.
+    /// </summary>
+    private static async Task<IReadOnlyList<RunRepositoryStepView>> RepositoryStepsAsync(AutomationDbContext db, Run run, CancellationToken ct)
+    {
+        var plan = run.RepositoryPlan!;
+        var rootRunId = run.RepositoryRootRunId ?? run.Id;
+        var runs = await db.Runs.AsNoTracking()
+            .Where(r => r.RepositoryRootRunId == rootRunId && r.Kind == RunKind.Implement)
+            .OrderBy(r => r.QueuedAt)
+            .ToListAsync(ct);
+        var runIds = runs.Select(r => r.Id).ToArray();
+        var waiting = await db.ChainSteps.AsNoTracking()
+            .Where(step => runIds.Contains(step.AfterRunId) && step.Kind == ChainStepKind.Repositories)
+            .ToListAsync(ct);
+
+        var views = new List<RunRepositoryStepView>();
+        foreach (var wave in RunDispatcher.Waves(plan))
+        {
+            var steps = plan.Where(step => wave.Contains(step.Alias)).ToList();
+            var after = steps.SelectMany(step => step.After).Distinct(StringComparer.Ordinal).ToArray();
+            var merge = steps.Any(step => step.WaitForMerge);
+            // The latest run of these repositories: a continue or follow-up redoes the same wave.
+            var done = runs.LastOrDefault(r => r.RepositoryAliases.Any(wave.Contains));
+            if (done is not null)
+            {
+                var state = done.Status switch
+                {
+                    RunStatus.Queued => "queued",
+                    RunStatus.Assigned or RunStatus.Running => "running",
+                    RunStatus.Succeeded => "succeeded",
+                    RunStatus.Cancelled => "cancelled",
+                    _ => "failed",
+                };
+                var urls = done.PullRequestUrls.Length > 0 ? done.PullRequestUrls
+                    : done.PullRequestUrl is { } single ? [single] : [];
+                views.Add(new RunRepositoryStepView(wave, after, merge, state, done.Id, urls));
+                continue;
+            }
+            var step = waiting.FirstOrDefault(row => row.RepositoryAliases.Any(wave.Contains));
+            var pending = step?.Status switch
+            {
+                ChainStepStatus.Pending => step.WaitForMergeUrls.Length > 0 ? "waiting-for-merge" : "waiting",
+                ChainStepStatus.Dropped => "dropped",
+                _ => "pending",
+            };
+            views.Add(new RunRepositoryStepView(wave, after, merge, pending, null, []));
+        }
+        return views;
     }
 
     /// <summary>
@@ -310,8 +380,16 @@ public static class RunEndpoints
             .ToList();
         // A continue run goes back to its workspace whatever its runner now maps.
         var project = (await ProjectServing.LoadAsync(db, access, [run.ProjectId], ct))[run.ProjectId];
+        var several = run.Repositories.Count > 0 || run.WorkingDirectory is not null;
+        var projectKey = several ? (await access.GetProjectAsync(run.ProjectId, ct))?.Key ?? "" : project.Key;
+        // A run with several checkouts, or a sub-package, goes to a runner that can do it, and has each local one.
         bool Serves(Runner runner) => run.ContinuesRunId is not null
-            || (!run.DeclinedRunnerIds.Contains(runner.Id) && project.Serves(runner.Capabilities));
+            || (!run.DeclinedRunnerIds.Contains(runner.Id) && (several
+                ? runner.Capabilities?.MultiRepo == true
+                    && RepositoryRouting.MissingRepository(runner.Capabilities, projectKey, run.Repositories) is null
+                : project.Serves(runner.Capabilities)));
+        string? Missing(Runner runner) =>
+            several ? RepositoryRouting.MissingRepository(runner.Capabilities, projectKey, run.Repositories) : null;
         var runners = offering.Where(Serves).ToList();
         var requested = run.RequestedRunnerId is { } requestedId
             ? await db.Runners.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestedId, ct)
@@ -321,7 +399,8 @@ public static class RunEndpoints
         var candidates = pinned ? [requested!] : runners;
         if (pinned && !Serves(requested!))
         {
-            return new RunWaitView("runner-missing-project", [requested!.Name], 0, ProjectKey: project.Key);
+            return new RunWaitView("runner-missing-project", [requested!.Name], 0, ProjectKey: projectKey,
+                Repository: Missing(requested));
         }
 
         var taken = await db.Runs.AsNoTracking()
@@ -362,7 +441,10 @@ public static class RunEndpoints
 
         return new RunWaitView(reason, named.Select(r => r.Name).Order(StringComparer.Ordinal).ToList(), ahead,
             fleet.Active && run.RequiredTags.Length > 0 ? run.RequiredTags : null, scaleUp,
-            reason == "no-runner-for-project" ? project.Key : null);
+            reason == "no-runner-for-project" ? projectKey : null,
+            reason == "no-runner-for-project"
+                ? offering.Where(r => RunnerEndpoints.IsOnline(r, options, now)).Select(Missing).FirstOrDefault(alias => alias is not null)
+                : null);
     }
 
     /// <summary>
@@ -844,7 +926,11 @@ public static class RunEndpoints
             WorkspacePath: run.WorkspacePath,
             TriggerCommentId: run.TriggerCommentId, FollowsUpRunId: run.FollowsUpRunId, BranchName: run.BranchName,
             StageVerdict: PlaybookChain.VerdictName(run.StageVerdict), StageIndex: run.StageIndex,
-            ReworkOfRunId: run.ReworkOfRunId, RequiredTags: run.RequiredTags);
+            ReworkOfRunId: run.ReworkOfRunId, RequiredTags: run.RequiredTags,
+            Repositories: run.RepositoryAliases,
+            PullRequestUrls: run.PullRequestUrls.Length > 0 ? run.PullRequestUrls
+                : run.PullRequestUrl is { } single ? [single] : [],
+            WorkingDirectory: run.WorkingDirectory);
 
     /// <summary>
     /// Someone else's project-chat run, as the run screens show it: that it ran, when and on

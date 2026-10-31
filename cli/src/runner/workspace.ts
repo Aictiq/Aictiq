@@ -7,11 +7,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { RunFailure, type ClaimedRun, type RunAttachment } from './types.js'
+import { RunFailure, type ClaimedRun, type RunAttachment, type RunRepoEntry } from './types.js'
 import { extractZip, type ZipExtraction } from './zip.js'
 
 export const DefaultAttachmentMaxCount = 25
@@ -42,8 +43,11 @@ export interface WorkspaceOptions {
   mcpServer: { command: string; args: string[] }
   /** runner milestones, streamed as `event` log chunks */
   event: (line: string) => void
-  /** fetches a fresh GitHub installation token when the claimed one is missing/expired (POST /runner/runs/{id}/repo-token) */
-  refreshCloneToken?: () => Promise<string | null>
+  /**
+   * fetches a fresh GitHub installation token when the claimed one is missing/expired (POST
+   * /runner/runs/{id}/repo-token); `alias` names a multi-repository run's checkout, none the primary
+   */
+  refreshCloneToken?: (alias?: string) => Promise<string | null>
   /** Where `github` repositories are cloned from; tests point it at a local bare repository. */
   githubBaseUrl?: string
   env?: NodeJS.ProcessEnv
@@ -55,9 +59,25 @@ export interface WorkspaceOptions {
   attachmentMaxBytes?: number
 }
 
+/** One git checkout of a run. A single-checkout run has one, with no alias. */
+export interface WorkspaceCheckout {
+  alias: string | null
+  path: string
+  /** The local repository the checkout is a worktree of, or null for a clone. */
+  source: string | null
+  defaultBranch: string
+  /** Provisioning created the run's branch here rather than finding it. */
+  createdBranch?: boolean
+}
+
 export interface Workspace {
   runDir: string
+  /** `repo/`: the checkout of a single-checkout run, the parent of every `repo/<alias>/` otherwise. */
   checkout: string
+  /** Where the harness starts: the checkout, or the working directory the run names below it. Unset means the checkout. */
+  cwd?: string
+  /** Every git checkout of the run; unset means `checkout` alone. */
+  checkouts?: WorkspaceCheckout[]
   branch: string
   promptFile: string
   mcpConfigFile: string
@@ -97,7 +117,14 @@ export interface KeptWorkspace {
   sessionId: string
   /** The local repository a worktree belongs to, or null for a clone. */
   source: string | null
+  /** A multi-repository run's worktrees, each with the local repository it belongs to. */
+  worktrees?: KeptWorktree[]
   keptAt: string
+}
+
+export interface KeptWorktree {
+  path: string
+  source: string
 }
 
 const KeptFile = 'kept.json'
@@ -111,7 +138,20 @@ export const TOKEN_ENV = 'AICTIQ_GIT_TOKEN'
 
 // Answers only `get`: git also calls helpers with `store` after a successful push, and the
 // token must not end up anywhere but this process's environment.
-export const CREDENTIAL_HELPER = `!f() { test "$1" = get || return 0; echo username=x-access-token; echo "password=$${TOKEN_ENV}"; }; f`
+export const CREDENTIAL_HELPER = credentialHelper(TOKEN_ENV)
+
+/** The helper for a checkout whose token is in `variable`: each repository of a run has its own. */
+export function credentialHelper(variable: string): string {
+  return `!f() { test "$1" = get || return 0; echo username=x-access-token; echo "password=$${variable}"; }; f`
+}
+
+/** The variable a multi-repository run's checkout at `index` (0-based) reads its push token from. */
+export function tokenVariable(index: number): string {
+  return `${TOKEN_ENV}_${index + 1}`
+}
+
+/** Aliases become directory names, so only the server's own spelling of one is accepted. */
+const AliasPattern = /^[a-z0-9][a-z0-9._-]{0,39}$/
 
 export const ASKPASS_SCRIPT = `#!/bin/sh
 case "$1" in
@@ -141,9 +181,11 @@ export async function provisionWorkspace(
 
   let source: string | null = null
   let createdBranch: boolean
+  // A multi-repository run's worktrees, added as each is made so a failure part-way removes them.
+  const worktrees: KeptWorktree[] = []
   const cleanup = async (): Promise<void> => {
     if (options.keep) return
-    await removeRunDir(runDir, source, env)
+    await removeRunDir(runDir, source, env, worktrees)
   }
 
   mkdirSync(options.root, { recursive: true, mode: 0o700 })
@@ -162,12 +204,43 @@ export async function provisionWorkspace(
     await assertRefName(run.defaultBranch, 'default branch', env)
 
     let harnessEnv: Record<string, string> = {}
-    if (run.repo.source === 'local') {
-      ;({ source, createdBranch } = await provisionLocal(run, checkout, options, env))
+    let checkouts: WorkspaceCheckout[]
+    let cwd = checkout
+    const repos = run.repos ?? null
+    if (repos) {
+      const entries = validateEntries(repos)
+      for (const entry of entries) await assertRefName(entry.defaultBranch, `default branch of ${entry.alias}`, env)
+      mkdirSync(checkout, { mode: 0o700 })
+      checkouts = []
+      for (const [index, entry] of entries.entries()) {
+        const sub = entryRun(run, entry)
+        const path = join(checkout, entry.alias)
+        if (entry.source === 'local') {
+          const made = await provisionLocal(sub, path, options, env, entryTarget(run, entry))
+          if (made.source !== null) worktrees.push({ path, source: made.source })
+          checkouts.push({ alias: entry.alias, path, source: made.source, defaultBranch: entry.defaultBranch, createdBranch: made.createdBranch })
+        } else {
+          Object.assign(
+            harnessEnv,
+            await provisionGithub(sub, runDir, path, options, env, { alias: entry.alias, variable: tokenVariable(index) }),
+          )
+          checkouts.push({ alias: entry.alias, path, source: null, defaultBranch: entry.defaultBranch, createdBranch: !run.workOnDefaultBranch })
+        }
+      }
+      createdBranch = checkouts[0]?.createdBranch === true
+      cwd = multiCwd(checkout, entries)
+      options.event(`Checked out ${entries.map((entry) => entry.alias).join(', ')} under ${checkout}`)
     } else {
-      harnessEnv = await provisionGithub(run, runDir, checkout, options, env)
-      createdBranch = !run.workOnDefaultBranch
+      if (run.repo.source === 'local') {
+        ;({ source, createdBranch } = await provisionLocal(run, checkout, options, env))
+      } else {
+        harnessEnv = await provisionGithub(run, runDir, checkout, options, env)
+        createdBranch = !run.workOnDefaultBranch
+      }
+      checkouts = [{ alias: null, path: checkout, source, defaultBranch: run.defaultBranch, createdBranch }]
+      if (run.workingDirectory) cwd = workingDirectory(checkout, run.workingDirectory, null)
     }
+    if (cwd !== checkout) options.event(`The agent starts in ${cwd}`)
 
     const prompt = await provisionAttachments(run, attachmentsDir, options)
     writePrivate(promptFile, prompt)
@@ -175,6 +248,8 @@ export async function provisionWorkspace(
     return {
       runDir,
       checkout,
+      cwd,
+      checkouts,
       branch: run.branchName,
       promptFile,
       mcpConfigFile,
@@ -183,7 +258,7 @@ export async function provisionWorkspace(
       createdBranch,
       env: harnessEnv,
       cleanup,
-      retain: (sessionId) => writeKept(runDir, run, sessionId, source),
+      retain: (sessionId) => writeKept(runDir, run, sessionId, source, worktrees),
     }
   } catch (error) {
     await cleanup()
@@ -236,21 +311,46 @@ export async function reattachWorkspace(
   writePrivate(promptFile, prompt)
 
   let harnessEnv: Record<string, string> = {}
-  if (run.repo.source === 'github') {
-    const token = (await options.refreshCloneToken?.()) ?? run.repo.cloneToken ?? null
-    if (!token) {
-      throw new RunFailure(
-        'repository-token-unavailable',
-        `No GitHub installation token is available to push ${run.repo.repoFullName ?? 'the repository'}.`,
-      )
+  let checkouts: WorkspaceCheckout[]
+  let cwd = checkout
+  const repos = run.repos ?? null
+  if (repos) {
+    const entries = validateEntries(repos)
+    checkouts = []
+    for (const [index, entry] of entries.entries()) {
+      const path = join(checkout, entry.alias)
+      if (!existsSync(path)) {
+        throw unavailable(`The workspace of run ${previous} has no checkout of ${entry.alias}.`)
+      }
+      const worktree = kept.worktrees?.find((tree) => tree.path === path)
+      checkouts.push({ alias: entry.alias, path, source: worktree?.source ?? null, defaultBranch: entry.defaultBranch })
+      if (entry.source !== 'github') continue
+      const token = (await options.refreshCloneToken?.(entry.alias)) ?? entry.cloneToken ?? null
+      if (!token) throw missingToken(entry)
+      harnessEnv[tokenVariable(index)] = token
     }
-    harnessEnv = { [TOKEN_ENV]: token }
+    cwd = multiCwd(checkout, entries)
+  } else {
+    if (run.repo.source === 'github') {
+      const token = (await options.refreshCloneToken?.()) ?? run.repo.cloneToken ?? null
+      if (!token) {
+        throw new RunFailure(
+          'repository-token-unavailable',
+          `No GitHub installation token is available to push ${run.repo.repoFullName ?? 'the repository'}.`,
+        )
+      }
+      harnessEnv = { [TOKEN_ENV]: token }
+    }
+    checkouts = [{ alias: null, path: checkout, source: kept.source, defaultBranch: run.defaultBranch }]
+    if (run.workingDirectory) cwd = workingDirectory(checkout, run.workingDirectory, null)
   }
   options.event(`Continuing in the workspace run ${previous} kept: ${checkout}`)
 
   return {
     runDir,
     checkout,
+    cwd,
+    checkouts,
     branch: run.branchName,
     promptFile,
     mcpConfigFile,
@@ -259,9 +359,9 @@ export async function reattachWorkspace(
     env: harnessEnv,
     cleanup: async () => {
       if (options.keep) return
-      await removeRunDir(runDir, kept.source, env)
+      await removeRunDir(runDir, kept.source, env, kept.worktrees ?? [])
     },
-    retain: (sessionId) => writeKept(runDir, run, sessionId, kept.source),
+    retain: (sessionId) => writeKept(runDir, run, sessionId, kept.source, kept.worktrees ?? []),
   }
 }
 
@@ -305,12 +405,12 @@ export async function pruneKeptWorkspaces(
     const age = now - Date.parse(entry.kept.keptAt)
     const stale =
       options.item !== undefined &&
-      entry.kept.source !== null &&
+      (entry.kept.source !== null || (entry.kept.worktrees?.length ?? 0) > 0) &&
       entry.kept.organizationSlug === options.item.organizationSlug &&
       entry.kept.itemKey === options.item.itemKey
     // `except` workspaces are in use and do not count against the limit.
     if (!(age > maxAgeMs || Number.isNaN(age) || index >= max || stale)) continue
-    await removeRunDir(entry.dir, entry.kept.source, env)
+    await removeRunDir(entry.dir, entry.kept.source, env, entry.kept.worktrees ?? [])
     removed.push(entry.name)
   }
   return removed
@@ -342,6 +442,14 @@ function readKept(runDir: string): KeptWorkspace | null {
           itemKey: String(parsed.itemKey ?? ''),
           sessionId: String(parsed.sessionId ?? ''),
           source: typeof parsed.source === 'string' ? parsed.source : null,
+          ...(Array.isArray(parsed.worktrees)
+            ? {
+                worktrees: parsed.worktrees.filter(
+                  (tree): tree is KeptWorktree =>
+                    typeof tree?.path === 'string' && typeof tree?.source === 'string',
+                ),
+              }
+            : {}),
           keptAt: parsed.keptAt,
         }
       : null
@@ -350,13 +458,20 @@ function readKept(runDir: string): KeptWorkspace | null {
   }
 }
 
-function writeKept(runDir: string, run: ClaimedRun, sessionId: string, source: string | null): void {
+function writeKept(
+  runDir: string,
+  run: ClaimedRun,
+  sessionId: string,
+  source: string | null,
+  worktrees: KeptWorktree[] = [],
+): void {
   const kept: KeptWorkspace = {
     runId: run.runId,
     organizationSlug: run.organizationSlug,
     itemKey: run.itemKey ?? '',
     sessionId,
     source,
+    ...(worktrees.length > 0 ? { worktrees } : {}),
     keptAt: new Date().toISOString(),
   }
   try {
@@ -366,12 +481,18 @@ function writeKept(runDir: string, run: ClaimedRun, sessionId: string, source: s
   }
 }
 
-async function removeRunDir(runDir: string, source: string | null, env: NodeJS.ProcessEnv) {
-  if (source !== null) {
-    await git(['worktree', 'remove', '--force', join(runDir, 'repo')], { cwd: source, env }).catch(
+async function removeRunDir(
+  runDir: string,
+  source: string | null,
+  env: NodeJS.ProcessEnv,
+  worktrees: KeptWorktree[] = [],
+) {
+  const trees = source !== null ? [{ path: join(runDir, 'repo'), source }, ...worktrees] : worktrees
+  for (const tree of trees) {
+    await git(['worktree', 'remove', '--force', tree.path], { cwd: tree.source, env }).catch(
       () => undefined,
     )
-    await git(['worktree', 'prune'], { cwd: source, env }).catch(() => undefined)
+    await git(['worktree', 'prune'], { cwd: tree.source, env }).catch(() => undefined)
   }
   try {
     rmSync(runDir, { recursive: true, force: true })
@@ -509,9 +630,12 @@ function formatBytes(value: number): string {
 function resolveLocalRepository(
   run: ClaimedRun,
   options: Pick<WorkspaceOptions, 'repositories' | 'repoRoots'>,
+  target?: LocalTarget,
 ): { path: string; root: string | null } {
-  const mapped = options.repositories[run.projectKey]
-  if (mapped !== undefined) return { path: mapped, root: null }
+  for (const key of target?.keys ?? [run.projectKey]) {
+    const mapped = options.repositories[key]
+    if (mapped !== undefined) return { path: mapped, root: null }
+  }
 
   const hint = run.repo.localPathHint?.trim()
   const roots = options.repoRoots ?? []
@@ -528,7 +652,8 @@ function resolveLocalRepository(
     }
   }
 
-  const example = `("${run.projectKey}": "/path/to/repository")`
+  const key = target?.keys[0] ?? run.projectKey
+  const example = `("${key}": "/path/to/repository")`
   const detail = !hint
     ? ` Add it to the \`workspaces\` map in runner.json ${example}, or set the project's path hint and list its parent directory in \`repoRoots\`.`
     : roots.length === 0
@@ -536,8 +661,19 @@ function resolveLocalRepository(
       : ` The project suggests ${hint}, which is not under any of this runner's repoRoots (${roots.join(', ')}). Add a root that contains it, or map it in \`workspaces\` ${example}.`
   throw new RunFailure(
     'no-local-repository',
-    `No local repository is mapped for project ${run.projectKey}.${detail}`,
+    `No local repository is mapped for ${describe(run, target)}.${detail}`,
+    target?.alias,
   )
+}
+
+/** Which repository a runner-local lookup is for: the mapping keys to try, and its alias in a multi-repository run. */
+interface LocalTarget {
+  keys: string[]
+  alias?: string
+}
+
+function describe(run: ClaimedRun, target?: LocalTarget): string {
+  return target?.alias ? `repository ${target.alias} of project ${run.projectKey}` : `project ${run.projectKey}`
 }
 
 function expandHome(path: string): string {
@@ -574,9 +710,11 @@ export async function locateLocalRepository(
   run: ClaimedRun,
   options: Pick<WorkspaceOptions, 'repositories' | 'repoRoots' | 'signal'>,
   env: NodeJS.ProcessEnv = process.env,
+  target?: LocalTarget,
 ): Promise<{ repo: string; origin: string }> {
-  const { path: mapped, root } = resolveLocalRepository(run, options)
-  const origin = root === null ? 'mapped for project' : 'the path hint for project'
+  const { path: mapped, root } = resolveLocalRepository(run, options, target)
+  const what = describe(run, target)
+  const origin = root === null ? `mapped for ${what}` : `the path hint for ${what}`
 
   const toplevel = await git(['rev-parse', '--show-toplevel'], {
     cwd: mapped,
@@ -584,20 +722,122 @@ export async function locateLocalRepository(
     signal: options.signal,
   }).catch((error: unknown) => {
     if (isAbort(error)) throw error
-    throw new RunFailure(
-      'no-local-repository',
-      `${mapped}, ${origin} ${run.projectKey}, is not a git repository.`,
-    )
+    throw new RunFailure('no-local-repository', `${mapped}, ${origin}, is not a git repository.`, target?.alias)
   })
   // A hinted directory that is not a clone itself would otherwise resolve to whatever
   // repository encloses it, e.g. a dotfiles repository in the home directory.
   if (root !== null && !isWithin(realpathOrSelf(toplevel.trim()), root)) {
     throw new RunFailure(
       'no-local-repository',
-      `${mapped}, the path hint for project ${run.projectKey}, is not a git repository under ${root}.`,
+      `${mapped}, the path hint for ${what}, is not a git repository under ${root}.`,
+      target?.alias,
     )
   }
   return { repo: toplevel.trim(), origin }
+}
+
+/**
+ * Every runner-local clone a run needs: its project's, or each local repository of a
+ * multi-repository run. Throws the first `no-local-repository` failure, naming the alias.
+ */
+export async function locateLocalRepositories(
+  run: ClaimedRun,
+  options: Pick<WorkspaceOptions, 'repositories' | 'repoRoots' | 'signal'>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (!run.repos) {
+    if (run.repo.source === 'local') await locateLocalRepository(run, options, env)
+    return
+  }
+  for (const entry of validateEntries(run.repos)) {
+    if (entry.source !== 'local') continue
+    await locateLocalRepository(entryRun(run, entry), options, env, entryTarget(run, entry))
+  }
+}
+
+/** True when the run needs a clone on this machine, so a runner without one may hand it back. */
+export function needsLocalRepository(run: ClaimedRun): boolean {
+  return run.repos ? run.repos.some((entry) => entry.source === 'local') : run.repo.source === 'local'
+}
+
+function validateEntries(repos: RunRepoEntry[]): RunRepoEntry[] {
+  if (repos.length === 0) {
+    throw new RunFailure('workspace-failed', 'The run names no repositories to check out.')
+  }
+  const seen = new Set<string>()
+  for (const entry of repos) {
+    if (!AliasPattern.test(entry.alias) || seen.has(entry.alias)) {
+      throw new RunFailure('workspace-failed', `Refusing to check out repository alias "${entry.alias}".`)
+    }
+    seen.add(entry.alias)
+  }
+  return repos
+}
+
+/** One repository of a multi-repository run, as the single-checkout steps read a run. */
+function entryRun(run: ClaimedRun, entry: RunRepoEntry): ClaimedRun {
+  return {
+    ...run,
+    repo: {
+      source: entry.source,
+      repoFullName: entry.repoFullName,
+      cloneToken: entry.cloneToken,
+      localPathHint: entry.localPathHint,
+    },
+    defaultBranch: entry.defaultBranch,
+    // Direct delivery goes to each repository's own default branch.
+    branchName: run.workOnDefaultBranch ? entry.defaultBranch : run.branchName,
+    repos: null,
+    workingDirectory: null,
+  }
+}
+
+/** A runner maps another repository as `KEY/alias`; the primary also under the bare key, as before. */
+function entryTarget(run: ClaimedRun, entry: RunRepoEntry): LocalTarget {
+  const own = `${run.projectKey}/${entry.alias}`
+  return { keys: entry.primary ? [own, run.projectKey] : [own], alias: entry.alias }
+}
+
+/** One repository: its working directory, or its root. Several: `repo/`, where the agent sees them all. */
+function multiCwd(checkout: string, entries: RunRepoEntry[]): string {
+  if (entries.length !== 1) return checkout
+  const entry = entries[0]!
+  const path = join(checkout, entry.alias)
+  return entry.workingDirectory ? workingDirectory(path, entry.workingDirectory, entry.alias) : path
+}
+
+/**
+ * The sub-directory the agent starts in. It comes from the server, so it must stay inside the
+ * checkout once `..` and symlinks are resolved, and it must exist.
+ */
+export function workingDirectory(checkout: string, relativePath: string, alias: string | null): string {
+  const where = alias ? `repository ${alias}` : 'the checkout'
+  const trimmed = relativePath.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (trimmed === '' || trimmed === '.') return checkout
+  if (isAbsolute(trimmed) || trimmed.split('/').includes('..')) {
+    throw new RunFailure('workspace-failed', `Refusing the working directory "${relativePath}" of ${where}.`, alias ?? undefined)
+  }
+  const path = join(checkout, trimmed)
+  const real = realpathOrSelf(path)
+  if (!isWithin(real, realpathOrSelf(checkout))) {
+    throw new RunFailure('workspace-failed', `The working directory "${relativePath}" leaves ${where}.`, alias ?? undefined)
+  }
+  if (!existsSync(path) || !statSync(path).isDirectory()) {
+    throw new RunFailure(
+      'working-directory-missing',
+      `The working directory ${trimmed} does not exist in ${where}. Check the repository's or the playbook's working directory.`,
+      alias ?? undefined,
+    )
+  }
+  return path
+}
+
+function missingToken(entry: RunRepoEntry): RunFailure {
+  return new RunFailure(
+    'repo-token-missing',
+    `No GitHub installation token is available for repository ${entry.alias} (${entry.repoFullName ?? 'no repository'}). Check that the GitHub App is installed on it and the repository is bound to the project.`,
+    entry.alias,
+  )
 }
 
 async function provisionLocal(
@@ -605,8 +845,9 @@ async function provisionLocal(
   checkout: string,
   options: WorkspaceOptions,
   env: NodeJS.ProcessEnv,
+  target?: LocalTarget,
 ): Promise<{ source: string | null; createdBranch: boolean }> {
-  const { repo, origin } = await locateLocalRepository(run, options, env)
+  const { repo, origin } = await locateLocalRepository(run, options, env, target)
   const call = (args: string[]) => gitStep(args, { cwd: repo, env, signal: options.signal })
 
   const hasOrigin = await git(['remote', 'get-url', 'origin'], {
@@ -625,7 +866,7 @@ async function provisionLocal(
     // commits would be lost while the run still reported success.
     throw new RunFailure(
       'no-remote',
-      `${repo}, ${origin} ${run.projectKey}, has no origin remote to push ${run.branchName} to. Direct delivery needs one; add it with \`git remote add origin <url>\` or use branch-and-pull-request delivery.`,
+      `${repo}, ${origin}, has no origin remote to push ${run.branchName} to. Direct delivery needs one; add it with \`git remote add origin <url>\` or use branch-and-pull-request delivery.`,
     )
   }
 
@@ -684,12 +925,17 @@ async function provisionLocal(
   return { source: repo, createdBranch: !branchExists }
 }
 
+/**
+ * `entry` is set for one repository of a multi-repository run: its token is refreshed by alias
+ * and the checkout's credential helper reads it from that repository's own variable.
+ */
 async function provisionGithub(
   run: ClaimedRun,
   runDir: string,
   checkout: string,
   options: WorkspaceOptions,
   env: NodeJS.ProcessEnv,
+  entry?: { alias: string; variable: string },
 ): Promise<Record<string, string>> {
   const full = run.repo.repoFullName
   if (!full || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(full)) {
@@ -699,7 +945,17 @@ async function provisionGithub(
     )
   }
 
-  const token = run.repo.cloneToken ?? (await options.refreshCloneToken?.()) ?? null
+  const token =
+    run.repo.cloneToken ??
+    (await (entry ? options.refreshCloneToken?.(entry.alias) : options.refreshCloneToken?.())) ??
+    null
+  if (!token && entry) {
+    throw new RunFailure(
+      'repo-token-missing',
+      `No GitHub installation token is available for repository ${entry.alias} (${full}). Check that the GitHub App is installed on it and the repository is bound to the project.`,
+      entry.alias,
+    )
+  }
   if (!token) {
     throw new RunFailure(
       'repository-token-unavailable',
@@ -734,7 +990,7 @@ async function provisionGithub(
     { cwd: runDir, env: cloneEnv, signal: options.signal },
     token,
   )
-  options.event(`Cloned ${full} (depth 50)`)
+  options.event(entry ? `Cloned ${full} (depth 50) into ${entry.alias}` : `Cloned ${full} (depth 50)`)
 
   const call = (args: string[]) =>
     gitStep(args, { cwd: checkout, env, signal: options.signal }, token)
@@ -745,9 +1001,10 @@ async function provisionGithub(
 
   // So the agent can push: a helper that reads the token from the harness's environment.
   await call(['config', '--local', '--replace-all', 'credential.helper', ''])
-  await call(['config', '--local', '--add', 'credential.helper', CREDENTIAL_HELPER])
+  const variable = entry?.variable ?? TOKEN_ENV
+  await call(['config', '--local', '--add', 'credential.helper', credentialHelper(variable)])
 
-  return { [TOKEN_ENV]: token }
+  return { [variable]: token }
 }
 
 function writePrivate(path: string, content: string | Uint8Array): void {

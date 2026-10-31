@@ -17,7 +17,7 @@ namespace Aictiq.Modules.Automation;
 /// </summary>
 public sealed class ChainQueue(
     AutomationDbContext db, IProjectAccess access, RunDispatcher dispatcher, ICurrentTenant tenant,
-    TimeProvider clock, ILogger<ChainQueue> logger)
+    TimeProvider clock, ILogger<ChainQueue> logger, IWorkItemLabels labels)
 {
     private const int BatchSize = 50;
 
@@ -113,7 +113,31 @@ public sealed class ChainQueue(
         {
             return (null, $"{project.Key} is archived, so nothing runs on it until it is un-archived.");
         }
-        if (now - step.CreatedAt > RunMention.MaxWait)
+        if (step.WaitForMergeUrls.Length > 0)
+        {
+            // A repository step that waits for a merge waits for GitHub, not for the item.
+            var states = await labels.PullRequestStatesAsync(step.ItemId, ct);
+            var open = new List<string>();
+            foreach (var url in step.WaitForMergeUrls)
+            {
+                var state = states.GetValueOrDefault(url.TrimEnd('/'));
+                if (state == "closed")
+                {
+                    return (null, $"The pull request {url} was closed without merging, so {string.Join(", ", step.RepositoryAliases)} did not start.");
+                }
+                if (state != "merged")
+                {
+                    open.Add(url);
+                }
+            }
+            if (open.Count > 0)
+            {
+                return now - step.CreatedAt > PlaybookChain.MergeMaxWait
+                    ? (null, $"The pull request {open[0]} did not merge within {PlaybookChain.MergeMaxWait.TotalDays:0} days, so the chain stopped waiting.")
+                    : (null, null);
+            }
+        }
+        else if (now - step.CreatedAt > RunMention.MaxWait)
         {
             return (null, "Someone else held the item for a day, so the chain stopped waiting.");
         }
@@ -135,7 +159,21 @@ public sealed class ChainQueue(
         }
 
         DispatchResult result;
-        if (step.Kind == ChainStepKind.Stage)
+        if (step.Kind == ChainStepKind.Repositories)
+        {
+            if (after.RepositoryPlan is not { } plan)
+            {
+                return (null, "The run before lost its repository plan.");
+            }
+            var actor = after.RequestedBy is { } requestedBy
+                ? DispatchActor.User(requestedBy)
+                : DispatchActor.Rule(after.RuleId!.Value);
+            result = await dispatcher.DispatchAsync(
+                project, step.ItemKey, after.PlaybookId, after.AgentUserId, runnerId: null, actor, ct,
+                requiredTags: after.RequiredTags,
+                wave: new RepositoryWaveDispatch(after.RepositoryRootRunId ?? after.Id, plan, step.RepositoryAliases));
+        }
+        else if (step.Kind == ChainStepKind.Stage)
         {
             var stages = await PlaybookChain.StagesAsync(db, chain.Id, ct);
             if (step.StageIndex >= stages.Count)

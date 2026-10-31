@@ -67,6 +67,12 @@ internal static class PlaybookChain
     public static async Task<Decision?> DecideAsync(
         AutomationDbContext db, Run run, string outcome, DateTimeOffset now, CancellationToken ct)
     {
+        if (run.Kind == RunKind.Implement && run.RepositoryPlan is { } plan && outcome == RunOutcomes.Succeeded
+            && await NextRepositoriesAsync(db, run, plan, now, ct) is { } repositories)
+        {
+            return repositories;
+        }
+
         if (run.Kind == RunKind.Implement)
         {
             // Stages check a pull request; a run that delivers straight to the default branch has none.
@@ -132,6 +138,83 @@ internal static class PlaybookChain
         }
         return new Decision(null, true, review,
             $"The item already had {MaxReworkRounds} rework rounds, so it goes to human review with these findings open.", stageName);
+    }
+
+    /// <summary>How long a repository step waits for a pull request to merge before the chain gives up on it.</summary>
+    public static readonly TimeSpan MergeMaxWait = TimeSpan.FromDays(14);
+
+    /// <summary>
+    /// A multi-repository run's next repositories: the steps of its graph whose waits are now all
+    /// done, or null when every repository has had its run and the chain goes on to its stages.
+    /// </summary>
+    private static async Task<Decision?> NextRepositoriesAsync(
+        AutomationDbContext db, Run run, List<RepositoryStep> plan, DateTimeOffset now, CancellationToken ct)
+    {
+        var rootRunId = run.RepositoryRootRunId ?? run.Id;
+        var earlier = await db.Runs.AsNoTracking()
+            .Where(row => row.RepositoryRootRunId == rootRunId && row.Id != run.Id
+                && row.Kind == RunKind.Implement && row.Status == RunStatus.Succeeded)
+            .ToListAsync(ct);
+        var finished = earlier.Append(run).ToList();
+        var done = finished.SelectMany(row => row.RepositoryAliases).ToHashSet(StringComparer.Ordinal);
+        var next = RepositoryPlans.NextWave(plan, done);
+        if (next.Count == 0)
+        {
+            return null;
+        }
+
+        var mergeUrls = next.Where(step => step.WaitForMerge)
+            .SelectMany(step => step.After)
+            .Distinct(StringComparer.Ordinal)
+            .SelectMany(alias => PullRequestsOf(finished, alias))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var aliases = next.Select(step => step.Alias).ToArray();
+        var names = string.Join(", ", aliases);
+        var note = mergeUrls.Length > 0
+            ? $"Next: {names} start once {(mergeUrls.Length == 1 ? "this pull request merges" : "these pull requests merge")}: {string.Join(", ", mergeUrls)}."
+            : $"Next: the agent works in {names}.";
+        var step = Step(run, run.PlaybookId, ChainStepKind.Repositories, 0, now);
+        return new Decision(new ChainStep
+        {
+            OrganizationId = step.OrganizationId,
+            ProjectId = step.ProjectId,
+            ItemId = step.ItemId,
+            ItemKey = step.ItemKey,
+            AfterRunId = step.AfterRunId,
+            ChainPlaybookId = step.ChainPlaybookId,
+            Kind = step.Kind,
+            StageIndex = 0,
+            CreatedAt = now,
+            Status = ChainStepStatus.Pending,
+            RepositoryAliases = aliases,
+            WaitForMergeUrls = mergeUrls,
+        }, false, null, note, null);
+    }
+
+    /// <summary>
+    /// The pull requests of <paramref name="alias"/>'s run: those on its GitHub repository when the
+    /// run had several checkouts, all of the run's when the repository cannot be told from the URL.
+    /// </summary>
+    private static IEnumerable<string> PullRequestsOf(IEnumerable<Run> runs, string alias)
+    {
+        foreach (var run in runs)
+        {
+            if (run.Repositories.FirstOrDefault(repo => repo.Alias == alias) is not { } repository)
+            {
+                continue;
+            }
+            var urls = run.PullRequestUrls.Length > 0 ? run.PullRequestUrls
+                : run.PullRequestUrl is { } single ? [single] : [];
+            if (repository.RepoFullName is { } fullName && run.Repositories.Count > 1)
+            {
+                urls = [.. urls.Where(url => url.Contains($"/{fullName}/pull/", StringComparison.OrdinalIgnoreCase))];
+            }
+            foreach (var url in urls)
+            {
+                yield return url;
+            }
+        }
     }
 
     private static ChainStep Step(Run after, Guid chainPlaybookId, ChainStepKind kind, int stageIndex, DateTimeOffset now) => new()

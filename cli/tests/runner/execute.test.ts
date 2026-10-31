@@ -387,6 +387,85 @@ describe('executeRun', () => {
     expect(instance.to('/release')).toHaveLength(1)
   })
 
+  it('hands a multi-repository run back naming the repository this machine lacks', async () => {
+    delete options.provision
+    options.workspace.repositories = { ACME: options.workspace.root }
+    options.adapters.fake = scriptAdapter(`console.log('never')`)
+    const local = (alias: string, primary: boolean) => ({
+      alias,
+      source: 'local' as const,
+      repoFullName: null,
+      cloneToken: null,
+      localPathHint: null,
+      defaultBranch: 'main',
+      workingDirectory: null,
+      primary,
+    })
+    const run = claimedRun({
+      runId: '5d1c2e9a-0000-4000-8000-000000000011',
+      repo: { source: 'github', repoFullName: 'acme/api', cloneToken: 'ghs_x', localPathHint: null },
+      repos: [
+        { ...local('api', true), source: 'github', repoFullName: 'acme/api', cloneToken: 'ghs_x' },
+        local('web', false),
+      ],
+    })
+    expect(await executeRun(run, options)).toBeNull()
+    expect(instance.to('/release')[0]!.body).toEqual({ reason: 'no-local-repository', repository: 'web' })
+  })
+
+  it('starts the harness in the working directory and reports a pull request per repository', async () => {
+    const workspace = stubWorkspace()
+    const api = join(workspace.checkout, 'api')
+    const web = join(workspace.checkout, 'web')
+    mkdirSync(api)
+    mkdirSync(web)
+    workspace.cwd = workspace.checkout
+    workspace.checkouts = [
+      { alias: 'api', path: api, source: null, defaultBranch: 'main' },
+      { alias: 'web', path: web, source: null, defaultBranch: 'main' },
+    ]
+    options.provision = async () => workspace
+    const asked: string[] = []
+    options.findPullRequest = async (checkout) => {
+      asked.push(checkout)
+      return checkout === web ? 'https://github.com/acme/web/pull/4' : null
+    }
+    options.adapters.fake = scriptAdapter(`
+      console.log('cwd ' + process.cwd())
+      console.log('Opened https://github.com/acme/api/pull/3')
+      console.log('RESULT done')
+    `)
+    const entry = (alias: string) => ({
+      alias,
+      source: 'github' as const,
+      repoFullName: `acme/${alias}`,
+      cloneToken: `ghs_${alias}_secret_token`,
+      localPathHint: null,
+      defaultBranch: 'main',
+      workingDirectory: null,
+      primary: alias === 'api',
+    })
+    const report = await executeRun(claimedRun({ repos: [entry('api'), entry('web')] }), options)
+
+    expect(report).toMatchObject({
+      outcome: 'succeeded',
+      pullRequestUrl: 'https://github.com/acme/api/pull/3',
+      pullRequestUrls: ['https://github.com/acme/api/pull/3', 'https://github.com/acme/web/pull/4'],
+    })
+    // The api pull request was reported, so only web is looked up.
+    expect(asked).toEqual([web])
+    expect(logLines().map((c) => c.text)).toContain(`cwd ${workspace.checkout}`)
+    expect(instance.to('/finish')[0]!.body).toMatchObject({
+      pullRequestUrls: ['https://github.com/acme/api/pull/3', 'https://github.com/acme/web/pull/4'],
+    })
+  })
+
+  it('reports no pullRequestUrls for a single-checkout run', async () => {
+    options.adapters.fake = scriptAdapter(`console.log('RESULT ok')`)
+    const report = await executeRun(claimedRun(), options)
+    expect(report).not.toHaveProperty('pullRequestUrls')
+  })
+
   it('fails with no-local-repository when the instance keeps the run on this runner', async () => {
     delete options.provision
     instance.on((r) =>
