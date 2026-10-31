@@ -13,6 +13,11 @@ updates:
       dotnet:
         patterns: ['*']
         update-types: ['minor', 'patch']
+    ignore:
+      # Microsoft.AspNetCore.OpenApi 10 pins Microsoft.OpenApi to < 3.0.0 and its XML-comment
+      # source generator emits 2.x-only code, so 3.x cannot build until ASP.NET Core moves.
+      - dependency-name: Microsoft.OpenApi
+        update-types: ['version-update:semver-major']
     commit-message:
       prefix: 'chore(deps)'
 

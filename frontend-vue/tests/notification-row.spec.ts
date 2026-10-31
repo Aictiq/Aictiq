@@ -63,15 +63,20 @@ describe('notification headline', () => {
 
 describe('notification row', () => {
   it('shows actor, action, item and its current state, with the exact time on hover', () => {
-    const row = mount(NotificationRow, {
-      props: {
-        entry: entry({ kind: 'transitioned', fromState: 'In Progress', toState: 'Review' }),
-      },
+    // One entry for both the mount and the assertion: entry() reads Date.now(), so a second
+    // call can land on the next second and miss the rendered title.
+    const transitioned = entry({
+      kind: 'transitioned',
+      fromState: 'In Progress',
+      toState: 'Review',
     })
+    const row = mount(NotificationRow, { props: { entry: transitioned } })
     expect(row.get('[data-testid="notification-headline"]').text()).toMatch(
       /^Ana Kovač moved a story from In Progress to Review · 18 hours ago$/,
     )
-    expect(row.get('time').attributes('title')).toBe(new Date(entry().createdAt).toLocaleString())
+    expect(row.get('time').attributes('title')).toBe(
+      new Date(transitioned.createdAt).toLocaleString(),
+    )
     expect(row.get('[data-testid="notification-item"]').text()).toBe('Fix the login')
     expect(row.find('[aria-label="Story"]').exists()).toBe(true)
     expect(row.get('[data-testid="notification-meta"]').text()).toBe('WEB-7 • In Review')
