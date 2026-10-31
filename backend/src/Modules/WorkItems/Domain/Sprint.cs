@@ -15,6 +15,8 @@ public sealed class Sprint : TenantEntity
     public DateOnly EndsOn { get; set; }
     public SprintState State { get; set; }
     public bool AutoCreateNext { get; set; }
+    /// <summary>The sprint this one was imported from, e.g. <c>jira:acme.atlassian.net:42</c>, so a retried import reuses it.</summary>
+    public string? ExternalRef { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }

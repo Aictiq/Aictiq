@@ -118,6 +118,13 @@ describe('switching projects from the sidebar', () => {
     wrapper.unmount()
   })
 
+  it('keeps a member on the Jira import, their one settings tab', async () => {
+    const { wrapper, router } = await render('/o/acme/p/OLD/settings/import')
+    await choose(wrapper, 'Member project')
+    expect(router.currentRoute.value.path).toBe('/o/acme/p/MEM/settings/import')
+    wrapper.unmount()
+  })
+
   it('falls back to Items when the destination has no available team', async () => {
     const { wrapper, router } = await render('/o/acme/p/OLD/teams/old-team/backlog')
     vi.spyOn(teamsApi, 'listTeams').mockResolvedValue([])

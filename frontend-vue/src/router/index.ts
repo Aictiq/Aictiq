@@ -477,6 +477,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/settings/ProjectIntegrationsView.vue'),
         meta: { requiresAuth: true, title: 'Integrations' },
       },
+      {
+        path: 'import',
+        name: 'project-settings-import',
+        component: () => import('@/views/settings/ProjectJiraImportView.vue'),
+        meta: { requiresAuth: true, title: 'Import from Jira' },
+      },
     ],
   },
 

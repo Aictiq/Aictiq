@@ -708,6 +708,142 @@ namespace Aictiq.Modules.WorkItems.Migrations
                     b.ToTable("watchers", "work");
                 });
 
+            modelBuilder.Entity("Aictiq.Modules.WorkItems.Domain.JiraImportJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("CreatedAttachments")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_attachments");
+
+                    b.Property<int>("CreatedComments")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_comments");
+
+                    b.Property<int>("CreatedItems")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_items");
+
+                    b.Property<int>("CreatedSprints")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_sprints");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("Failures")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("failures");
+
+                    b.Property<DateTimeOffset?>("HeartbeatAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("heartbeat_at");
+
+                    b.Property<string>("IssueTypeMap")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("issue_type_map");
+
+                    b.Property<string>("JiraProjectKey")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("jira_project_key");
+
+                    b.Property<string>("JiraProjectName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("jira_project_name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("OrganizationSlug")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("organization_slug");
+
+                    b.Property<int>("ProcessedIssues")
+                        .HasColumnType("integer")
+                        .HasColumnName("processed_issues");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("ProjectKey")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("project_key");
+
+                    b.Property<string>("ProtectedToken")
+                        .HasColumnType("text")
+                        .HasColumnName("protected_token");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("requested_by");
+
+                    b.Property<string>("SiteUrl")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("site_url");
+
+                    b.Property<int>("SkippedIssues")
+                        .HasColumnType("integer")
+                        .HasColumnName("skipped_issues");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StatusMap")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("status_map");
+
+                    b.Property<int>("TotalIssues")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_issues");
+
+                    b.HasKey("Id")
+                        .HasName("pk_jira_import_jobs");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .HasDatabaseName("ix_jira_import_jobs_project_id_created_at");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("ix_jira_import_jobs_status_created_at");
+
+                    b.ToTable("jira_import_jobs", "work");
+                });
+
             modelBuilder.Entity("Aictiq.Modules.WorkItems.Domain.Label", b =>
                 {
                     b.Property<Guid>("Id")
@@ -894,6 +1030,11 @@ namespace Aictiq.Modules.WorkItems.Migrations
                         .HasColumnType("date")
                         .HasColumnName("ends_on");
 
+                    b.Property<string>("ExternalRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("external_ref");
+
                     b.Property<string>("Goal")
                         .IsRequired()
                         .HasMaxLength(2000)
@@ -934,6 +1075,11 @@ namespace Aictiq.Modules.WorkItems.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_sprints");
+
+                    b.HasIndex("TeamId", "ExternalRef")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sprints_team_external_ref")
+                        .HasFilter("external_ref IS NOT NULL");
 
                     b.HasIndex("TeamId", "StartsOn")
                         .HasDatabaseName("ix_sprints_team_starts_on");
