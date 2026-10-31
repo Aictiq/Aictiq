@@ -35,6 +35,7 @@ public static class AutomationModule
             .ValidateOnStart();
         services.AddScoped<RunDispatcher>();
         services.AddScoped<FleetMode>();
+        services.AddScoped<MultiRepo>();
         services.AddSingleton<FleetSecrets>();
         // Registered with the module rather than the workers so the sweeper a test drives in the
         // API host finds it. The address is re-checked when the socket opens, as outbound

@@ -34,6 +34,11 @@ export interface Playbook {
    * while fleet mode is off. Absent from older servers.
    */
   requiredTags?: string[]
+  /**
+   * Multiple repositories: the repositories the playbook works in and their order, used when
+   * the ticket names none. Ignored while the project's switch is off. Absent from older servers.
+   */
+  repositorySteps?: RepositoryStep[]
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -55,6 +60,8 @@ export interface SavePlaybookBody {
   maxMinutes: number
   /** Fleet mode only; left out entirely while it is off, so a save never touches them. */
   requiredTags?: string[]
+  /** Multiple repositories only; left out while the project's switch is off. [] clears them. */
+  repositorySteps?: RepositoryStep[]
 }
 
 export interface UpdatePlaybookBody extends Partial<SavePlaybookBody> {
@@ -71,6 +78,31 @@ export interface PlaybookInstructions {
 
 export type RepositorySource = 0 | 1
 
+/** One repository a playbook works in, and what it waits for. */
+export interface RepositoryStep {
+  /** A repository alias of the project: the primary's or an additional one's. */
+  alias: string
+  /** Where the agent starts, relative to the checkout; null uses the repository's default. */
+  workingDirectory: string | null
+  /** Aliases of other steps that must finish first. */
+  after: string[]
+  /** Wait for those steps' pull requests to merge, not only for their runs to finish. */
+  waitForMerge: boolean
+}
+
+/** Paid hosted plans only: hidden on self-hosted installs, an upgrade on free ones. */
+export type MultiRepoAvailability = 'hidden' | 'upgrade' | 'available'
+
+/** A repository besides the primary one, checked out at `repo/<alias>/`. */
+export interface ProjectRepository {
+  alias: string
+  repoSource: RepositorySource
+  repoFullName: string | null
+  localPathHint: string | null
+  defaultBranch: string
+  workingDirectory: string | null
+}
+
 export interface FactorySettings {
   projectId: string
   /** 0 uses a repository bound through the GitHub App; 1 is a path on the runner. */
@@ -81,6 +113,14 @@ export interface FactorySettings {
   defaultAgentId: string | null
   /** Null is any free runner. Absent from older servers. */
   defaultRunnerId?: string | null
+  /** The fields below are absent from older servers. */
+  multiRepoEnabled?: boolean
+  multiRepoAvailability?: MultiRepoAvailability
+  /** The primary repository's alias: stored, or derived from its name. */
+  primaryAlias?: string
+  primaryWorkingDirectory?: string | null
+  /** Every repository but the primary, which is the fields above. */
+  additionalRepositories?: ProjectRepository[]
   updatedAt: string | null
   version: number | null
 }
@@ -92,6 +132,11 @@ export interface SaveFactorySettingsBody {
   localPathHint: string | null
   defaultAgentId: string | null
   defaultRunnerId: string | null
+  /** Multiple repositories: left out (undefined) to leave them as they are. */
+  multiRepoEnabled?: boolean
+  primaryAlias?: string
+  primaryWorkingDirectory?: string | null
+  additionalRepositories?: ProjectRepository[]
   version: number | null
 }
 

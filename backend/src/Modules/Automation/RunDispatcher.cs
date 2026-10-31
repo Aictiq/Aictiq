@@ -43,6 +43,12 @@ public sealed record MentionDispatch(Guid CommentId, string Instruction, string 
 public sealed record ReworkDispatch(Guid StageRunId, string StageName, string Findings, int Round);
 
 /// <summary>
+/// Set when <see cref="ChainQueue"/> starts the next repositories of a multi-repository run's graph:
+/// the plan and its first run carry over, and <paramref name="Aliases"/> are this run's checkouts.
+/// </summary>
+public sealed record RepositoryWaveDispatch(Guid RootRunId, List<RepositoryStep> Plan, IReadOnlyList<string> Aliases);
+
+/// <summary>
 /// Who is asking for a run: a person, through REST or MCP, or an automation rule
 ///, through <c>Events/RuleFiringHandler</c>. Never a faked user - the run row
 /// and every audit trail say exactly which.
@@ -102,7 +108,8 @@ public sealed class RunDispatcher(
     AutomationDbContext db, ICurrentTenant tenant, IWorkItemLookup items, IProjectAccess access,
     IAgentIdentities agents, IWikiPageAccess pages, IWikiPageContent pageContent,
     IWorkItemClaims claims, IRealtimePublisher realtime, IOrganizationBillingState billing,
-    FleetMode fleetMode, TimeProvider clock, IOrganizationLookup organizations, IProjectChatAttachments chatAttachments)
+    FleetMode fleetMode, TimeProvider clock, IOrganizationLookup organizations, IProjectChatAttachments chatAttachments,
+    MultiRepo multiRepo, IWorkItemLabels labels)
 {
     /// <param name="project">The item's project, already resolved and checked by the door.</param>
     /// <param name="itemKey">The item to hand over.</param>
@@ -150,7 +157,7 @@ public sealed class RunDispatcher(
         ProjectRef project, string itemKey, Guid? playbookId, string? agentId, Guid? runnerId,
         DispatchActor actor, CancellationToken ct, RefineContext? refine = null, DateTimeOffset? scheduledFor = null,
         MentionDispatch? mention = null, string? harness = null, ReworkDispatch? rework = null,
-        IReadOnlyList<string>? requiredTags = null)
+        IReadOnlyList<string>? requiredTags = null, RepositoryWaveDispatch? wave = null)
     {
         var organizationId = tenant.OrganizationId!.Value;
 
@@ -243,6 +250,20 @@ public sealed class RunDispatcher(
             return DispatchResult.PlaybookNotFound();
         }
 
+        var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
+        var (checkouts, repositoryError) = await CheckoutsAsync(
+            organizationId, project.Id, item.Id, kind, scheduledFor, settings, playbook, previous, wave, ct);
+        if (repositoryError is not null)
+        {
+            return DispatchResult.Invalid("repositories", repositoryError);
+        }
+        if (previous is null && runnerId is { } chosenRunner
+            && (checkouts.Repositories.Count > 0 || checkouts.WorkingDirectory is not null)
+            && await RepositoryRunnerErrorAsync(chosenRunner, project.Key, checkouts.Repositories, ct) is { } checkoutError)
+        {
+            return DispatchResult.Invalid("runnerId", checkoutError);
+        }
+
         var claim = refine is null && !chat
             ? await claims.ClaimForAsync(item.Id, agentUserId, ct)
             : await claims.ClaimInPlaceAsync(item.Id, agentUserId, ct);
@@ -274,8 +295,8 @@ public sealed class RunDispatcher(
                     agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
                     branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt,
                     rework is null ? null : new ReworkPrompt(rework.StageName, rework.StageRunId, rework.Findings,
-                        previous!.Id, await PullRequestOfAsync(item.Id, branch, ct), rework.Round, PlaybookChain.MaxReworkRounds));
-        var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
+                        previous!.Id, await PullRequestOfAsync(item.Id, branch, ct), rework.Round, PlaybookChain.MaxReworkRounds),
+                    checkouts.Prompt);
         // A follow-up keeps what its earlier run required, so it can go back to the same kind of machine.
         var runTags = (await fleetMode.GetAsync(organizationId, ct)).Active
             ? FleetTags.Union(playbook.RequiredTags, tags, previous?.RequiredTags)
@@ -307,7 +328,17 @@ public sealed class RunDispatcher(
             Instruction = mention?.Instruction ?? Truncate(rework?.Findings, Run.MaxInstructionLength),
             FollowsUpRunId = previous?.Id,
             ReworkOfRunId = rework?.StageRunId,
+            Repositories = checkouts.Repositories,
+            RepositoryAliases = [.. checkouts.Repositories.Select(repo => repo.Alias)],
+            WorkingDirectory = checkouts.WorkingDirectory,
+            RepositoryPlan = checkouts.Plan,
+            RepositoryRootRunId = checkouts.RootRunId,
         };
+        // The first run of a graph is its root.
+        if (run.RepositoryPlan is not null && run.RepositoryRootRunId is null)
+        {
+            run.RepositoryRootRunId = run.Id;
+        }
         db.Runs.Add(run);
         try
         {
@@ -567,6 +598,10 @@ public sealed class RunDispatcher(
             FollowsUpRunId = builder.Id,
             ChainPlaybookId = chain.Id,
             StageIndex = stageIndex,
+            // A stage checks the builder's work where the builder did it.
+            Repositories = builder.Repositories,
+            RepositoryAliases = builder.RepositoryAliases,
+            WorkingDirectory = builder.WorkingDirectory,
         };
         db.Runs.Add(run);
         try
@@ -586,6 +621,120 @@ public sealed class RunDispatcher(
         AutomationMetrics.Started.Add(1);
 
         return DispatchResult.Created(run, agent);
+    }
+
+    /// <summary>What a run checks out besides, or instead of, the project's one repository at its root.</summary>
+    private sealed record RunCheckouts(
+        List<RunRepository> Repositories, string? WorkingDirectory, List<RepositoryStep>? Plan, Guid? RootRunId,
+        RepositoryPrompt? Prompt)
+    {
+        public static readonly RunCheckouts None = new([], null, null, null, null);
+    }
+
+    /// <summary>
+    /// The checkouts of a new run (<see cref="RepositoryPlans"/>). Only implement runs started now
+    /// use several repositories: refine, chat, project-chat and scheduled runs work in the primary
+    /// one, and so does every run while the project's switch is off or its plan does not allow it.
+    /// A follow-up or rework works where its earlier run did.
+    /// </summary>
+    private async Task<(RunCheckouts Checkouts, string? Error)> CheckoutsAsync(
+        Guid organizationId, Guid projectId, Guid itemId, RunKind kind, DateTimeOffset? scheduledFor,
+        ProjectFactorySettings? settings, Playbook playbook, Run? previous, RepositoryWaveDispatch? wave, CancellationToken ct)
+    {
+        if (kind != RunKind.Implement || scheduledFor is not null || !await multiRepo.IsActiveAsync(organizationId, settings, ct))
+        {
+            return (RunCheckouts.None, null);
+        }
+        if (previous is not null)
+        {
+            return (new RunCheckouts(previous.Repositories, previous.WorkingDirectory, previous.RepositoryPlan,
+                previous.RepositoryRootRunId, PromptOf(previous.Repositories, previous.WorkingDirectory, previous.RepositoryPlan,
+                    previous.RepositoryAliases)), null);
+        }
+
+        var primary = RepositoryPlans.PrimaryAlias(settings);
+        List<RepositoryStep>? plan;
+        IReadOnlyList<RepositoryStep> stepsNow;
+        if (wave is not null)
+        {
+            plan = wave.Plan;
+            stepsNow = [.. plan.Where(step => wave.Aliases.Contains(step.Alias, StringComparer.Ordinal))];
+        }
+        else
+        {
+            plan = RepositoryPlans.Resolve(playbook.RepositorySteps, await labels.ItemLabelNamesAsync(itemId, ct));
+            if (plan is null)
+            {
+                return (settings!.PrimaryWorkingDirectory is { } directory
+                    ? new RunCheckouts([], directory, null, null, PromptOf([], directory, null, []))
+                    : RunCheckouts.None, null);
+            }
+            stepsNow = RepositoryPlans.NextWave(plan, new HashSet<string>(StringComparer.Ordinal));
+        }
+
+        // Only the primary, in a sub-package or not: the single checkout, as always.
+        if (wave is null && RepositoryPlans.IsPrimaryOnly(plan, primary))
+        {
+            var directory = plan[0].WorkingDirectory ?? settings!.PrimaryWorkingDirectory;
+            return (directory is null
+                ? RunCheckouts.None
+                : new RunCheckouts([], directory, null, null, PromptOf([], directory, null, [])), null);
+        }
+
+        var (repositories, unknown) = RepositoryPlans.Checkouts(stepsNow, settings, await multiRepo.AdditionalAsync(projectId, ct));
+        if (unknown is not null)
+        {
+            return (RunCheckouts.None,
+                $"The ticket or playbook names the repository {unknown}, which is not one of this project's. Check its repo: labels, the playbook's repository steps, or the project's repositories under Factory settings.");
+        }
+        var aliases = repositories.Select(repo => repo.Alias).ToArray();
+        return (new RunCheckouts(repositories, null, plan, wave?.RootRunId, PromptOf(repositories, null, plan, aliases)), null);
+    }
+
+    /// <summary>Why the chosen runner cannot take a run with several checkouts or a sub-package, or null.</summary>
+    private async Task<string?> RepositoryRunnerErrorAsync(
+        Guid runnerId, string projectKey, IReadOnlyList<RunRepository> repositories, CancellationToken ct)
+    {
+        var runner = await db.Runners.AsNoTracking().SingleOrDefaultAsync(r => r.Id == runnerId, ct);
+        if (runner?.Capabilities is not { MultiRepo: true } capabilities)
+        {
+            return $"{runner?.Name ?? "This runner"} runs an older Aictiq CLI that checks out one repository. Update it, or choose another runner.";
+        }
+        return RepositoryRouting.MissingRepository(capabilities, projectKey, repositories) is { } alias
+            ? $"{runner.Name} has no local repository {alias}: map it there with `aictiq runner map {projectKey}/{alias} <path>`, or choose another runner."
+            : null;
+    }
+
+    private static RepositoryPrompt? PromptOf(
+        IReadOnlyList<RunRepository> repositories, string? workingDirectory, List<RepositoryStep>? plan, IReadOnlyList<string> aliases)
+    {
+        if (repositories.Count == 0)
+        {
+            return workingDirectory is null ? null : new RepositoryPrompt([], workingDirectory, 1, 1, [], []);
+        }
+        var waves = Waves(plan ?? []);
+        var index = waves.FindIndex(wave => wave.Any(aliases.Contains));
+        var done = index <= 0 ? [] : waves.Take(index).SelectMany(wave => wave).ToList();
+        var later = index < 0 ? [] : waves.Skip(index + 1).SelectMany(wave => wave).ToList();
+        return new RepositoryPrompt(repositories, null, Math.Max(index, 0) + 1, Math.Max(waves.Count, 1), done, later);
+    }
+
+    /// <summary>The plan's steps, grouped in the order they run.</summary>
+    internal static List<List<string>> Waves(IReadOnlyList<RepositoryStep> plan)
+    {
+        var waves = new List<List<string>>();
+        var done = new HashSet<string>(StringComparer.Ordinal);
+        while (done.Count < plan.Count)
+        {
+            var next = RepositoryPlans.NextWave(plan, done).Select(step => step.Alias).ToList();
+            if (next.Count == 0)
+            {
+                break;
+            }
+            waves.Add(next);
+            done.UnionWith(next);
+        }
+        return waves;
     }
 
     /// <summary>The pull request the item's implement runs last reported for <paramref name="branch"/>: a follow-up updates it without reporting it again.</summary>
@@ -684,6 +833,12 @@ public sealed class RunDispatcher(
             ChainPlaybookId = previous.ChainPlaybookId,
             StageIndex = previous.StageIndex,
             ReworkOfRunId = previous.ReworkOfRunId,
+            // The kept workspace has these checkouts, and the graph goes on from this run.
+            Repositories = previous.Repositories,
+            RepositoryAliases = previous.RepositoryAliases,
+            WorkingDirectory = previous.WorkingDirectory,
+            RepositoryPlan = previous.RepositoryPlan,
+            RepositoryRootRunId = previous.RepositoryRootRunId,
         };
         db.Runs.Add(run);
         if (refinement is not null)

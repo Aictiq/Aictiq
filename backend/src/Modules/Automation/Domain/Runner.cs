@@ -152,6 +152,10 @@ public static class RunnerCredential
 /// Whether the machine reads Claude usage from Anthropic between runs (<c>aictiq runner usage
 /// --claude-oauth on</c>). Without it, Claude usage is only updated after a run. Display only.
 /// </param>
+/// <param name="MultiRepo">
+/// The CLI checks out several repositories into <c>repo/&lt;alias&gt;/</c> and starts in a working
+/// directory. Runs that need either go only to a runner that says so.
+/// </param>
 /// <param name="Tags">
 /// The machine's own tags (<c>aictiq runner start --tag gpu-enabled</c>). Matched against a run's
 /// required tags while fleet mode is on, together with the tags an Admin set on the runner.
@@ -172,7 +176,8 @@ public sealed record RunnerCapabilities(
     RunnerUpdateFailure? UpdateFailure = null,
     IReadOnlyList<RunnerUsageLimits>? UsageLimits = null,
     bool? ClaudeUsagePoll = null,
-    IReadOnlyList<string>? Tags = null);
+    IReadOnlyList<string>? Tags = null,
+    bool? MultiRepo = null);
 
 /// <param name="Name">The harness as a playbook names it: <c>claude</c>, <c>codex</c>, <c>opencode</c>, <c>cursor</c>, <c>copilot</c>.</param>
 public sealed record RunnerHarness(string Name, string? Version);

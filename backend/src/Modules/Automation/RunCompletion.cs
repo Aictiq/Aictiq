@@ -64,6 +64,7 @@ internal static class RunCompletion
             Refined = refinement is { Status: RefinementStatus.Ready },
             Chained = chain?.Next is not null,
             ChainNote = chain?.Note,
+            PullRequestUrls = run.PullRequestUrls,
             StageName = stage ? chain?.StageName ?? "Follow-up" : null,
             StageVerdict = PlaybookChain.VerdictName(run.StageVerdict),
             StageFindings = run.StageVerdict == StageVerdict.ChangesRequested ? run.StageFindings : null,

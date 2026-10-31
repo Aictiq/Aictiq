@@ -16,6 +16,7 @@ import {
   createPlaybook,
   createStarterPlaybook,
   deletePlaybook,
+  getFactorySettings,
   getPlaybookInstructions,
   listPlaybooks,
   playbookHarnesses,
@@ -24,6 +25,7 @@ import {
   updatePlaybook,
   type Playbook,
   type PlaybookHarness,
+  type RepositoryStep,
   type SavePlaybookBody,
 } from '@/api/playbooks'
 import { withBoardNames } from '@/api/boards'
@@ -33,6 +35,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import FactoryDocsLink from '@/components/factory/FactoryDocsLink.vue'
 import FleetTagInput from '@/components/factory/FleetTagInput.vue'
+import RepositoryStepsEditor from '@/components/factory/RepositoryStepsEditor.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Badge } from '@/components/ui/badge'
@@ -90,6 +93,32 @@ const maxMinutes = ref(60)
 const workOnDefaultBranch = ref(false)
 /** Fleet mode only: never shown, and never sent, while it is not active. */
 const requiredTags = ref<string[]>([])
+/**
+ * Multiple repositories: the editing project's aliases while its switch is on and its plan
+ * allows it, else null - the section is then neither shown nor sent.
+ */
+const repositoryAliases = ref<string[] | null>(null)
+const repositorySteps = ref<RepositoryStep[]>([])
+const repositoryStepErrors = computed(() =>
+  Object.entries(fieldErrors.value)
+    .filter(([field]) => field.toLowerCase().startsWith('repositorysteps'))
+    .flatMap(([, messages]) => messages),
+)
+
+/** The project's repository aliases when multi-repository runs are on for it, else null. */
+async function multiRepoAliases(projectKey: string): Promise<string[] | null> {
+  try {
+    const settings = await getFactorySettings(org.slug.value, projectKey)
+    if (!settings.multiRepoEnabled || settings.multiRepoAvailability !== 'available') return null
+    return [
+      settings.primaryAlias ?? 'main',
+      ...(settings.additionalRepositories ?? []).map((repo) => repo.alias),
+    ]
+  } catch {
+    // Without the settings the playbook is edited as it always was.
+    return null
+  }
+}
 
 const { active: fleetActive, knownTags } = useFleetStatus(() => org.slug.value)
 
@@ -160,7 +189,15 @@ async function openEditor(group: ProjectPlaybooks, playbook: Playbook | null = n
   maxMinutes.value = playbook?.maxMinutes ?? 60
   workOnDefaultBranch.value = playbook?.workOnDefaultBranch ?? false
   requiredTags.value = [...(playbook?.requiredTags ?? [])]
+  repositorySteps.value = (playbook?.repositorySteps ?? []).map((step) => ({
+    ...step,
+    after: [...step.after],
+  }))
+  repositoryAliases.value = null
   fieldErrors.value = {}
+  void multiRepoAliases(group.project.key).then((aliases) => {
+    if (editing.value?.group.project.key === group.project.key) repositoryAliases.value = aliases
+  })
   if (!playbook) return
   instructionsLoading.value = true
   try {
@@ -194,6 +231,15 @@ async function save() {
     workOnDefaultBranch: workOnDefaultBranch.value,
     // Left out entirely while fleet mode is off, so the request is the one it always was.
     ...(fleetActive.value ? { requiredTags: requiredTags.value } : {}),
+    // Likewise while the project's multiple repositories are off.
+    ...(repositoryAliases.value
+      ? {
+          repositorySteps: repositorySteps.value.map((step) => ({
+            ...step,
+            workingDirectory: step.workingDirectory?.trim() || null,
+          })),
+        }
+      : {}),
   }
 
   submitting.value = true
@@ -712,6 +758,13 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
               {{ message }}
             </p>
           </div>
+
+          <RepositoryStepsEditor
+            v-if="repositoryAliases"
+            v-model="repositorySteps"
+            :aliases="repositoryAliases"
+            :errors="repositoryStepErrors"
+          />
 
           <div class="grid gap-4 sm:grid-cols-2">
             <div class="space-y-1.5">

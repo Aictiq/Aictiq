@@ -30,6 +30,13 @@ public sealed class Playbook : TenantEntity, IAudited
 
     /// <summary>Tags every run of this playbook requires of its runner while fleet mode is on.</summary>
     public string[] RequiredTags { get; set; } = [];
+
+    /// <summary>
+    /// Multiple repositories: the repositories this playbook works in when the ticket names none,
+    /// in the order they run. Kept, but ignored, while the project's switch is off or its plan
+    /// does not allow it.
+    /// </summary>
+    public List<RepositoryStep> RepositorySteps { get; set; } = [];
     public required string CreatedBy { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -60,6 +67,39 @@ public enum ProjectRepositorySource : short
     RunnerLocal = 1,
 }
 
+/// <summary>
+/// One repository of a run's execution graph. <see cref="After"/> names the steps that must be done
+/// first: finished, or with <see cref="WaitForMerge"/> their pull requests merged. Steps with nothing
+/// left to wait for run together, in one run with a checkout of each.
+/// </summary>
+/// <param name="WorkingDirectory">Where the agent starts inside the checkout, in place of the repository's default.</param>
+public sealed record RepositoryStep(string Alias, string? WorkingDirectory = null, string[]? After = null, bool WaitForMerge = false)
+{
+    public const int MaxSteps = 10;
+
+    public string[] After { get; init; } = After ?? [];
+}
+
+/// <summary>
+/// A repository of a project beyond its primary one, which stays in <see cref="ProjectFactorySettings"/>.
+/// Used only while the project's multiple-repositories switch is on and its plan allows it.
+/// </summary>
+public sealed class ProjectRepository : TenantEntity
+{
+    public const int MaxRepositories = 20;
+    public const int MaxAliasLength = 40;
+    public const int MaxWorkingDirectoryLength = 500;
+
+    public Guid ProjectId { get; init; }
+    public int Position { get; set; }
+    public required string Alias { get; set; }
+    public ProjectRepositorySource RepoSource { get; set; }
+    public string? RepoFullName { get; set; }
+    public string DefaultBranch { get; set; } = "main";
+    public string? LocalPathHint { get; set; }
+    public string? WorkingDirectory { get; set; }
+}
+
 /// <summary>Where a runner gets one project's repository and which agent and runner it uses by default.</summary>
 public sealed class ProjectFactorySettings : TenantEntity, IAudited
 {
@@ -74,6 +114,15 @@ public sealed class ProjectFactorySettings : TenantEntity, IAudited
     /// Deleting the runner clears it.
     /// </summary>
     public Guid? DefaultRunnerId { get; set; }
+
+    /// <summary>The "multiple repositories / monorepo" switch. Off by default, and kept through a downgrade.</summary>
+    public bool MultiRepoEnabled { get; set; }
+
+    /// <summary>The primary repository's alias; null derives one (<see cref="RepositoryPlans.PrimaryAlias"/>).</summary>
+    public string? PrimaryAlias { get; set; }
+
+    /// <summary>Where the agent starts inside the primary checkout while multiple repositories are on.</summary>
+    public string? PrimaryWorkingDirectory { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public uint Version { get; private set; }
 }

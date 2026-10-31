@@ -35,6 +35,11 @@ public enum RunLogStream : short
     Event = 2,
 }
 
+/// <summary>One checkout of a multi-repository run.</summary>
+public sealed record RunRepository(
+    string Alias, ProjectRepositorySource Source, string? RepoFullName, string? LocalPathHint,
+    string DefaultBranch, string? WorkingDirectory, bool Primary);
+
 /// <summary>
 /// One execution of a playbook by one agent on one item - the item's factory history - or,
 /// for a <see cref="RunKind.ProjectChat"/> run, on no item at all.
@@ -264,6 +269,31 @@ public sealed class Run : TenantEntity
 
     /// <summary>What the stage found, as its agent reported it with the verdict.</summary>
     public string? StageFindings { get; set; }
+
+    /// <summary>
+    /// A multi-repository run's checkouts, as they were when it was dispatched: each goes to
+    /// <c>repo/&lt;alias&gt;/</c>. Empty for every other run, which checks out the project's one
+    /// repository into <c>repo/</c> as always.
+    /// </summary>
+    public List<RunRepository> Repositories { get; init; } = [];
+
+    /// <summary>The aliases of <see cref="Repositories"/>, for the claim query's routing.</summary>
+    public string[] RepositoryAliases { get; init; } = [];
+
+    /// <summary>A single-checkout run's sub-directory (a monorepo package) the agent starts in; null is the checkout's root.</summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// The execution graph a multi-repository run belongs to, the same on every run of it; null
+    /// for a run that is not part of one.
+    /// </summary>
+    public List<RepositoryStep>? RepositoryPlan { get; init; }
+
+    /// <summary>The graph's first run; this run's own id on that one.</summary>
+    public Guid? RepositoryRootRunId { get; set; }
+
+    /// <summary>Every pull request the run opened or updated, one per changed repository; <see cref="PullRequestUrl"/> is the first.</summary>
+    public string[] PullRequestUrls { get; set; } = [];
 
     public uint Version { get; set; }
 

@@ -25,7 +25,8 @@ import {
 } from './followup.js'
 import type { FollowUpTarget, PullRequestStateLookup } from './followup.js'
 import {
-  locateLocalRepository,
+  locateLocalRepositories,
+  needsLocalRepository,
   pruneKeptWorkspaces,
   provisionWorkspace,
   reattachWorkspace,
@@ -94,8 +95,8 @@ async function handedBack(
   local: (message: string) => void,
 ): Promise<boolean> {
   const locate =
-    options.locate ?? (options.provision ? undefined : locateLocalRepository)
-  if (!locate || run.repo.source !== 'local' || run.resume || handedBackRuns.has(run.runId))
+    options.locate ?? (options.provision ? undefined : locateLocalRepositories)
+  if (!locate || !needsLocalRepository(run) || run.resume || handedBackRuns.has(run.runId))
     return false
   try {
     await locate(run, options.workspace as WorkspaceOptions)
@@ -103,7 +104,9 @@ async function handedBack(
   } catch (error) {
     if (!(error instanceof RunFailure) || error.reason !== 'no-local-repository') return false
     try {
-      await options.client.release(run.runId, 'no-local-repository')
+      // A multi-repository run names the checkout this machine lacks, so the reason says which.
+      if (error.repository) await options.client.release(run.runId, 'no-local-repository', error.repository)
+      else await options.client.release(run.runId, 'no-local-repository')
     } catch (releaseError) {
       if (releaseError instanceof RunnerHttpError && releaseError.revoked) throw releaseError
       // 409: the run is this runner's alone; 404: it is gone. Either way it is not handed back.
@@ -134,7 +137,12 @@ export async function executeRun(
   const local = options.local ?? (() => {})
   const log = new LogStreamer({
     send: (chunks) => client.log(run.runId, chunks),
-    secrets: [run.agentToken, options.runnerToken, run.repo.cloneToken ?? ''],
+    secrets: [
+      run.agentToken,
+      options.runnerToken,
+      run.repo.cloneToken ?? '',
+      ...(run.repos ?? []).map((entry) => entry.cloneToken ?? ''),
+    ],
     maxBatchBytes: options.hello.maxLogBatchBytes,
     flushIntervalMs: options.flushIntervalMs ?? 1000,
     local: (message) => local(`${runLabel(run)}: ${message}`),
@@ -252,7 +260,8 @@ export async function executeRun(
     const workspaceOptions: WorkspaceOptions = {
       ...options.workspace,
       event,
-      refreshCloneToken: () => client.repoToken(run.runId),
+      refreshCloneToken: (alias) =>
+        alias ? client.repoToken(run.runId, alias) : client.repoToken(run.runId),
       attachments: {
         list: () => client.listAttachments(run),
         download: (attachmentId) => client.downloadAttachment(run, attachmentId),
@@ -260,7 +269,7 @@ export async function executeRun(
       signal: abort.signal,
     }
     const fresh = async () => {
-      if (run.repo.source === 'local' && !run.workOnDefaultBranch) {
+      if (needsLocalRepository(run) && !run.workOnDefaultBranch) {
         // A failed run's kept worktree holds the item's branch, and git checks a branch out
         // in one worktree only. This fresh run supersedes it.
         await prune({ item: run })
@@ -323,7 +332,7 @@ export async function executeRun(
       const gitEnv = { ...(options.workspace.env ?? process.env), ...workspace.env }
       const createdBranch = resumeSessionId === undefined && workspace.createdBranch === true
       try {
-        target = await resolveFollowUpTarget(workspace.checkout, followUp, gitEnv, {
+        target = await resolveFollowUpTarget(firstCheckout(workspace), followUp, gitEnv, {
           createdBranch,
           ...(options.pullRequestState ? { pullRequestState: options.pullRequestState } : {}),
         })
@@ -334,15 +343,32 @@ export async function executeRun(
             detail: `I didn't start: the pull request ${followUp.pullRequestUrl ?? ''} from run ${followUp.previousRunId} was ${target.because}, so there is nothing left for this follow-up playbook to check.`,
           }
         }
+        const [first, ...others] = run.repos ? (workspace.checkouts ?? []) : []
         await applyFollowUpTarget(
-          workspace.checkout,
+          first?.path ?? workspace.checkout,
           followUp,
           target,
-          run.defaultBranch,
+          first?.defaultBranch ?? run.defaultBranch,
           gitEnv,
           event,
           { createdBranch },
         )
+        // The other repositories of a multi-repository run follow the first one's decision. One
+        // the earlier run left alone has no branch to continue, and keeps the one just made.
+        if (target.kind !== 'missing') {
+          for (const other of others) {
+            const own =
+              target.kind === 'new'
+                ? target
+                : await resolveFollowUpTarget(other.path, { ...followUp, pullRequestUrl: null }, gitEnv, {
+                    createdBranch: resumeSessionId === undefined && other.createdBranch === true,
+                  })
+            if (own.kind === 'missing') continue
+            await applyFollowUpTarget(other.path, followUp, own, other.defaultBranch, gitEnv, event, {
+              createdBranch: resumeSessionId === undefined && other.createdBranch === true,
+            })
+          }
+        }
       } catch (error) {
         if (stopReason) return stopped(null, [])
         if (error instanceof RunFailure) {
@@ -379,7 +405,7 @@ export async function executeRun(
       prompt: workspace.prompt,
       systemPrompt,
       promptFile: workspace.promptFile,
-      workspace: workspace.checkout,
+      workspace: workspace.cwd ?? workspace.checkout,
       attachmentsDir: workspace.attachmentsDir,
       mcpConfigFile: workspace.mcpConfigFile,
       mcpServer: options.workspace.mcpServer,
@@ -402,6 +428,8 @@ export async function executeRun(
     const lastLines: string[] = []
     let lastResult: string | null = null
     let pullRequestUrl: string | null = null
+    // A multi-repository run opens a pull request in each repository it changed.
+    const pullRequestUrls: string[] = []
     let costUsd: number | undefined
     let inputTokens: number | undefined
     let outputTokens: number | undefined
@@ -419,11 +447,11 @@ export async function executeRun(
       return failed('workspace-failed', message(error))
     }
 
-    event(`Starting ${invocation.command} in ${workspace.checkout}`)
+    event(`Starting ${invocation.command} in ${context.workspace}`)
     harness = spawnSupervised({
       command: invocation.command,
       args: invocation.args,
-      cwd: workspace.checkout,
+      cwd: context.workspace,
       env,
       ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
       onLine: (stream, raw) => {
@@ -435,6 +463,7 @@ export async function executeRun(
             // A follow-up on a new branch may well mention the merged pull request it follows.
             if (target?.kind === 'new' && match[0] === followUp?.pullRequestUrl) continue
             pullRequestUrl = match[0]
+            if (!pullRequestUrls.includes(match[0])) pullRequestUrls.push(match[0])
           }
         }
         if (stream === 'stderr') {
@@ -490,20 +519,33 @@ export async function executeRun(
     if (stopReason) return stopped(exitCode, lastLines, usage)
 
     const verdict = adapter.outcome(exitCode, lastLines, lastResult, resumeSessionId !== undefined)
-    if (verdict.outcome === 'succeeded' && !run.workOnDefaultBranch && !pullRequestUrl) {
+    const multi = run.repos ? (workspace.checkouts ?? []) : null
+    if (multi && verdict.outcome === 'succeeded' && !run.workOnDefaultBranch) {
+      // Each repository the agent did not report a pull request for is asked on its own.
+      for (const checkout of multi) {
+        const entry = run.repos!.find((repo) => repo.alias === checkout.alias)
+        const full = entry?.repoFullName?.toLowerCase()
+        if (full && pullRequestUrls.some((url) => url.toLowerCase().includes(`/${full}/pull/`))) continue
+        const found = await (options.findPullRequest ?? findPullRequest)(checkout.path, deliveryBranch, env)
+        if (found && !pullRequestUrls.includes(found)) pullRequestUrls.push(found)
+      }
+      pullRequestUrl = pullRequestUrls[0] ?? null
+    } else if (verdict.outcome === 'succeeded' && !run.workOnDefaultBranch && !pullRequestUrl) {
       pullRequestUrl = await (options.findPullRequest ?? findPullRequest)(
         workspace.checkout,
         deliveryBranch,
         env,
       )
     }
-    if (pullRequestUrl) event(`Pull request: ${pullRequestUrl}`)
+    if (multi) for (const url of pullRequestUrls) event(`Pull request: ${url}`)
+    else if (pullRequestUrl) event(`Pull request: ${pullRequestUrl}`)
     return {
       ...(deliveryBranch !== run.branchName ? { branchName: deliveryBranch } : {}),
       outcome: verdict.outcome,
       exitCode,
       summary: truncate(verdict.summary, MaxSummary),
       pullRequestUrl,
+      ...(multi ? { pullRequestUrls: [...pullRequestUrls] } : {}),
       failureReason:
         verdict.outcome === 'failed'
           ? truncate(verdict.failureReason ?? 'harness-failed', MaxFailureReason)
@@ -655,6 +697,11 @@ export function findPullRequest(
       },
     )
   })
+}
+
+/** The checkout a follow-up decides its branch in: the only one, or a multi-repository run's first. */
+function firstCheckout(workspace: Workspace): string {
+  return workspace.checkouts?.[0]?.alias ? workspace.checkouts[0].path : workspace.checkout
 }
 
 function truncate(value: string | null | undefined, max: number): string | null {

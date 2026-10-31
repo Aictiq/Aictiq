@@ -144,6 +144,34 @@ export interface Run {
   chain?: RunChainLink[] | null
   /** Fleet mode: the tags its runner must have (the playbook's, the rule's and Start run's). */
   requiredTags?: string[]
+  /** Multiple repositories: the aliases this run checked out; empty for a normal run. */
+  repositories?: string[]
+  /** Every pull request the run opened or updated, one per changed repository. */
+  pullRequestUrls?: string[]
+  /** Multiple repositories: the run's repository steps in order; null for a normal run. */
+  repositorySteps?: RunRepositoryStep[] | null
+}
+
+export type RunRepositoryStepState =
+  | 'pending'
+  | 'waiting'
+  | 'waiting-for-merge'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'dropped'
+
+/** One step of a multi-repository run: the repositories one run works in and what it waits for. */
+export interface RunRepositoryStep {
+  aliases: string[]
+  after: string[]
+  waitForMerge: boolean
+  state: RunRepositoryStepState
+  /** The step's run once it started. */
+  runId: string | null
+  pullRequestUrls: string[]
 }
 
 /** One run of a continue chain, with what it cost on its own. */

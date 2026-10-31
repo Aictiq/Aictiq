@@ -183,6 +183,7 @@ aictiq runner register --url https://aictiq.example.com --token jrn_… [--name 
 aictiq runner root ~/src [--org <slug>]  # use the web UI path hint for clones under ~/src
 aictiq runner root ~/src --remove [--org <slug>]
 aictiq runner map ACME ~/src/aictiq [--org <slug>]  # project key → local clone; wins over the path hint
+aictiq runner map ACME/frontend ~/src/frontend [--org <slug>]  # an additional repository (alias) of a multi-repository project
 aictiq runner map ACME --remove [--org <slug>]
 aictiq runner remove <org>            # stop running for one organization on this machine
 aictiq runner status                  # every registration, detected harnesses, mapped repositories and roots
@@ -204,7 +205,10 @@ on `PATH`, or `--version` failed) and the `PATH` it searched. The runner reports
 the instance, but the Factory runner page does not show missing harnesses. Each run gets
 `~/.local/share/aictiq/runner/<run-id>/`: `repo/` is a git worktree of the mapped clone (or
 a shallow clone of the project's GitHub repository) on the run's branch, and the prompt and
-MCP configuration sit beside it, outside anything the agent could commit. The harness runs
+MCP configuration sit beside it, outside anything the agent could commit. A run of a project with
+[multiple repositories](guide/multiple-repositories.md) checks each repository out at
+`repo/<alias>/` instead, from the clone mapped as `KEY/alias` (the primary stays `KEY`) or
+found under a root. The harness runs
 there as the user who started the runner, with `AICTIQ_URL`, `AICTIQ_TOKEN` (the run's own
 agent token, revoked when the run ends) and `AICTIQ_ITEM` in its environment. The runner's own
 `AICTIQ_*` variables are removed first. There is no sandbox: **one OS user is one trust

@@ -48,6 +48,8 @@ public sealed class AutomationProjectDeletedHandler(
             .ExecuteDeleteAsync(cancellationToken);
         await db.ProjectSettings.Where(settings => settings.ProjectId == @event.ProjectId)
             .ExecuteDeleteAsync(cancellationToken);
+        await db.ProjectRepositories.Where(repo => repo.ProjectId == @event.ProjectId)
+            .ExecuteDeleteAsync(cancellationToken);
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.Rule, ruleIds, cancellationToken);
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.Playbook, playbookIds, cancellationToken);
         await AuditPurge.EntitiesAsync(db, @event.OrganizationId, AuditEntityTypes.ProjectFactorySettings,

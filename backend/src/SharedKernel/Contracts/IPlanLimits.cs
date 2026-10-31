@@ -36,6 +36,21 @@ public enum FleetModeAvailability
     Available = 2,
 }
 
+/// <summary>
+/// Whether a project may use several repositories or a monorepo sub-package. Decided exactly as
+/// <see cref="FleetModeAvailability"/> is: paid hosted plans only, hidden on self-hosted installs.
+/// </summary>
+public enum MultiRepoAvailability
+{
+    /// <summary>Not offered here: a self-hosted instance, or one without billing.</summary>
+    Hidden = 0,
+
+    /// <summary>Offered, but only on a paid hosted plan: free, hosted-free and evaluation organizations see an upgrade.</summary>
+    UpgradeRequired = 1,
+
+    Available = 2,
+}
+
 public sealed record IncomingPerson(string? UserId, string? Email, string? AcceptedInvitationEmail = null);
 
 /// <summary>
@@ -75,6 +90,10 @@ public interface IPlanLimits
 
     /// <summary>Fleet mode is for organizations a paid hosted subscription is charging for, and nobody else.</summary>
     Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Multiple repositories per project follow fleet mode's rule: a paid hosted subscription, and nobody else.</summary>
+    Task<MultiRepoAvailability> GetMultiRepoAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(MultiRepoAvailability.Hidden);
 }
 
 /// <summary>
@@ -100,4 +119,7 @@ public sealed class UnlimitedPlanLimits : IPlanLimits
 
     // Fleet mode is not offered on self-hosted installs for now; support may come later.
     public Task<FleetModeAvailability> GetFleetModeAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(FleetModeAvailability.Hidden);
+
+    // Like fleet mode, multiple repositories are not offered on self-hosted installs.
+    public Task<MultiRepoAvailability> GetMultiRepoAvailabilityAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(MultiRepoAvailability.Hidden);
 }

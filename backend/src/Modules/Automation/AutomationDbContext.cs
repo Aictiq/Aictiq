@@ -26,6 +26,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<Runner> Runners => Set<Runner>();
     public DbSet<Playbook> Playbooks => Set<Playbook>();
     public DbSet<ProjectFactorySettings> ProjectSettings => Set<ProjectFactorySettings>();
+    public DbSet<ProjectRepository> ProjectRepositories => Set<ProjectRepository>();
     public DbSet<Run> Runs => Set<Run>();
     public DbSet<RunLogChunk> RunLogChunks => Set<RunLogChunk>();
     public DbSet<Rule> Rules => Set<Rule>();
@@ -106,6 +107,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.Harness).HasMaxLength(16);
             b.Property(x => x.CreatedBy).HasMaxLength(450);
             b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
+            JsonList(b.Property(x => x.RepositorySteps));
             b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_playbooks_project_id");
             b.HasIndex(x => new { x.ProjectId, x.IsDefault }).IsUnique().HasFilter("is_default")
                 .HasDatabaseName("ux_playbooks_default_project");
@@ -141,6 +143,8 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.DropReason).HasMaxLength(ChainStep.MaxDropReasonLength);
             b.Property(x => x.Kind).HasConversion<short>();
             b.Property(x => x.Status).HasConversion<short>();
+            b.Property(x => x.RepositoryAliases).HasDefaultValueSql("'{}'::text[]");
+            b.Property(x => x.WaitForMergeUrls).HasDefaultValueSql("'{}'::text[]");
             // The replay guard: a finished run hands over once, however often its finish is retried.
             b.HasIndex(x => x.AfterRunId).IsUnique().HasDatabaseName("ux_chain_steps_after_run");
             b.HasIndex(x => new { x.ItemId, x.CreatedAt }).HasFilter("status = 0")
@@ -148,7 +152,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.HasIndex(x => x.ProjectId).HasDatabaseName("ix_chain_steps_project_id");
             b.ToTable(t =>
             {
-                t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1)");
+                t.HasCheckConstraint("ck_chain_steps_kind", "kind IN (0, 1, 2)");
                 t.HasCheckConstraint("ck_chain_steps_status", "status BETWEEN 0 AND 2");
                 t.HasCheckConstraint("ck_chain_steps_started", "(status = 1) = (run_id IS NOT NULL)");
                 t.HasCheckConstraint("ck_chain_steps_decided", "(status = 0) = (decided_at IS NULL)");
@@ -166,11 +170,32 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.DefaultBranch).HasMaxLength(255).HasDefaultValue("main");
             b.Property(x => x.LocalPathHint).HasMaxLength(2000);
             b.Property(x => x.DefaultAgentId).HasMaxLength(450);
+            b.Property(x => x.PrimaryAlias).HasMaxLength(ProjectRepository.MaxAliasLength);
+            b.Property(x => x.PrimaryWorkingDirectory).HasMaxLength(ProjectRepository.MaxWorkingDirectoryLength);
             b.ToTable(table =>
             {
                 table.HasCheckConstraint("ck_project_settings_repo_source", "repo_source IN (0, 1)");
                 table.HasCheckConstraint("ck_project_settings_github_repo", "repo_source <> 0 OR repo_full_name IS NOT NULL");
                 table.HasCheckConstraint("ck_project_settings_default_branch", "length(btrim(default_branch)) BETWEEN 1 AND 255");
+            });
+        });
+
+        modelBuilder.Entity<ProjectRepository>(b =>
+        {
+            b.ToTable("project_repositories");
+            b.Property(x => x.Alias).HasMaxLength(ProjectRepository.MaxAliasLength);
+            b.Property(x => x.RepoSource).HasConversion<short>();
+            b.Property(x => x.RepoFullName).HasMaxLength(500);
+            b.Property(x => x.DefaultBranch).HasMaxLength(255).HasDefaultValue("main");
+            b.Property(x => x.LocalPathHint).HasMaxLength(2000);
+            b.Property(x => x.WorkingDirectory).HasMaxLength(ProjectRepository.MaxWorkingDirectoryLength);
+            b.HasIndex(x => new { x.ProjectId, x.Alias }).IsUnique().HasDatabaseName("ux_project_repositories_project_alias");
+            b.ToTable(table =>
+            {
+                table.HasCheckConstraint("ck_project_repositories_repo_source", "repo_source IN (0, 1)");
+                table.HasCheckConstraint("ck_project_repositories_github_repo", "repo_source <> 0 OR repo_full_name IS NOT NULL");
+                table.HasCheckConstraint("ck_project_repositories_alias", "alias ~ '^[a-z0-9][a-z0-9._-]{0,39}$'");
+                table.HasCheckConstraint("ck_project_repositories_default_branch", "length(btrim(default_branch)) BETWEEN 1 AND 255");
             });
         });
 
@@ -197,6 +222,21 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.StageFindings).HasMaxLength(Run.MaxStageFindingsLength);
             b.Property(x => x.RequiredTags).HasDefaultValueSql("'{}'::text[]");
             b.Property(x => x.DeclinedRunnerIds).HasDefaultValueSql("'{}'::uuid[]");
+            JsonList(b.Property(x => x.Repositories));
+            b.Property(x => x.RepositoryAliases).HasDefaultValueSql("'{}'::text[]");
+            b.Property(x => x.WorkingDirectory).HasMaxLength(ProjectRepository.MaxWorkingDirectoryLength);
+            b.Property(x => x.RepositoryPlan).HasColumnType("jsonb")
+                .HasConversion(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<RepositoryStep>?, string?>(
+                    value => value == null ? null : JsonSerializer.Serialize(value, CapabilitiesJson),
+                    value => value == null ? null : JsonSerializer.Deserialize<List<RepositoryStep>>(value, CapabilitiesJson)),
+                    new ValueComparer<List<RepositoryStep>?>(
+                        (left, right) => JsonSerializer.Serialize(left, CapabilitiesJson) == JsonSerializer.Serialize(right, CapabilitiesJson),
+                        value => JsonSerializer.Serialize(value, CapabilitiesJson).GetHashCode(StringComparison.Ordinal),
+                        value => value == null ? null : value.ToList()));
+            b.Property(x => x.PullRequestUrls).HasDefaultValueSql("'{}'::text[]");
+            // The run page and the chain find a graph's runs by its first one; only those runs are indexed.
+            b.HasIndex(x => x.RepositoryRootRunId, "ix_runs_repository_root")
+                .HasFilter("repository_root_run_id IS NOT NULL").HasDatabaseName("ix_runs_repository_root");
 
             b.HasIndex(x => new { x.ProjectId, x.QueuedAt }).HasDatabaseName("ix_runs_project_queued");
             b.HasIndex(x => new { x.OrganizationId, x.Status, x.QueuedAt }).HasDatabaseName("ix_runs_organization_status_queued");
@@ -388,4 +428,14 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.HasOne<Playbook>().WithMany().HasForeignKey(x => x.PlaybookId).OnDelete(DeleteBehavior.SetNull);
         });
     }
+
+    /// <summary>A list kept as a jsonb array, compared by content so a changed element is saved.</summary>
+    private static void JsonList<T>(Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<List<T>> property) =>
+        property.HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb").HasConversion(
+            value => JsonSerializer.Serialize(value, CapabilitiesJson),
+            value => JsonSerializer.Deserialize<List<T>>(value, CapabilitiesJson) ?? new List<T>(),
+            new ValueComparer<List<T>>(
+                (left, right) => JsonSerializer.Serialize(left, CapabilitiesJson) == JsonSerializer.Serialize(right, CapabilitiesJson),
+                value => JsonSerializer.Serialize(value, CapabilitiesJson).GetHashCode(StringComparison.Ordinal),
+                value => value.ToList()));
 }

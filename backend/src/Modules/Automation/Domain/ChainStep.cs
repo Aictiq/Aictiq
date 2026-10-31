@@ -9,6 +9,12 @@ public enum ChainStepKind : short
 
     /// <summary>Rerun the builder with the findings of the stage run <see cref="ChainStep.AfterRunId"/>.</summary>
     Rework = 1,
+
+    /// <summary>
+    /// Run the builder in the next repositories of a multi-repository run's graph
+    /// (<see cref="ChainStep.RepositoryAliases"/>), once the run before has done its part.
+    /// </summary>
+    Repositories = 2,
 }
 
 /// <summary>Where a chain step stands. Only <see cref="Pending"/> is still waiting.</summary>
@@ -51,6 +57,15 @@ public sealed class ChainStep : TenantEntity
 
     /// <summary>The stage to run, for <see cref="ChainStepKind.Stage"/>; 0 for a rework.</summary>
     public int StageIndex { get; init; }
+
+    /// <summary>The repositories to check out, for <see cref="ChainStepKind.Repositories"/>.</summary>
+    public string[] RepositoryAliases { get; init; } = [];
+
+    /// <summary>
+    /// Pull requests that must be merged before the step starts, for a repository step that waits
+    /// for merge. Empty starts it as soon as the item is free.
+    /// </summary>
+    public string[] WaitForMergeUrls { get; init; } = [];
 
     public DateTimeOffset CreatedAt { get; init; }
 
