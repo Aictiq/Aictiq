@@ -12,7 +12,8 @@ import { type SessionUser, useSessionStore } from '@/stores/session'
 
 /**
  * The project section of the rail links to that project's settings, but only for the people
- * who can open them - the same rule as the gear on the projects page.
+ * who can open them: an admin to the whole hub, a member to the Jira import (their one tab),
+ * a guest nowhere.
  */
 
 const project = (role: ProjectRole): Project => ({
@@ -92,12 +93,21 @@ describe('AppSidebar project settings link', () => {
     expect(hrefs(wrapper)).toContain('/o/acme/p/DSO/settings/general')
   })
 
-  it('leaves the link out for a project member', async () => {
+  it('links a project member straight to the Jira import, not the admin tabs', async () => {
     const wrapper = await render('member')
 
     expect(hrefs(wrapper)).not.toContain('/o/acme/p/DSO/settings/general')
+    expect(hrefs(wrapper)).toContain('/o/acme/p/DSO/settings/import')
     // The organization settings link is still there; only the project one is gated.
     expect(hrefs(wrapper)).toContain('/o/acme/settings/general')
+  })
+})
+
+describe('AppSidebar project settings link for guests', () => {
+  it('leaves every project settings link out for a guest', async () => {
+    const wrapper = await render('guest')
+
+    expect(hrefs(wrapper).some((href) => href?.startsWith('/o/acme/p/DSO/settings'))).toBe(false)
   })
 })
 
@@ -128,7 +138,8 @@ describe('AppSidebar organization group', () => {
   })
 
   it('leaves the whole group out for a stakeholder or guest', async () => {
-    const wrapper = await render('member', false)
+    // A project guest, so the project's own Settings link is absent too.
+    const wrapper = await render('guest', false)
 
     expect(wrapper.text()).not.toContain('Organization')
     for (const label of ['Factory', 'Agents', 'Members', 'Settings'])

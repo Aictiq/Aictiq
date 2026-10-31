@@ -36,6 +36,7 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<CsvImportJob> CsvImportJobs => Set<CsvImportJob>();
+    public DbSet<JiraImportJob> JiraImportJobs => Set<JiraImportJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -95,6 +96,22 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
             b.Property(x => x.Status).HasConversion<short>(); b.Property(x => x.Errors).HasColumnType("text[]");
             b.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("ix_csv_import_jobs_status_created_at");
             b.HasIndex(x => x.ProjectId);
+        });
+        modelBuilder.Entity<JiraImportJob>(b =>
+        {
+            b.ToTable("jira_import_jobs");
+            b.Property(x => x.ProjectKey).HasMaxLength(12); b.Property(x => x.OrganizationSlug).HasMaxLength(64); b.Property(x => x.RequestedBy).HasMaxLength(64);
+            b.Property(x => x.SiteUrl).HasMaxLength(255); b.Property(x => x.Email).HasMaxLength(320); b.Property(x => x.JiraProjectKey).HasMaxLength(255); b.Property(x => x.JiraProjectName).HasMaxLength(255);
+            b.Property(x => x.Status).HasConversion<short>();
+            // Replaced, never mutated in place: a converted collection is compared by reference.
+            b.Property(x => x.IssueTypeMap).HasColumnType("jsonb").HasConversion(
+                map => JsonSerializer.Serialize(map, BoardJson), json => JsonSerializer.Deserialize<Dictionary<string, WorkItemType>>(json, BoardJson)!);
+            b.Property(x => x.StatusMap).HasColumnType("jsonb").HasConversion(
+                map => JsonSerializer.Serialize(map, BoardJson), json => JsonSerializer.Deserialize<Dictionary<string, Guid>>(json, BoardJson)!);
+            b.Property(x => x.Failures).HasColumnType("jsonb").HasConversion(
+                failures => JsonSerializer.Serialize(failures, BoardJson), json => JsonSerializer.Deserialize<List<JiraImportFailure>>(json, BoardJson)!);
+            b.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("ix_jira_import_jobs_status_created_at");
+            b.HasIndex(x => new { x.ProjectId, x.CreatedAt });
         });
         modelBuilder.Entity<ProjectSequence>(b => { b.ToTable("project_sequences"); b.Ignore(x => x.Id); b.HasKey(x => x.ProjectId); b.Property(x => x.TemplatesSeeded).HasDefaultValue(false); });
         modelBuilder.Entity<ItemTemplate>(b =>
@@ -187,6 +204,8 @@ public sealed class WorkItemsDbContext(DbContextOptions<WorkItemsDbContext> opti
             b.ToTable("sprints"); b.Property(x => x.Name).HasMaxLength(100); b.Property(x => x.Goal).HasMaxLength(2000); b.Property(x => x.State).HasConversion<short>(); b.Property(x => x.Version).IsRowVersion();
             b.HasIndex(x => new { x.TeamId, x.State }).HasDatabaseName("ix_sprints_team_state");
             b.HasIndex(x => new { x.TeamId, x.StartsOn }).HasDatabaseName("ix_sprints_team_starts_on");
+            b.Property(x => x.ExternalRef).HasMaxLength(256);
+            b.HasIndex(x => new { x.TeamId, x.ExternalRef }).IsUnique().HasFilter("external_ref IS NOT NULL").HasDatabaseName("ux_sprints_team_external_ref");
             b.ToTable(t => t.HasCheckConstraint("ck_sprints_dates", "ends_on > starts_on"));
         });
         modelBuilder.Entity<SprintScopeLog>(b =>

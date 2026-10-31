@@ -134,13 +134,17 @@ const project = computed<NavItem[]>(() => {
       to: hasProject ? wikiPath(slug!, projectKey!) : '/',
       tour: 'wiki-link',
     },
-    // Only admins can open project settings; the projects page gates its gear the same way.
-    ...(hasProject && projects.current?.role === 'admin'
+    // Admins open the whole settings hub; a member's only tab there is the Jira import, so
+    // their link goes straight to it. Guests get neither.
+    ...(hasProject && (projects.current?.role === 'admin' || projects.current?.role === 'member')
       ? [
           {
             label: 'Settings',
             icon: Settings,
-            to: projectSettingsPath(slug!, projectKey!),
+            to:
+              projects.current.role === 'admin'
+                ? projectSettingsPath(slug!, projectKey!)
+                : projectSettingsPath(slug!, projectKey!, 'import'),
           },
         ]
       : []),
@@ -173,7 +177,7 @@ async function selectProject(projectKey: string) {
         route,
         slug,
         projectKey,
-        projects.current?.role === 'admin',
+        projects.current?.role,
         teams.current?.id ?? null,
       ),
     )

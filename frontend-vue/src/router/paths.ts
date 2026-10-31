@@ -28,6 +28,7 @@ export type ProjectSettingsTab =
   | 'labels'
   | 'templates'
   | 'integrations'
+  | 'import'
 
 export const orgSettingsPath = (slug: string, tab: OrgSettingsTab = 'general') =>
   `/o/${slug}/settings/${tab}`
@@ -114,7 +115,21 @@ export function orgSettingsLinks(slug: string, options: { fleet?: boolean } = {}
   ]
 }
 
-export function projectSettingsLinks(slug: string, projectKey: string): SettingsLink[] {
+/**
+ * A project's settings tabs for the caller's role. Admins configure the project; a member
+ * may only bring work into it, so the Jira import is the one tab they get, and a guest none.
+ */
+export function projectSettingsLinks(
+  slug: string,
+  projectKey: string,
+  role: 'admin' | 'member' | 'guest' | undefined = 'admin',
+): SettingsLink[] {
+  const importLink = {
+    to: projectSettingsPath(slug, projectKey, 'import'),
+    label: 'Import from Jira',
+  }
+  if (role === 'member') return [importLink]
+  if (role !== 'admin') return []
   return [
     { to: projectSettingsPath(slug, projectKey, 'general'), label: 'General' },
     { to: projectSettingsPath(slug, projectKey, 'factory'), label: 'Factory' },
@@ -127,6 +142,7 @@ export function projectSettingsLinks(slug: string, projectKey: string): Settings
       to: projectSettingsPath(slug, projectKey, 'integrations'),
       label: 'Integrations',
     },
+    importLink,
   ]
 }
 

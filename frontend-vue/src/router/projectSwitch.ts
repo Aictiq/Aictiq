@@ -1,5 +1,6 @@
 import type { RouteLocationNormalizedLoaded, RouteLocationRaw } from 'vue-router'
 
+import type { ProjectRole } from '@/api/projects'
 import { projectItemsPath } from '@/router/paths'
 
 export function projectSwitchNeedsTeam(route: RouteLocationNormalizedLoaded) {
@@ -11,9 +12,10 @@ export function projectSwitchLocation(
   route: RouteLocationNormalizedLoaded,
   slug: string,
   projectKey: string,
-  isAdmin: boolean,
+  role: ProjectRole | undefined,
   teamId: string | null,
 ): RouteLocationRaw {
+  const isAdmin = role === 'admin'
   const items = projectItemsPath(slug, projectKey)
   const params = { slug, projectKey }
   const name = String(route.name)
@@ -30,6 +32,10 @@ export function projectSwitchLocation(
   if (name === 'project-wiki') return { name, params }
   if (name === 'team-settings') {
     return isAdmin ? { name: 'project-settings-teams', params } : items
+  }
+  // The Jira import is the one settings tab a member has, so it carries across for them too.
+  if (name === 'project-settings-import') {
+    return role === 'admin' || role === 'member' ? { name, params } : items
   }
   if (name.startsWith('project-settings')) return isAdmin ? { name, params } : items
   if (

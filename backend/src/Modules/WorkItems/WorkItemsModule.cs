@@ -15,6 +15,7 @@ using Aictiq.SharedKernel.Mcp;
 using Aictiq.SharedKernel.Http;
 using Aictiq.Modules.WorkItems.Access;
 using Aictiq.Modules.WorkItems.Mcp;
+using Aictiq.Modules.WorkItems.Jira;
 
 namespace Aictiq.Modules.WorkItems;
 
@@ -37,6 +38,15 @@ public static class WorkItemsModule
         services.AddHttpClient("aictiq-link-preview", client => client.Timeout = TimeSpan.FromSeconds(3))
             .ConfigurePrimaryHttpMessageHandler(() => PublicNetworkGuard.CreateHandler());
         services.AddScoped<LinkPreviewFetcher>();
+        // A Jira site URL is user input, so the same connect-time public-address check as link
+        // previews; JiraClient follows attachment redirects itself.
+        services.AddOptions<JiraImportOptions>().BindConfiguration(JiraImportOptions.SectionName);
+        services.AddHttpClient(JiraClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(60))
+            .ConfigurePrimaryHttpMessageHandler(sp => PublicNetworkGuard.CreateHandler(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<JiraImportOptions>>().Value.AllowInsecureSites));
+        services.AddScoped<JiraClient>();
+        services.AddSingleton<JiraTokenProtector>();
+        services.AddScoped<JiraImporter>();
         services.RemoveAll<ITeamUsage>();
         services.AddScoped<ITeamUsage, WorkItemsTeamUsage>();
         // The same replace-the-null precedent: SharedKernel's NullWorkItemClaims answers
@@ -65,10 +75,12 @@ public static class WorkItemsModule
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<StaleClaimReleaseService>();
         services.AddHostedService<CsvImportWorker>();
+        services.AddSingleton<JiraImportWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<JiraImportWorker>());
         return services;
     }
     public static IEndpointRouteBuilder MapWorkItemsEndpoints(this IEndpointRouteBuilder api)
-    { api.MapWorkflowEndpoints(); api.MapItemWatchEndpoints(); api.MapSprintEndpoints(); api.MapBoardEndpoints(); api.MapWorkItemEndpoints(); api.MapCsvImportExportEndpoints(); api.MapPortfolioEndpoints(); api.MapLabelEndpoints(); api.MapItemTemplateEndpoints(); api.MapSavedViewEndpoints(); api.MapCommentEndpoints(); api.MapAttachmentEndpoints(); api.MapItemRelationsEndpoints(); api.MapGitHubBranchEndpoints(); api.MapSearchEndpoints(); api.MapAgentActivityEndpoints(); return api; }
+    { api.MapWorkflowEndpoints(); api.MapItemWatchEndpoints(); api.MapSprintEndpoints(); api.MapBoardEndpoints(); api.MapWorkItemEndpoints(); api.MapCsvImportExportEndpoints(); api.MapJiraImportEndpoints(); api.MapPortfolioEndpoints(); api.MapLabelEndpoints(); api.MapItemTemplateEndpoints(); api.MapSavedViewEndpoints(); api.MapCommentEndpoints(); api.MapAttachmentEndpoints(); api.MapItemRelationsEndpoints(); api.MapGitHubBranchEndpoints(); api.MapSearchEndpoints(); api.MapAgentActivityEndpoints(); return api; }
 }
 
 internal sealed class WorkItemsTeamUsage(WorkItemsDbContext db) : ITeamUsage

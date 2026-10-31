@@ -67,7 +67,9 @@ const scope: ProjectScope = {
 
 provide(projectScopeKey, scope)
 
-const links = computed(() => projectSettingsLinks(slug.value, projectKey.value))
+const links = computed(() =>
+  projectSettingsLinks(slug.value, projectKey.value, record.value?.role ?? 'admin'),
+)
 </script>
 
 <template>
