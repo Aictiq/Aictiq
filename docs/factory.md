@@ -426,6 +426,15 @@ aictiq run logs RUN_ID --follow
 An orchestrating agent can instead use the MCP tools `start_run`, `get_run`, and `list_runs`.
 See [the CLI reference](cli.md) and [the agent guide](agents.md#the-tools).
 
+A project Admin can tie a member to one runner under **Settings → Members**, in the
+**Runner** column. Every chat question, refine and **Hand to agent** run that member starts
+then goes to that runner: their runner pickers are locked to it, and the API uses it whatever
+runner the request (CLI, MCP or REST) names. Admins are never locked; a runner assigned to an
+Admin only preselects it in their pickers and takes their chat. Runs nobody started by hand,
+such as rules, chained follow-ups and mentions, choose their runner as before. When the
+assigned runner is disabled or deleted, the member's runs go where they would without it: the
+project's default runner, else any free runner.
+
 A run moves through `queued` → `assigned` → `running` and then `succeeded`, `failed`,
 `cancelled`, or `timed out`. The run detail page shows runner events, stdout, and stderr as
 they arrive. The runner redacts the runner and per-run tokens, but a harness can print other

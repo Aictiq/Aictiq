@@ -89,6 +89,7 @@ public static class AutomationModule
         api.MapRuleEndpoints();
         api.MapRefinementEndpoints();
         api.MapProjectChatEndpoints();
+        api.MapMemberRunnerEndpoints();
         return api;
     }
 }

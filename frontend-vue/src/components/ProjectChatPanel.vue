@@ -454,8 +454,12 @@ onBeforeUnmount(() => {
               data-testid="project-chat-no-runner"
             >
               <template v-if="view.runnerName">
-                {{ view.runnerName }}, this project's default runner, is offline. Your question will
-                start when it connects.
+                {{ view.runnerName }},
+                {{
+                  view.runnerAssigned
+                    ? 'the runner assigned to you'
+                    : "this project's default runner"
+                }}, is offline. Your question will start when it connects.
               </template>
               <template v-else>
                 No runner is online. Your question will start when a runner connects.

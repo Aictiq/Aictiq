@@ -6,7 +6,7 @@ import type { Run } from '@/api/runs'
 import { dispatchRun } from '@/api/runs'
 import { listAgents, type Agent } from '@/api/agents'
 import { getFactorySettings, listPlaybooks, type Playbook } from '@/api/playbooks'
-import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
+import { getMyRunner, listRunnerChoices, type MyRunner, type RunnerChoice } from '@/api/runners'
 import { listProjectMembers } from '@/api/projects'
 import EmptyState from '@/components/common/EmptyState.vue'
 import FleetTagInput from '@/components/factory/FleetTagInput.vue'
@@ -78,6 +78,13 @@ const agentId = ref<string | null>(null)
 const runners = ref<RunnerChoice[]>([])
 /** Null is "any free runner". */
 const runnerId = ref<string | null>(null)
+/** The runner a project admin assigned to the caller, when it is theirs to keep: the picker locks to it. */
+const myRunner = ref<MyRunner | null>(null)
+const lockedRunner = computed(() =>
+  myRunner.value?.locked && myRunner.value.runnerId
+    ? { id: myRunner.value.runnerId, name: myRunner.value.runnerName ?? 'Assigned runner' }
+    : null,
+)
 /** Off is "start now", as every run did before there was a choice. */
 const scheduled = ref(false)
 /** A `datetime-local` value, in the browser's timezone. */
@@ -88,11 +95,14 @@ const error = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
 
 const assignable = computed(() =>
-  agents.value.filter((agent) => agent.isActive).sort((a, b) => a.displayName.localeCompare(b.displayName)),
+  agents.value
+    .filter((agent) => agent.isActive)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName)),
 )
 
-const playbookHarness = computed(() => playbooks.value.find((p) => p.id === playbookId.value)?.harness ?? null)
-
+const playbookHarness = computed(
+  () => playbooks.value.find((p) => p.id === playbookId.value)?.harness ?? null,
+)
 
 /**
  * Fleet mode: tags the run requires on top of the playbook's. Never shown, and never sent,
@@ -139,7 +149,9 @@ watch(scheduled, (on) => {
   startAt.value = on ? defaultScheduleValue() : ''
 })
 
-const chosenRunner = computed(() => runners.value.find((runner) => runner.id === runnerId.value) ?? null)
+const chosenRunner = computed(
+  () => runners.value.find((runner) => runner.id === runnerId.value) ?? null,
+)
 
 /**
  * What is left of the harness account the run will use: the chosen runner's, or the most
@@ -166,10 +178,13 @@ const usageWindows = computed(() => {
 })
 
 // A playbook with another harness may rule the chosen runner out, and so may a required tag.
+// An assigned runner stays put: the server sends the run to it regardless, and says why it can't.
 watch(playbookHarness, (harness) => {
+  if (lockedRunner.value) return
   if (chosenRunner.value && !runnerCanRun(chosenRunner.value, harness)) runnerId.value = null
 })
 watch([playbookTags, requiredTags], () => {
+  if (lockedRunner.value) return
   if (chosenRunner.value && !runnerHasTags(chosenRunner.value)) runnerId.value = null
 })
 
@@ -184,16 +199,20 @@ watch(
     loadFailed.value = false
     loading.value = true
     try {
-      const [projectPlaybooks, projectAgents, settings, members, runnerChoices] = await Promise.all([
-        listPlaybooks(props.slug, props.projectKey),
-        listAgents(props.slug),
-        getFactorySettings(props.slug, props.projectKey).catch(() => null),
-        listProjectMembers(props.slug, props.projectKey),
-        // Without the list the run still goes to any free runner, as it always could.
-        listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
-      ])
+      const [projectPlaybooks, projectAgents, settings, members, runnerChoices, assigned] =
+        await Promise.all([
+          listPlaybooks(props.slug, props.projectKey),
+          listAgents(props.slug),
+          getFactorySettings(props.slug, props.projectKey).catch(() => null),
+          listProjectMembers(props.slug, props.projectKey),
+          // Without the list the run still goes to any free runner, as it always could.
+          listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
+          // An older server has no assigned runners, and the server enforces one anyway.
+          getMyRunner(props.slug, props.projectKey).catch(() => null),
+        ])
       playbooks.value = projectPlaybooks
       runners.value = runnerChoices
+      myRunner.value = assigned
       const memberIds = new Set(members.map((member) => member.userId))
       agents.value = projectAgents.filter((agent) => memberIds.has(agent.userId))
 
@@ -204,7 +223,8 @@ watch(
           ? remembered.playbookId
           : (projectPlaybooks.find((p) => p.isDefault)?.id ?? projectPlaybooks[0]?.id ?? null)
       const defaultAgent =
-        settings?.defaultAgentId && assignable.value.some((a) => a.userId === settings.defaultAgentId)
+        settings?.defaultAgentId &&
+        assignable.value.some((a) => a.userId === settings.defaultAgentId)
           ? settings.defaultAgentId
           : null
       const organizationDefaultAgent = assignable.value.find((agent) => agent.isDefault)?.userId
@@ -212,13 +232,16 @@ watch(
         remembered?.agentId && assignable.value.some((a) => a.userId === remembered.agentId)
           ? remembered.agentId
           : (defaultAgent ?? organizationDefaultAgent ?? assignable.value[0]?.userId ?? null)
-      // The remembered runner, else the project's default runner.
-      runnerId.value = preselectedRunnerId(
-        runnerChoices,
-        playbookHarness.value,
-        remembered?.runnerId,
-        settings?.defaultRunnerId,
-      )
+      // The assigned runner when it is locked; else the remembered runner, else the one assigned
+      // to this admin, else the project's default runner.
+      runnerId.value =
+        lockedRunner.value?.id ??
+        preselectedRunnerId(
+          runnerChoices,
+          playbookHarness.value,
+          remembered?.runnerId,
+          assigned?.runnerId ?? settings?.defaultRunnerId,
+        )
     } catch {
       loadFailed.value = true
     } finally {
@@ -242,7 +265,7 @@ async function submit() {
     const run = await dispatchRun(props.slug, props.itemKey, {
       playbookId: playbookId.value,
       agentId: agentId.value,
-      runnerId: showRunners.value ? runnerId.value : null,
+      runnerId: lockedRunner.value?.id ?? (showRunners.value ? runnerId.value : null),
       // Left out entirely when starting now, so the request is the one it always was.
       ...(scheduledFor ? { scheduledFor: scheduledFor.toISOString() } : {}),
       // The same for required tags: only in fleet mode, and only when there are any.
@@ -292,8 +315,8 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Hand {{ itemKey }} to an agent</DialogTitle>
         <DialogDescription>
-          The agent claims the item, follows the playbook on a runner, and reports back here
-          with its pull request. It starts as soon as a runner is free, or later if you schedule it.
+          The agent claims the item, follows the playbook on a runner, and reports back here with
+          its pull request. It starts as soon as a runner is free, or later if you schedule it.
         </DialogDescription>
       </DialogHeader>
 
@@ -377,7 +400,34 @@ async function submit() {
             {{ message }}
           </p>
         </div>
-        <div v-if="showRunners" class="space-y-1.5">
+        <div v-if="lockedRunner" class="space-y-1.5">
+          <label for="start-run-runner" class="text-sm font-medium">Runner</label>
+          <select
+            id="start-run-runner"
+            data-testid="start-run-runner"
+            class="border-input bg-background w-full rounded border px-2 py-1.5 text-sm disabled:opacity-70"
+            disabled
+          >
+            <option :value="lockedRunner.id">
+              {{ lockedRunner.name
+              }}{{ chosenRunner ? ` · ${chosenRunner.isOnline ? 'online' : 'offline'}` : '' }}
+            </option>
+          </select>
+          <p class="text-muted-foreground text-xs" data-testid="start-run-runner-locked">
+            A project admin assigned you this runner, so your runs go to it.
+          </p>
+          <p v-if="chosenRunner && !chosenRunner.isOnline" class="text-muted-foreground text-xs">
+            {{ chosenRunner.name }} is offline. The run waits in the queue until it comes back.
+          </p>
+          <p
+            v-for="message in fieldErrors.runnerId"
+            :key="message"
+            class="text-destructive text-xs"
+          >
+            {{ message }}
+          </p>
+        </div>
+        <div v-else-if="showRunners" class="space-y-1.5">
           <label for="start-run-runner" class="text-sm font-medium">Runner</label>
           <select
             id="start-run-runner"
@@ -393,7 +443,11 @@ async function submit() {
           <p v-if="chosenRunner && !chosenRunner.isOnline" class="text-muted-foreground text-xs">
             {{ chosenRunner.name }} is offline. The run waits in the queue until it comes back.
           </p>
-          <p v-for="message in fieldErrors.runnerId" :key="message" class="text-destructive text-xs">
+          <p
+            v-for="message in fieldErrors.runnerId"
+            :key="message"
+            class="text-destructive text-xs"
+          >
             {{ message }}
           </p>
         </div>
@@ -423,7 +477,11 @@ async function submit() {
         </div>
         <div class="space-y-1.5">
           <div class="flex items-center justify-end gap-2">
-            <label id="start-run-schedule-label" for="start-run-schedule" class="text-sm font-medium">
+            <label
+              id="start-run-schedule-label"
+              for="start-run-schedule"
+              class="text-sm font-medium"
+            >
               Start later
             </label>
             <button
@@ -460,10 +518,14 @@ async function submit() {
               </span>
             </div>
             <p class="text-muted-foreground text-xs">
-              When you schedule this run, the item is reserved for the agent so another run cannot start.
-              Work begins at or after the selected time, when a runner is available.
+              When you schedule this run, the item is reserved for the agent so another run cannot
+              start. Work begins at or after the selected time, when a runner is available.
             </p>
-            <p v-for="message in fieldErrors.scheduledFor" :key="message" class="text-destructive text-xs">
+            <p
+              v-for="message in fieldErrors.scheduledFor"
+              :key="message"
+              class="text-destructive text-xs"
+            >
               {{ message }}
             </p>
           </template>

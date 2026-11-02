@@ -1,4 +1,5 @@
 using Aictiq.Modules.Automation.Domain;
+using Aictiq.Modules.Automation.Endpoints;
 using Aictiq.Modules.Automation.Prompts;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
@@ -232,11 +233,22 @@ public sealed class RunDispatcher(
                 : DispatchResult.PlaybookNotFound();
         }
 
+        // A member who is not an Admin runs on the runner an Admin assigned them, whatever the
+        // request names. Only runs the person starts themselves: a mention, a chain's next run or a
+        // rule chooses its runner as before.
+        var locked = false;
+        if (actor.Kind == DispatchActorKind.User && mention is null && rework is null && wave is null
+            && await MemberRunnerEndpoints.LockedAsync(db, access, project.Id, actor.UserId!, ct) is { } assigned)
+        {
+            runnerId = assigned.Id;
+            locked = true;
+        }
+
         var runHarness = harness ?? playbook.Harness;
         if (previous is null && runnerId is { } requestedRunner
             && await RunnerErrorAsync(requestedRunner, runHarness, project.Key, settings, ct) is { } runnerError)
         {
-            return DispatchResult.Invalid("runnerId", runnerError);
+            return DispatchResult.Invalid("runnerId", locked ? $"{runnerError} {AskAdminToChange}" : runnerError);
         }
 
         if (playbook.WikiPageId is not { } pageId
@@ -401,10 +413,19 @@ public sealed class RunDispatcher(
 
         var playbook = await FindPlaybookAsync(null, project.Id, ct);
         var harness = playbook?.Harness ?? ProjectChat.DefaultHarness;
-        // The project's default runner takes the question, as if it were chosen in Start run.
-        // One deleted or disabled since no longer applies: any free runner takes it.
+        // The person's assigned runner takes the question, else the project's default runner, as if
+        // it were chosen in Start run. One deleted or disabled since no longer applies: the next
+        // one down does, and without either any free runner takes it.
         Guid? runnerId = null;
-        if (settings?.DefaultRunnerId is { } defaultRunner
+        if (await MemberRunnerEndpoints.UsableAsync(db, project.Id, userId, ct) is { } assigned)
+        {
+            if (await RunnerErrorAsync(assigned.Id, harness, project.Key, settings, ct) is { } runnerError)
+            {
+                return DispatchResult.Invalid("runnerId", $"{runnerError} {AskAdminToChange}");
+            }
+            runnerId = assigned.Id;
+        }
+        else if (settings?.DefaultRunnerId is { } defaultRunner
             && await db.Runners.AnyAsync(r => r.Id == defaultRunner && r.DeletedAt == null && r.DisabledAt == null, ct))
         {
             if (await RunnerErrorAsync(defaultRunner, harness, project.Key, settings, ct) is { } runnerError)
@@ -927,6 +948,8 @@ public sealed class RunDispatcher(
         }
         return null;
     }
+
+    private const string AskAdminToChange = "Your runner is assigned under Settings → Members; ask a project admin to change it.";
 
     private static string KindName(RunKind kind) => kind switch
     {

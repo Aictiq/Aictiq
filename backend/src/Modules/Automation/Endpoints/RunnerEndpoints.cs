@@ -428,6 +428,8 @@ public static partial class RunnerEndpoints
         // that is gone. Dispatch ignores a deleted runner too, should this update not land.
         await db.ProjectSettings.Where(settings => settings.DefaultRunnerId == runnerId)
             .ExecuteUpdateAsync(set => set.SetProperty(settings => settings.DefaultRunnerId, (Guid?)null), cancellationToken);
+        // So does every member it was assigned to.
+        await db.MemberRunners.Where(row => row.RunnerId == runnerId).ExecuteDeleteAsync(cancellationToken);
         return Results.NoContent();
     }
 

@@ -208,9 +208,11 @@ describe('RefinementPanel', () => {
     enabled = true,
     runners: unknown[] = [],
     defaultRunnerId: string | null = null,
+    myRunner: unknown = { runnerId: null, runnerName: null, locked: false },
   ) {
     const calls = stubFetch([
       ['GET', /\/factory-settings\/?$/, { defaultRunnerId }],
+      ['GET', /\/member-runners\/me$/, myRunner],
       ['GET', /\/refinement-settings\/$/, settings(enabled)],
       ['GET', /\/projects\/PROJ\/playbooks$/, playbooks],
       ['GET', /\/runners\/choices$/, runners],
@@ -475,5 +477,39 @@ describe('RefinementPanel', () => {
         .value,
     ).toBe('a')
     remembered.wrapper.unmount()
+  })
+
+  it('locks the runner to the one a project admin assigned and sends it', async () => {
+    const store = stubStorage()
+    store.set('aictiq.refine.PROJ', JSON.stringify({ runnerId: 'a', harness: null }))
+    const runners = [runnerChoice('a', []), runnerChoice('b', [])]
+    const { wrapper, calls } = await mountPanel(null, false, true, true, runners, null, {
+      runnerId: 'b',
+      runnerName: 'b-box',
+      locked: true,
+    })
+    const runner = wrapper.find('[data-testid="refine-run-runner"]')
+    expect((runner.element as HTMLSelectElement).disabled).toBe(true)
+    expect(runner.findAll('option').map((o) => o.text())).toEqual(['b-box'])
+    expect(wrapper.find('[data-testid="refine-run-runner-locked"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="refinement-start"]').trigger('click')
+    await flushPromises()
+    expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ runnerId: 'b' })
+    wrapper.unmount()
+  })
+
+  it('only preselects an admin’s assigned runner', async () => {
+    stubStorage()
+    const runners = [runnerChoice('a', []), runnerChoice('b', [])]
+    const { wrapper } = await mountPanel(null, false, true, true, runners, 'a', {
+      runnerId: 'b',
+      runnerName: 'b-box',
+      locked: false,
+    })
+    const runner = wrapper.find('[data-testid="refine-run-runner"]')
+    expect((runner.element as HTMLSelectElement).disabled).toBe(false)
+    expect((runner.element as HTMLSelectElement).value).toBe('b')
+    wrapper.unmount()
   })
 })

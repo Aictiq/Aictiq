@@ -38,6 +38,7 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
     public DbSet<ChainStep> ChainSteps => Set<ChainStep>();
     public DbSet<FleetSettings> FleetSettings => Set<FleetSettings>();
     public DbSet<ProjectChatMessage> ProjectChatMessages => Set<ProjectChatMessage>();
+    public DbSet<ProjectMemberRunner> MemberRunners => Set<ProjectMemberRunner>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -411,6 +412,17 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
                 t.HasCheckConstraint("ck_project_chat_messages_question", "length(btrim(question)) BETWEEN 1 AND 4000");
                 t.HasCheckConstraint("ck_project_chat_messages_answered", "(status = 0) = (answered_at IS NULL)");
             });
+        });
+
+        modelBuilder.Entity<ProjectMemberRunner>(b =>
+        {
+            b.ToTable("member_runners");
+            b.Property(x => x.UserId).HasMaxLength(Run.MaxActorLength);
+            b.Property(x => x.AssignedBy).HasMaxLength(Run.MaxActorLength);
+            // One runner per member; every dispatch a person starts looks theirs up.
+            b.HasIndex(x => new { x.ProjectId, x.UserId }).IsUnique().HasDatabaseName("ux_member_runners_member");
+            b.HasIndex(x => x.RunnerId).HasDatabaseName("ix_member_runners_runner");
+            b.HasOne<Runner>().WithMany().HasForeignKey(x => x.RunnerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ProjectRefinementSettings>(b =>
