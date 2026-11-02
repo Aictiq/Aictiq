@@ -6,12 +6,13 @@ namespace Aictiq.Modules.Automation;
 /// <summary>
 /// Multiple repositories and monorepo sub-packages: which repositories a run checks out, where the
 /// agent starts, and in what order the repositories of one ticket run.
+/// A run checks out every repository of the project (<see cref="AllRepositories"/>); the agent
+/// decides which ones it needs. An implement run still orders them:
 /// <list type="bullet">
-/// <item>The ticket decides first, with labels: <c>repo:&lt;alias&gt;</c> selects a repository,
-/// <c>repo:&lt;alias&gt;:after:&lt;dep&gt;</c> also orders it after <c>dep</c>, and
-/// <c>repo:&lt;alias&gt;:after-merge:&lt;dep&gt;</c> after <c>dep</c>'s pull request has merged.</item>
-/// <item>Without such labels, the playbook's <see cref="Playbook.RepositorySteps"/>.</item>
-/// <item>Without either, the primary repository, as a single-repository project always did.</item>
+/// <item>The ticket decides first, with labels: <c>repo:&lt;alias&gt;:after:&lt;dep&gt;</c> orders a
+/// repository after <c>dep</c>, and <c>repo:&lt;alias&gt;:after-merge:&lt;dep&gt;</c> after
+/// <c>dep</c>'s pull request has merged. A plain <c>repo:&lt;alias&gt;</c> only says where to focus.</item>
+/// <item>Without such labels, the waits of the playbook's <see cref="Playbook.RepositorySteps"/>.</item>
 /// </list>
 /// The steps that have nothing to wait for run together, in one run with a checkout of each;
 /// the rest wait as <see cref="ChainStepKind.Repositories"/> chain steps.
@@ -167,29 +168,64 @@ public static partial class RepositoryPlans
     }
 
     /// <summary>
-    /// The graph a new run follows: the ticket's selection with its own waits where it set any and
-    /// the playbook's otherwise, or the playbook's steps, or null for the primary repository alone.
-    /// Working directories come from the playbook's steps.
+    /// Every repository of the project, primary first: what a refine, chat, project-chat or
+    /// implement run checks out while multiple repositories are in force. The agent picks the
+    /// ones it needs. Working directories come from the playbook's steps.
+    /// <para>
+    /// With <paramref name="ordered"/> (an implement run), the ticket's ordering labels and the
+    /// playbook's waits still split the repositories into waves: a label's waits replace the
+    /// playbook's for that repository. Plan is null when nothing waits, so one run has them all.
+    /// An ordering label or a step naming a repository the project does not have is Unknown;
+    /// a read-only run ignores waits, and with them such names.
+    /// </para>
+    /// Focus is what plain <c>repo:&lt;alias&gt;</c> labels name among the project's
+    /// repositories: a hint to the agent, no longer a selection.
     /// </summary>
-    public static List<RepositoryStep>? Resolve(IReadOnlyList<RepositoryStep> playbookSteps, IEnumerable<string> labels)
+    public static (List<RepositoryStep> Steps, List<RepositoryStep>? Plan, List<string> Focus, string? Unknown) AllRepositories(
+        IReadOnlyList<string> aliases, IReadOnlyList<RepositoryStep> playbookSteps, IEnumerable<string> labels, bool ordered)
     {
-        var fromTicket = FromLabels(labels);
-        if (fromTicket is null)
-        {
-            return playbookSteps.Count == 0 ? null : [.. playbookSteps];
-        }
+        var known = aliases.ToHashSet(StringComparer.Ordinal);
+        var names = labels.ToList();
+        var focus = PlainLabels(names).Where(known.Contains).ToList();
         var playbook = playbookSteps.ToDictionary(step => step.Alias, StringComparer.Ordinal);
-        var selected = fromTicket.Select(step => step.Alias).ToHashSet(StringComparer.Ordinal);
-        var resolved = fromTicket.Select(step =>
+        if (!ordered)
         {
-            var own = playbook.GetValueOrDefault(step.Alias);
-            // The ticket ordered this repository itself: its waits replace the playbook's.
-            var after = step.After.Length > 0 ? step.After : own?.After.Where(selected.Contains).ToArray() ?? [];
-            var merge = step.After.Length > 0 ? step.WaitForMerge : own?.WaitForMerge == true && after.Length > 0;
-            return new RepositoryStep(step.Alias, own?.WorkingDirectory, after, merge);
-        }).ToList();
-        return HasCycle(resolved) ? null : resolved;
+            return ([.. aliases.Select(alias => new RepositoryStep(alias, playbook.GetValueOrDefault(alias)?.WorkingDirectory, [], false))],
+                null, focus, null);
+        }
+
+        var fromTicket = (FromLabels(names) ?? []).Where(step => step.After.Length > 0)
+            .ToDictionary(step => step.Alias, StringComparer.Ordinal);
+        var named = fromTicket.Values.SelectMany(step => step.After.Append(step.Alias))
+            .Concat(playbookSteps.SelectMany(step => step.After.Append(step.Alias)));
+        if (named.FirstOrDefault(alias => !known.Contains(alias)) is { } unknown)
+        {
+            return ([], null, focus, unknown);
+        }
+
+        List<RepositoryStep> Steps(bool withTicket) => [.. aliases.Select(alias =>
+        {
+            var own = playbook.GetValueOrDefault(alias);
+            return withTicket && fromTicket.TryGetValue(alias, out var ticket)
+                ? new RepositoryStep(alias, own?.WorkingDirectory, ticket.After, ticket.WaitForMerge)
+                : new RepositoryStep(alias, own?.WorkingDirectory, own?.After ?? [], own is { WaitForMerge: true, After.Length: > 0 });
+        })];
+        // Labels that wait for each other in a circle order nothing; the playbook's waits never do.
+        var steps = Steps(withTicket: true);
+        if (HasCycle(steps))
+        {
+            steps = Steps(withTicket: false);
+        }
+        return (steps, steps.Any(step => step.After.Length > 0) ? steps : null, focus, null);
     }
+
+    /// <summary>The aliases plain <c>repo:&lt;alias&gt;</c> labels name, in label order.</summary>
+    public static List<string> PlainLabels(IEnumerable<string> labels) =>
+        [.. labels.Select(label => label.Trim())
+            .Where(name => name.StartsWith(LabelPrefix, StringComparison.OrdinalIgnoreCase))
+            .Select(name => name[LabelPrefix.Length..].ToLowerInvariant())
+            .Where(IsAlias)
+            .Distinct(StringComparer.Ordinal)];
 
     /// <summary>The steps whose waits are all in <paramref name="done"/> and that are not done themselves.</summary>
     public static List<RepositoryStep> NextWave(IReadOnlyList<RepositoryStep> plan, IReadOnlySet<string> done) =>

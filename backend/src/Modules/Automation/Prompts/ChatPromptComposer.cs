@@ -11,7 +11,8 @@ namespace Aictiq.Modules.Automation.Prompts;
 public static class ChatPromptComposer
 {
     public static string Compose(string agentDisplayName, string itemKey, string projectKey,
-        string projectName, string playbookName, string playbookMarkdown, MentionPrompt mention)
+        string projectName, string playbookName, string playbookMarkdown, MentionPrompt mention,
+        RepositoryPrompt? repositories = null)
     {
         var playbook = string.IsNullOrWhiteSpace(playbookMarkdown)
             ? "(The playbook page is empty.)"
@@ -33,7 +34,7 @@ public static class ChatPromptComposer
 
             1. Read the item with get_item("{itemKey}") over the aictiq MCP server.
             2. Look at the code only as far as the answer needs it: search for names and read the lines around the hits rather than whole files.
-            3. Your final message is posted as your reply to that comment, so make it the answer itself: short, direct and in plain words. When the comment asks for work, say briefly how you would approach it instead of doing it.
+            3. Your final message is posted as your reply to that comment, so make it the answer itself: short, direct and in plain words. When the comment asks for work, say briefly how you would approach it instead of doing it.{(RepositoryPrompts.ReadOnly(repositories) is { } checkouts ? $"\n\n{checkouts}" : "")}
 
             # Playbook: {playbookName}
 

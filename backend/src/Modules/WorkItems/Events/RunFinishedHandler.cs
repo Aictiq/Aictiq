@@ -119,27 +119,28 @@ public sealed class RunFinishedHandler(
 
         var noun = @event.Refinement ? "Refinement run" : @event.Chat ? "Chat run"
             : @event.StageName is { } stage ? $"Follow-up playbook {stage}: run" : "Run";
+        var where = RepositoriesNote(@event);
         var markdown = @event.ChainStopped
             ? $"Follow-up playbook chain stopped · {@event.ChainNote} · [View log](/runs/{@event.RunId})"
             : @event.StageName is not null && @event.Outcome == RunOutcomes.Succeeded
             ? (@event.StageVerdict switch
             {
-                "pass" => $"{noun} {@event.RunId} passed",
-                "changes_requested" => $"{noun} {@event.RunId} requested changes",
-                _ => $"{noun} {@event.RunId} finished without a verdict",
+                "pass" => $"{noun} {@event.RunId} passed{where}",
+                "changes_requested" => $"{noun} {@event.RunId} requested changes{where}",
+                _ => $"{noun} {@event.RunId} finished without a verdict{where}",
             }) + (string.IsNullOrWhiteSpace(@event.Summary) ? "" : $" · {@event.Summary}") + $" · [View log](/runs/{@event.RunId})"
             : @event.Outcome switch
         {
             RunOutcomes.Succeeded => string.IsNullOrWhiteSpace(@event.Summary)
-                ? $"{noun} {@event.RunId} succeeded · [View log](/runs/{@event.RunId})"
-                : $"{noun} {@event.RunId} succeeded · {@event.Summary} · [View log](/runs/{@event.RunId})",
+                ? $"{noun} {@event.RunId} succeeded{where} · [View log](/runs/{@event.RunId})"
+                : $"{noun} {@event.RunId} succeeded{where} · {@event.Summary} · [View log](/runs/{@event.RunId})",
             RunOutcomes.Cancelled => string.IsNullOrWhiteSpace(@event.Summary)
-                ? $"{noun} {@event.RunId} was cancelled · [View log](/runs/{@event.RunId})"
-                : $"{noun} {@event.RunId} was cancelled · {@event.Summary} · [View log](/runs/{@event.RunId})",
+                ? $"{noun} {@event.RunId} was cancelled{where} · [View log](/runs/{@event.RunId})"
+                : $"{noun} {@event.RunId} was cancelled{where} · {@event.Summary} · [View log](/runs/{@event.RunId})",
             // A reply owes the person who asked the reason in words, not only its code.
             _ when @event.TriggerCommentId is not null && !string.IsNullOrWhiteSpace(@event.Summary)
-                => $"{noun} {@event.RunId} failed · {@event.FailureReason} · {@event.Summary} · [View log](/runs/{@event.RunId})",
-            _ => $"{noun} {@event.RunId} failed · {@event.FailureReason} · [View log](/runs/{@event.RunId})",
+                => $"{noun} {@event.RunId} failed{where} · {@event.FailureReason} · {@event.Summary} · [View log](/runs/{@event.RunId})",
+            _ => $"{noun} {@event.RunId} failed{where} · {@event.FailureReason} · [View log](/runs/{@event.RunId})",
         };
         // A run a comment asked for answers in that comment's thread, with the pull request
         // beside the log so the person who asked can open what changed in one click.
@@ -196,5 +197,21 @@ public sealed class RunFinishedHandler(
             db.ChangeTracker.Clear();
             logger.LogDebug("RunFinished {EventId} was already applied; skipping the replay", @event.EventId);
         }
+    }
+
+    /// <summary>
+    /// The repositories a multi-repository run worked in, and those its runner did not have with
+    /// the command that maps each; empty for a run with one repository.
+    /// </summary>
+    private static string RepositoriesNote(RunFinished @event)
+    {
+        var note = @event.Repositories.Count == 0 ? "" : $" · {string.Join(", ", @event.Repositories)}";
+        if (@event.MissingRepositories.Count > 0)
+        {
+            var projectKey = @event.ItemKey[..Math.Max(0, @event.ItemKey.LastIndexOf('-'))];
+            note += " · not checked out, this runner has no clone of " + string.Join(", ", @event.MissingRepositories.Select(alias =>
+                $"{alias} (map it with `aictiq runner map {projectKey}/{alias} <path>`)"));
+        }
+        return note;
     }
 }

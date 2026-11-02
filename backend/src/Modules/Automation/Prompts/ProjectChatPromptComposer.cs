@@ -32,7 +32,8 @@ public static class ProjectChatPromptComposer
 
     public static string Compose(string agentDisplayName, string organizationSlug, string projectKey, string projectName,
         string requesterName, IReadOnlyList<ProjectChatTurn> history, string question,
-        IReadOnlyList<ProjectChatAttachment>? attachments = null, IReadOnlyList<ProjectChatAttachment>? unanswered = null)
+        IReadOnlyList<ProjectChatAttachment>? attachments = null, IReadOnlyList<ProjectChatAttachment>? unanswered = null,
+        RepositoryPrompt? repositories = null)
     {
         attachments ??= [];
         unanswered ??= [];
@@ -67,7 +68,7 @@ public static class ProjectChatPromptComposer
 
             1. Use the aictiq MCP server to read the project's items and wiki when the question is about them (search_items, get_item, search_wiki, get_page), and the checkout when it is about code.
             2. To create a standalone item or parent, call create_item with project "{projectKey}", the requested type, a title, a description and parentKey when agreed or required. Ask for a missing or ambiguous required parent before creation; preserve the requested type and follow the hierarchy in the playbook. For requested subtasks, create the parent first and use its returned key as parentKey in each create_subtask call, with the agreed titles. Keep all creation in "{projectKey}". Aictiq records {requesterName} as the reporter of both parent and subtasks. Confirm each created item's type and link it in your answer as [{projectKey}-123](/o/{organizationSlug}/p/{projectKey}/items/{projectKey}-123) with its real key, grouping subtasks under their parent. If a call fails, report the failure and the items already created; never replace subtasks with standalone tickets.{AttachInstructions(attachments.Count + unanswered.Count + history.Sum(turn => turn.Attachments?.Count ?? 0))}
-            3. Your final message is shown to {requesterName} as the answer, so make it the answer itself.
+            3. Your final message is shown to {requesterName} as the answer, so make it the answer itself.{(RepositoryPrompts.ReadOnly(repositories) is { } checkouts ? $"\n\n{checkouts}" : "")}
 
             # Playbook: Project chat
 

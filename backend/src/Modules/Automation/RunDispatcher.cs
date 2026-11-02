@@ -244,9 +244,17 @@ public sealed class RunDispatcher(
             locked = true;
         }
 
+        var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
+        var (checkouts, repositoryError) = await CheckoutsAsync(
+            organizationId, project.Id, item.Id, kind, scheduledFor, settings, playbook, previous, wave, ct);
+        if (repositoryError is not null)
+        {
+            return DispatchResult.Invalid("repositories", repositoryError);
+        }
+
         var runHarness = harness ?? playbook.Harness;
         if (previous is null && runnerId is { } requestedRunner
-            && await RunnerErrorAsync(requestedRunner, runHarness, project.Key, settings, ct) is { } runnerError)
+            && await RunnerErrorAsync(requestedRunner, runHarness, project.Key, settings, checkouts.Repositories.Count > 0, ct) is { } runnerError)
         {
             return DispatchResult.Invalid("runnerId", locked ? $"{runnerError} {AskAdminToChange}" : runnerError);
         }
@@ -262,13 +270,6 @@ public sealed class RunDispatcher(
             return DispatchResult.PlaybookNotFound();
         }
 
-        var kind = refine is not null ? RunKind.Refine : chat ? RunKind.Chat : RunKind.Implement;
-        var (checkouts, repositoryError) = await CheckoutsAsync(
-            organizationId, project.Id, item.Id, kind, scheduledFor, settings, playbook, previous, wave, ct);
-        if (repositoryError is not null)
-        {
-            return DispatchResult.Invalid("repositories", repositoryError);
-        }
         if (previous is null && runnerId is { } chosenRunner
             && (checkouts.Repositories.Count > 0 || checkouts.WorkingDirectory is not null)
             && await RepositoryRunnerErrorAsync(chosenRunner, project.Key, checkouts.Repositories, ct) is { } checkoutError)
@@ -298,11 +299,11 @@ public sealed class RunDispatcher(
         var prompt = refine is not null
             ? RefinePromptComposer.Compose(
                 agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                playbook.Name, content.Markdown, refine)
+                playbook.Name, content.Markdown, refine, checkouts.Prompt)
             : chat
                 ? ChatPromptComposer.Compose(
                     agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
-                    playbook.Name, content.Markdown, mentionPrompt!)
+                    playbook.Name, content.Markdown, mentionPrompt!, checkouts.Prompt)
                 : RunPromptComposer.Compose(
                     agent.DisplayName ?? agentUserId, item.Key, project.Key, project.Name,
                     branch, playbook.Name, content.Markdown, onDefaultBranch, mentionPrompt,
@@ -413,13 +414,20 @@ public sealed class RunDispatcher(
 
         var playbook = await FindPlaybookAsync(null, project.Id, ct);
         var harness = playbook?.Harness ?? ProjectChat.DefaultHarness;
+        var (checkouts, repositoryError) = await CheckoutsAsync(
+            organizationId, project.Id, null, RunKind.ProjectChat, null, settings, playbook, null, null, ct);
+        if (repositoryError is not null)
+        {
+            return DispatchResult.Invalid("repositories", repositoryError);
+        }
+        var several = checkouts.Repositories.Count > 0;
         // The person's assigned runner takes the question, else the project's default runner, as if
         // it were chosen in Start run. One deleted or disabled since no longer applies: the next
         // one down does, and without either any free runner takes it.
         Guid? runnerId = null;
         if (await MemberRunnerEndpoints.UsableAsync(db, project.Id, userId, ct) is { } assigned)
         {
-            if (await RunnerErrorAsync(assigned.Id, harness, project.Key, settings, ct) is { } runnerError)
+            if (await RunnerErrorAsync(assigned.Id, harness, project.Key, settings, several, ct) is { } runnerError)
             {
                 return DispatchResult.Invalid("runnerId", $"{runnerError} {AskAdminToChange}");
             }
@@ -428,11 +436,18 @@ public sealed class RunDispatcher(
         else if (settings?.DefaultRunnerId is { } defaultRunner
             && await db.Runners.AnyAsync(r => r.Id == defaultRunner && r.DeletedAt == null && r.DisabledAt == null, ct))
         {
-            if (await RunnerErrorAsync(defaultRunner, harness, project.Key, settings, ct) is { } runnerError)
+            if (await RunnerErrorAsync(defaultRunner, harness, project.Key, settings, several, ct) is { } runnerError)
             {
                 return DispatchResult.Invalid("runnerId", $"{runnerError} Change the default runner under Factory settings.");
             }
             runnerId = defaultRunner;
+        }
+
+        if (runnerId is { } chosenRunner
+            && (checkouts.Repositories.Count > 0 || checkouts.WorkingDirectory is not null)
+            && await RepositoryRunnerErrorAsync(chosenRunner, project.Key, checkouts.Repositories, ct) is { } checkoutError)
+        {
+            return DispatchResult.Invalid("runnerId", checkoutError);
         }
 
         var history = await db.ProjectChatMessages.AsNoTracking()
@@ -455,7 +470,7 @@ public sealed class RunDispatcher(
             .SelectMany(row => files[row.Id]).ToList();
         var prompt = ProjectChatPromptComposer.Compose(
             agent.DisplayName ?? agentUserId, organizationSlug,
-            project.Key, project.Name, requesterName, turns, question, attachments, unanswered);
+            project.Key, project.Name, requesterName, turns, question, attachments, unanswered, checkouts.Prompt);
 
         var now = clock.GetUtcNow();
         var run = new Run
@@ -474,6 +489,9 @@ public sealed class RunDispatcher(
             WorkOnDefaultBranch = true,
             MaxMinutes = ProjectChat.MaxMinutes,
             QueuedAt = now,
+            Repositories = checkouts.Repositories,
+            RepositoryAliases = [.. checkouts.Repositories.Select(repo => repo.Alias)],
+            WorkingDirectory = checkouts.WorkingDirectory,
         };
         db.Runs.Add(run);
         db.ProjectChatMessages.Add(new ProjectChatMessage
@@ -572,7 +590,7 @@ public sealed class RunDispatcher(
             .SingleOrDefaultAsync(row => row.ProjectId == project.Id, ct);
         Guid? runnerId = settings?.RepoSource == ProjectRepositorySource.RunnerLocal
             && builder.RunnerId is { } builderRunner
-            && await RunnerErrorAsync(builderRunner, stage.Harness, project.Key, settings, ct) is null
+            && await RunnerErrorAsync(builderRunner, stage.Harness, project.Key, settings, builder.Repositories.Count > 0, ct) is null
                 ? builderRunner
                 : null;
 
@@ -620,8 +638,8 @@ public sealed class RunDispatcher(
             ChainPlaybookId = chain.Id,
             StageIndex = stageIndex,
             // A stage checks the builder's work where the builder did it.
-            Repositories = builder.Repositories,
-            RepositoryAliases = builder.RepositoryAliases,
+            Repositories = builder.CheckedOutRepositories,
+            RepositoryAliases = [.. builder.CheckedOutRepositories.Select(repo => repo.Alias)],
             WorkingDirectory = builder.WorkingDirectory,
         };
         db.Runs.Add(run);
@@ -653,29 +671,35 @@ public sealed class RunDispatcher(
     }
 
     /// <summary>
-    /// The checkouts of a new run (<see cref="RepositoryPlans"/>). Only implement runs started now
-    /// use several repositories: refine, chat, project-chat and scheduled runs work in the primary
-    /// one, and so does every run while the project's switch is off or its plan does not allow it.
-    /// A follow-up or rework works where its earlier run did.
+    /// The checkouts of a new run (<see cref="RepositoryPlans"/>). While the project's switch is on
+    /// and its plan allows it, refine, chat, project-chat and implement runs check out every
+    /// repository of the project and the agent picks what it needs; an implement run's ordering
+    /// labels and playbook waits still split them into waves. Scheduled runs, and every run while
+    /// multiple repositories are not in force, work in the primary one. A follow-up or rework
+    /// works where its earlier run did.
     /// </summary>
     private async Task<(RunCheckouts Checkouts, string? Error)> CheckoutsAsync(
-        Guid organizationId, Guid projectId, Guid itemId, RunKind kind, DateTimeOffset? scheduledFor,
-        ProjectFactorySettings? settings, Playbook playbook, Run? previous, RepositoryWaveDispatch? wave, CancellationToken ct)
+        Guid organizationId, Guid projectId, Guid? itemId, RunKind kind, DateTimeOffset? scheduledFor,
+        ProjectFactorySettings? settings, Playbook? playbook, Run? previous, RepositoryWaveDispatch? wave, CancellationToken ct)
     {
-        if (kind != RunKind.Implement || scheduledFor is not null || !await multiRepo.IsActiveAsync(organizationId, settings, ct))
+        if (kind is not (RunKind.Implement or RunKind.Refine or RunKind.Chat or RunKind.ProjectChat)
+            || scheduledFor is not null || !await multiRepo.IsActiveAsync(organizationId, settings, ct))
         {
             return (RunCheckouts.None, null);
         }
         if (previous is not null)
         {
-            return (new RunCheckouts(previous.Repositories, previous.WorkingDirectory, previous.RepositoryPlan,
-                previous.RepositoryRootRunId, PromptOf(previous.Repositories, previous.WorkingDirectory, previous.RepositoryPlan,
-                    previous.RepositoryAliases)), null);
+            var kept = previous.CheckedOutRepositories;
+            return (new RunCheckouts(kept, previous.WorkingDirectory, previous.RepositoryPlan,
+                previous.RepositoryRootRunId, PromptOf(kept, previous.WorkingDirectory, previous.RepositoryPlan,
+                    [.. kept.Select(repo => repo.Alias)], [])), null);
         }
 
+        var additional = await multiRepo.AdditionalAsync(projectId, ct);
         var primary = RepositoryPlans.PrimaryAlias(settings);
         List<RepositoryStep>? plan;
         IReadOnlyList<RepositoryStep> stepsNow;
+        List<string> focus = [];
         if (wave is not null)
         {
             plan = wave.Plan;
@@ -683,36 +707,43 @@ public sealed class RunDispatcher(
         }
         else
         {
-            plan = RepositoryPlans.Resolve(playbook.RepositorySteps, await labels.ItemLabelNamesAsync(itemId, ct));
-            if (plan is null)
+            var aliases = additional.Select(repo => repo.Alias).Prepend(primary).Distinct(StringComparer.Ordinal).ToList();
+            var labelNames = itemId is { } id ? await labels.ItemLabelNamesAsync(id, ct) : [];
+            (var steps, plan, focus, var unknownStep) = RepositoryPlans.AllRepositories(
+                aliases, playbook?.RepositorySteps ?? [], labelNames, ordered: kind == RunKind.Implement);
+            if (unknownStep is not null)
             {
-                return (settings!.PrimaryWorkingDirectory is { } directory
-                    ? new RunCheckouts([], directory, null, null, PromptOf([], directory, null, []))
-                    : RunCheckouts.None, null);
+                return (RunCheckouts.None, UnknownRepository(unknownStep));
             }
-            stepsNow = RepositoryPlans.NextWave(plan, new HashSet<string>(StringComparer.Ordinal));
+            stepsNow = plan is null ? steps : RepositoryPlans.NextWave(plan, new HashSet<string>(StringComparer.Ordinal));
         }
 
         // Only the primary, in a sub-package or not: the single checkout, as always.
-        if (wave is null && RepositoryPlans.IsPrimaryOnly(plan, primary))
+        if (wave is null && RepositoryPlans.IsPrimaryOnly(stepsNow, primary) && plan is null)
         {
-            var directory = plan[0].WorkingDirectory ?? settings!.PrimaryWorkingDirectory;
+            var directory = stepsNow[0].WorkingDirectory ?? settings!.PrimaryWorkingDirectory;
             return (directory is null
                 ? RunCheckouts.None
-                : new RunCheckouts([], directory, null, null, PromptOf([], directory, null, [])), null);
+                : new RunCheckouts([], directory, null, null, PromptOf([], directory, null, [], [])), null);
         }
 
-        var (repositories, unknown) = RepositoryPlans.Checkouts(stepsNow, settings, await multiRepo.AdditionalAsync(projectId, ct));
+        var (repositories, unknown) = RepositoryPlans.Checkouts(stepsNow, settings, additional);
         if (unknown is not null)
         {
-            return (RunCheckouts.None,
-                $"The ticket or playbook names the repository {unknown}, which is not one of this project's. Check its repo: labels, the playbook's repository steps, or the project's repositories under Factory settings.");
+            return (RunCheckouts.None, UnknownRepository(unknown));
         }
-        var aliases = repositories.Select(repo => repo.Alias).ToArray();
-        return (new RunCheckouts(repositories, null, plan, wave?.RootRunId, PromptOf(repositories, null, plan, aliases)), null);
+        var checkedOut = repositories.Select(repo => repo.Alias).ToArray();
+        return (new RunCheckouts(repositories, null, plan, wave?.RootRunId, PromptOf(repositories, null, plan, checkedOut, focus)), null);
     }
 
-    /// <summary>Why the chosen runner cannot take a run with several checkouts or a sub-package, or null.</summary>
+    private static string UnknownRepository(string alias) =>
+        $"The ticket or playbook names the repository {alias}, which is not one of this project's. Check its repo: ordering labels, the playbook's repository steps, or the project's repositories under Factory settings.";
+
+    /// <summary>
+    /// Why the chosen runner cannot take a run with several checkouts or a sub-package, or null:
+    /// an older CLI that checks out one repository, or none of the run's local checkouts. A runner
+    /// that has only some of them starts the run with those.
+    /// </summary>
     private async Task<string?> RepositoryRunnerErrorAsync(
         Guid runnerId, string projectKey, IReadOnlyList<RunRepository> repositories, CancellationToken ct)
     {
@@ -721,13 +752,14 @@ public sealed class RunDispatcher(
         {
             return $"{runner?.Name ?? "This runner"} runs an older Aictiq CLI that checks out one repository. Update it, or choose another runner.";
         }
-        return RepositoryRouting.MissingRepository(capabilities, projectKey, repositories) is { } alias
-            ? $"{runner.Name} has no local repository {alias}: map it there with `aictiq runner map {projectKey}/{alias} <path>`, or choose another runner."
+        return repositories.Count > 0 && !RepositoryRouting.CanStart(capabilities, projectKey, repositories)
+            ? $"{runner.Name} has none of this project's repositories: map them there with `{RepositoryRouting.MapCommand(projectKey, repositories[0].Alias)}`, or choose another runner."
             : null;
     }
 
     private static RepositoryPrompt? PromptOf(
-        IReadOnlyList<RunRepository> repositories, string? workingDirectory, List<RepositoryStep>? plan, IReadOnlyList<string> aliases)
+        IReadOnlyList<RunRepository> repositories, string? workingDirectory, List<RepositoryStep>? plan, IReadOnlyList<string> aliases,
+        IReadOnlyList<string> focus)
     {
         if (repositories.Count == 0)
         {
@@ -737,7 +769,10 @@ public sealed class RunDispatcher(
         var index = waves.FindIndex(wave => wave.Any(aliases.Contains));
         var done = index <= 0 ? [] : waves.Take(index).SelectMany(wave => wave).ToList();
         var later = index < 0 ? [] : waves.Skip(index + 1).SelectMany(wave => wave).ToList();
-        return new RepositoryPrompt(repositories, null, Math.Max(index, 0) + 1, Math.Max(waves.Count, 1), done, later);
+        return new RepositoryPrompt(repositories, null, Math.Max(index, 0) + 1, Math.Max(waves.Count, 1), done, later)
+        {
+            Focus = [.. focus.Where(aliases.Contains)],
+        };
     }
 
     /// <summary>The plan's steps, grouped in the order they run.</summary>
@@ -855,8 +890,8 @@ public sealed class RunDispatcher(
             StageIndex = previous.StageIndex,
             ReworkOfRunId = previous.ReworkOfRunId,
             // The kept workspace has these checkouts, and the graph goes on from this run.
-            Repositories = previous.Repositories,
-            RepositoryAliases = previous.RepositoryAliases,
+            Repositories = previous.CheckedOutRepositories,
+            RepositoryAliases = [.. previous.CheckedOutRepositories.Select(repo => repo.Alias)],
             WorkingDirectory = previous.WorkingDirectory,
             RepositoryPlan = previous.RepositoryPlan,
             RepositoryRootRunId = previous.RepositoryRootRunId,
@@ -921,10 +956,12 @@ public sealed class RunDispatcher(
     /// <summary>
     /// A requested runner must be one this organization still has, enabled, and - once it has
     /// reported its capabilities - able to run the playbook's harness. Being offline is fine:
-    /// the run waits for it, as a run waits today when no runner is online.
+    /// the run waits for it, as a run waits today when no runner is online. A run with
+    /// <paramref name="severalCheckouts"/> is judged by its checkouts instead of the project's
+    /// primary repository (<see cref="RepositoryRunnerErrorAsync"/>).
     /// </summary>
     private async Task<string?> RunnerErrorAsync(
-        Guid runnerId, string harness, string projectKey, ProjectFactorySettings? settings, CancellationToken ct)
+        Guid runnerId, string harness, string projectKey, ProjectFactorySettings? settings, bool severalCheckouts, CancellationToken ct)
     {
         var runner = await db.Runners.AsNoTracking()
             .SingleOrDefaultAsync(r => r.Id == runnerId && r.DeletedAt == null, ct);
@@ -941,7 +978,8 @@ public sealed class RunDispatcher(
         {
             return $"{runner.Name} does not report {harness}, which this run uses.";
         }
-        if (!new ProjectServing(projectKey, settings?.LocalPathHint, RunnerProjects.NeedsLocalRepository(settings))
+        if (!severalCheckouts
+            && !new ProjectServing(projectKey, settings?.LocalPathHint, RunnerProjects.NeedsLocalRepository(settings))
                 .Serves(runner.Capabilities))
         {
             return $"{runner.Name} has no local repository for {projectKey}: map it there with `aictiq runner map {projectKey} <path>`, or choose another runner.";

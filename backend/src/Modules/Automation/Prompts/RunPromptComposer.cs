@@ -52,12 +52,7 @@ public static class RunPromptComposer
                 This project is a monorepo. You start in `{repositories.WorkingDirectory}` inside the checkout; the rest of the repository is there too. Keep your changes inside `{repositories.WorkingDirectory}` unless the ticket says otherwise.
                 """;
         }
-        var lines = string.Join("\n", repositories.Checkouts.Select(repo =>
-        {
-            var where = repo.WorkingDirectory is { } directory ? $"; work in `repo/{repo.Alias}/{directory}`" : "";
-            var what = repo.RepoFullName ?? repo.LocalPathHint ?? "the runner's local clone";
-            return $"- `{repo.Alias}`: `repo/{repo.Alias}/` ({what}, default branch {repo.DefaultBranch}){where}";
-        }));
+        var lines = RepositoryPrompts.Lines(repositories.Checkouts, "work in");
         var step = repositories.Steps > 1
             ? $"\nThis run is step {repositories.Step} of {repositories.Steps} of the ticket's repository plan."
               + (repositories.Done.Count > 0 ? $" Already done: {string.Join(", ", repositories.Done)}." : "")
@@ -71,8 +66,8 @@ public static class RunPromptComposer
 
             This run has more than one checkout. Each repository is its own git repository under `repo/`:
             {lines}
-            {step}
-            Change only the repositories listed here. {delivery}
+            {step}{RepositoryPrompts.FocusLine(repositories.Focus)}
+            Change only the repositories the work needs, and only those listed here: a repository you leave unchanged gets no pull request. {delivery}
             """;
     }
 
@@ -162,4 +157,8 @@ public sealed record ReworkPrompt(
 /// <param name="Later">Repositories later steps will handle.</param>
 public sealed record RepositoryPrompt(
     IReadOnlyList<Domain.RunRepository> Checkouts, string? WorkingDirectory, int Step, int Steps,
-    IReadOnlyList<string> Done, IReadOnlyList<string> Later);
+    IReadOnlyList<string> Done, IReadOnlyList<string> Later)
+{
+    /// <summary>The checkouts the ticket's plain <c>repo:&lt;alias&gt;</c> labels point at: where to look first.</summary>
+    public IReadOnlyList<string> Focus { get; init; } = [];
+}
