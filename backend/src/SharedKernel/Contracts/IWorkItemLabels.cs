@@ -1,13 +1,17 @@
 namespace Aictiq.SharedKernel.Contracts;
 
 /// <summary>
-/// Label questions for modules that must not reach into WorkItems' own tables - an
+/// Label operations for modules that must not reach into WorkItems' own tables - an
 /// automation rule may require a label on the item it watches, and the firing
 /// handler needs to ask whether one item carries one label without joining across the
 /// module boundary.
 /// </summary>
 public interface IWorkItemLabels
 {
+    /// <summary>Create missing project labels, preserving existing labels with the same case-insensitive name.</summary>
+    Task EnsureProjectLabelsAsync(
+        Guid projectId, IReadOnlyCollection<string> names, CancellationToken cancellationToken = default);
+
     Task<bool> ItemHasLabelAsync(
         Guid itemId, Guid labelId, CancellationToken cancellationToken = default);
 
@@ -30,6 +34,10 @@ public interface IWorkItemLabels
 /// <summary>No WorkItems module means there is nothing to check a label against; fail closed.</summary>
 public sealed class NullWorkItemLabels : IWorkItemLabels
 {
+    public Task EnsureProjectLabelsAsync(
+        Guid projectId, IReadOnlyCollection<string> names, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
     public Task<bool> ItemHasLabelAsync(
         Guid itemId, Guid labelId, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);

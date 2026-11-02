@@ -38,14 +38,18 @@ public sealed class MultiRepoTests(PostgresFixture postgres, GarageFixture garag
     private async Task<FactorySettingsView> SettingsAsync() =>
         (await Owner.GetFromJsonAsync<FactorySettingsView>(SettingsUrl, ApiTestContext.Json, Ct))!;
 
+    private async Task<LabelView[]> LabelsAsync() =>
+        (await Owner.GetFromJsonAsync<LabelView[]>($"{ProjectBase}/labels", ApiTestContext.Json, Ct))!;
+
     private async Task<HttpResponseMessage> PutAsync(
-        bool? enabled = null, IReadOnlyList<ProjectRepositoryView>? additional = null, string? primaryWorkingDirectory = null)
+        bool? enabled = null, IReadOnlyList<ProjectRepositoryView>? additional = null, string? primaryWorkingDirectory = null,
+        string? primaryAlias = null)
     {
         var current = await SettingsAsync();
         return await Owner.PutAsJsonAsync(SettingsUrl,
             new UpdateFactorySettingsRequest(current.RepoSource, current.RepoFullName, current.DefaultBranch,
                 current.LocalPathHint, current.DefaultAgentId, current.Version, current.DefaultRunnerId,
-                enabled, null, primaryWorkingDirectory, additional),
+                enabled, primaryAlias, primaryWorkingDirectory, additional),
             ApiTestContext.Json, Ct);
     }
 
@@ -74,9 +78,13 @@ public sealed class MultiRepoTests(PostgresFixture postgres, GarageFixture garag
 
     private async Task LabelAsync(string itemKey, string name)
     {
-        var created = await Owner.PostAsJsonAsync($"{ProjectBase}/labels", new CreateLabelRequest(name, null, null, null), ApiTestContext.Json, Ct);
-        Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync(Ct));
-        var label = (await created.Content.ReadFromJsonAsync<LabelView>(ApiTestContext.Json, Ct))!;
+        var label = (await LabelsAsync()).SingleOrDefault(label => string.Equals(label.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (label is null)
+        {
+            var created = await Owner.PostAsJsonAsync($"{ProjectBase}/labels", new CreateLabelRequest(name, null, null, null), ApiTestContext.Json, Ct);
+            Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync(Ct));
+            label = (await created.Content.ReadFromJsonAsync<LabelView>(ApiTestContext.Json, Ct))!;
+        }
         (await Owner.PutAsync($"/api/v1/orgs/{Slug}/items/{itemKey}/labels/{label.Id}", null, Ct)).EnsureSuccessStatusCode();
     }
 
@@ -182,6 +190,78 @@ public sealed class MultiRepoTests(PostgresFixture postgres, GarageFixture garag
         var plain = await PutAsync();
         Assert.True(plain.IsSuccessStatusCode, await plain.Content.ReadAsStringAsync(Ct));
         Assert.False((await SettingsAsync()).MultiRepoEnabled);
+        Assert.Empty(await LabelsAsync());
+    }
+
+    [Fact]
+    public async Task saving_multiple_repositories_creates_only_the_missing_plain_repo_labels_and_resaving_preserves_them()
+    {
+        var created = await Owner.PostAsJsonAsync($"{ProjectBase}/labels",
+            new CreateLabelRequest("Repo:API", "#3B82F6", "Existing API label", "repositories"), ApiTestContext.Json, Ct);
+        created.EnsureSuccessStatusCode();
+        var existing = (await created.Content.ReadFromJsonAsync<LabelView>(ApiTestContext.Json, Ct))!;
+
+        await SeedPaidSubscriptionAsync();
+        (await PutAsync(true,
+            [new ProjectRepositoryView("API", 1, null, "/srv/api", null, null),
+             new ProjectRepositoryView("frontend", 1, null, "/srv/frontend", null, null)])).EnsureSuccessStatusCode();
+
+        var labels = await LabelsAsync();
+        Assert.Equal(["repo:acme", "repo:api", "repo:frontend"],
+            labels.Select(label => label.Name.ToLowerInvariant()).OrderBy(name => name));
+        Assert.Equal(existing, Assert.Single(labels, label => label.Id == existing.Id));
+        await LabelAsync(ItemKey, "repo:acme");
+        var attached = await Owner.GetFromJsonAsync<WorkItemView>(
+            $"/api/v1/orgs/{Slug}/items/{ItemKey}", ApiTestContext.Json, Ct);
+        // Labels can be selected for items as soon as the settings save completes.
+        Assert.Contains(attached!.Labels, label => label.Name == "repo:acme");
+
+        (await PutAsync(true,
+            [new ProjectRepositoryView("api", 1, null, "/srv/api", null, null),
+             new ProjectRepositoryView("frontend", 1, null, "/srv/frontend", null, null)])).EnsureSuccessStatusCode();
+        var savedAgain = await LabelsAsync();
+        Assert.Equal(labels.Select(label => label.Id).Order(), savedAgain.Select(label => label.Id).Order());
+        Assert.Equal(existing, Assert.Single(savedAgain, label => label.Id == existing.Id));
+    }
+
+    [Fact]
+    public async Task renaming_or_removing_repositories_keeps_old_labels_and_their_item_assignments()
+    {
+        await EnableAsync();
+        await LabelAsync(ItemKey, "repo:api");
+        var oldLabels = await LabelsAsync();
+
+        (await PutAsync(additional: [], primaryAlias: "core")).EnsureSuccessStatusCode();
+
+        var labels = await LabelsAsync();
+        Assert.Equal(["repo:acme", "repo:api", "repo:core"], labels.Select(label => label.Name).OrderBy(name => name));
+        Assert.All(oldLabels, old => Assert.Contains(labels, label => label.Id == old.Id));
+        Assert.Equal(1, Assert.Single(labels, label => label.Name == "repo:api").ItemCount);
+    }
+
+    [Fact]
+    public async Task saving_repository_configuration_while_multiple_repositories_are_off_creates_no_labels()
+    {
+        await SeedPaidSubscriptionAsync();
+        (await PutAsync(false, [new ProjectRepositoryView("api", 1, null, "/srv/api", null, null)])).EnsureSuccessStatusCode();
+        (await PutAsync()).EnsureSuccessStatusCode();
+
+        Assert.False((await SettingsAsync()).MultiRepoEnabled);
+        Assert.Empty(await LabelsAsync());
+    }
+
+    [Fact]
+    public async Task a_downgraded_project_does_not_recreate_missing_repository_labels_when_saving_other_settings()
+    {
+        await EnableAsync();
+        foreach (var label in await LabelsAsync())
+            (await Owner.DeleteAsync($"{ProjectBase}/labels/{label.Id}", Ct)).EnsureSuccessStatusCode();
+        await ExecuteSqlAsync($"UPDATE billing.subscriptions SET plan = 'free' WHERE organization_id = '{OrganizationId}'");
+
+        (await PutAsync()).EnsureSuccessStatusCode();
+
+        Assert.True((await SettingsAsync()).MultiRepoEnabled);
+        Assert.Empty(await LabelsAsync());
     }
 
     [Fact]
@@ -555,5 +635,6 @@ public sealed class MultiRepoSelfHostedTests(PostgresFixture postgres, GarageFix
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         using var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync(Ct));
         Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("multiRepoEnabled", out _));
+        Assert.Empty((await Owner.GetFromJsonAsync<LabelView[]>($"{ProjectBase}/labels", ApiTestContext.Json, Ct))!);
     }
 }

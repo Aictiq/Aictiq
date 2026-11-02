@@ -447,7 +447,7 @@ public static class PlaybookEndpoints
     private static async Task<IResult> PutSettingsAsync(
         UpdateFactorySettingsRequest request, HttpContext http, AutomationDbContext db,
         ICurrentTenant tenant, IProjectAccess access, IAgentIdentities agents, IPlanLimits plans,
-        TimeProvider clock, CancellationToken ct)
+        IWorkItemLabels labels, TimeProvider clock, CancellationToken ct)
     {
         var projectId = http.ResolvedProjectId()!.Value;
         var errors = new Dictionary<string, string[]>();
@@ -558,8 +558,11 @@ public static class PlaybookEndpoints
         row.UpdatedAt = clock.GetUtcNow();
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
-        await transaction.CommitAsync(ct);
         var view = await plans.GetMultiRepoAvailabilityAsync(tenant.OrganizationId!.Value, ct);
+        if (row.MultiRepoEnabled && view == MultiRepoAvailability.Available)
+            await labels.EnsureProjectLabelsAsync(projectId,
+                [$"repo:{RepositoryPlans.PrimaryAlias(row)}", .. existing.Select(repo => $"repo:{repo.Alias}")], ct);
+        await transaction.CommitAsync(ct);
         return Results.Ok(ToView(row, view, existing));
     }
 
