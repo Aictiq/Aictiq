@@ -1,11 +1,28 @@
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.SharedKernel.Contracts;
+using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aictiq.Modules.WorkItems;
 
-internal sealed class WorkItemLabelsAccess(WorkItemsDbContext db) : IWorkItemLabels
+internal sealed class WorkItemLabelsAccess(WorkItemsDbContext db, ICurrentTenant tenant) : IWorkItemLabels
 {
+    public async Task EnsureProjectLabelsAsync(
+        Guid projectId, IReadOnlyCollection<string> names, CancellationToken cancellationToken = default)
+    {
+        var organizationId = tenant.OrganizationId!.Value;
+        foreach (var name in names.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // The expression index also handles a concurrent label-picker create or settings save.
+            // DO NOTHING keeps the existing label's spelling, metadata and item associations.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO work.labels (id, organization_id, project_id, name)
+                VALUES ({Guid.CreateVersion7()}, {organizationId}, {projectId}, {name})
+                ON CONFLICT (organization_id, project_id, lower(name)) DO NOTHING
+                """, cancellationToken);
+        }
+    }
+
     public Task<bool> ItemHasLabelAsync(Guid itemId, Guid labelId, CancellationToken cancellationToken = default) =>
         db.ItemLabels.AsNoTracking().AnyAsync(x => x.ItemId == itemId && x.LabelId == labelId, cancellationToken);
 
