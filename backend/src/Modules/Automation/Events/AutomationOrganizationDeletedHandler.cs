@@ -36,6 +36,7 @@ public sealed class AutomationOrganizationDeletedHandler(
         await db.RunMentions.Where(m => m.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.ChainSteps.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectChatMessages.Where(m => m.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
+        await db.MemberRunners.Where(m => m.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.PlaybookStages.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.RefinementSettings.Where(s => s.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);
         await db.Playbooks.Where(p => p.OrganizationId == @event.OrganizationId).ExecuteDeleteAsync(cancellationToken);

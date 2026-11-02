@@ -6,6 +6,13 @@ import { useRouter } from 'vue-router'
 import { listMembers } from '@/api/members'
 import { avatarUrl } from '@/api/profile'
 import {
+  listMemberRunners,
+  listRunnerChoices,
+  setMemberRunner,
+  type MemberRunner,
+  type RunnerChoice,
+} from '@/api/runners'
+import {
   hasProjectRole,
   listProjectMembers,
   projectRoles,
@@ -33,6 +40,9 @@ import { useSessionStore } from '@/stores/session'
  * organization - an owner or admin, or a project everyone in the organization can see.
  * There is nothing to remove in the second case, only a role to raise, and giving such a
  * person an explicit membership is exactly how that is done.
+ *
+ * Admins also see each member's **runner**: one an admin assigns here takes every run that
+ * member starts, and their run pickers lock to it. Admins themselves are never locked.
  */
 const project = useProjectScope()
 const session = useSessionStore()
@@ -48,11 +58,29 @@ const loading = ref(true)
 const failed = ref(false)
 const loadingCandidates = ref(false)
 const busyUserId = ref<string | null>(null)
+const runners = ref<RunnerChoice[]>([])
+/** By user id. */
+const memberRunners = ref<Record<string, MemberRunner>>({})
 
 const isAdmin = computed(() => hasProjectRole(record.value.role, 'admin'))
 const isArchived = computed(() => record.value.isArchived)
 /** An archived project answers 409 to every write, so none of them are offered. */
 const mayManage = computed(() => isAdmin.value && !isArchived.value)
+
+/** Only an admin sees, or may change, who runs where. */
+const showRunners = computed(() => isAdmin.value)
+
+/** "" is "Not set". */
+function runnerOf(member: ProjectMember) {
+  return memberRunners.value[member.userId]?.runnerId ?? ''
+}
+
+/** The assigned runner when the roster no longer offers it: disabled since, or deleted. */
+function unlistedRunner(member: ProjectMember) {
+  const assigned = memberRunners.value[member.userId]
+  if (!assigned || runners.value.some((runner) => runner.id === assigned.runnerId)) return null
+  return `${assigned.runnerName ?? 'Deleted runner'} (${assigned.runnerName ? 'disabled' : 'gone'})`
+}
 
 /**
  * The whole organization is offered, because an implicit member is a legitimate pick:
@@ -72,12 +100,50 @@ async function loadMembers() {
   loading.value = true
   failed.value = false
   try {
-    members.value = await listProjectMembers(project.slug.value, project.projectKey.value)
+    const [loaded] = await Promise.all([
+      listProjectMembers(project.slug.value, project.projectKey.value),
+      loadRunners(),
+    ])
+    members.value = loaded
   } catch (error) {
     failed.value = true
     toast.error(error)
   } finally {
     loading.value = false
+  }
+}
+
+/** The runner column is an admin's; nobody else is asked for it. */
+async function loadRunners() {
+  if (!showRunners.value) return
+  const [choices, assigned] = await Promise.all([
+    // Without the roster the column still shows what is assigned.
+    listRunnerChoices(project.slug.value).catch(() => [] as RunnerChoice[]),
+    listMemberRunners(project.slug.value, project.projectKey.value).catch(
+      () => [] as MemberRunner[],
+    ),
+  ])
+  runners.value = choices
+  memberRunners.value = Object.fromEntries(assigned.map((row) => [row.userId, row]))
+}
+
+async function setRunner(member: ProjectMember, runnerId: string) {
+  busyUserId.value = member.userId
+  try {
+    const saved = await setMemberRunner(
+      project.slug.value,
+      project.projectKey.value,
+      member.userId,
+      runnerId || null,
+    )
+    const next = { ...memberRunners.value }
+    if (saved) next[member.userId] = saved
+    else delete next[member.userId]
+    memberRunners.value = next
+  } catch (error) {
+    toast.error(error)
+  } finally {
+    busyUserId.value = null
   }
 }
 
@@ -164,7 +230,11 @@ function pictureOf(member: ProjectMember) {
 </script>
 
 <template>
-  <SettingsSection wide title="People" description="Who can open this project, and what they may do in it.">
+  <SettingsSection
+    wide
+    title="People"
+    description="Who can open this project, and what they may do in it."
+  >
     <div v-if="mayManage" class="max-w-sm pb-4">
       <UserSelect
         :model-value="null"
@@ -178,8 +248,8 @@ function pictureOf(member: ProjectMember) {
     </div>
 
     <p v-else-if="isAdmin && isArchived" class="text-muted-foreground pb-4 text-xs">
-      This project is archived, so its roster is read-only. Restore it under General to change
-      who is on it.
+      This project is archived, so its roster is read-only. Restore it under General to change who
+      is on it.
     </p>
 
     <UiPageState v-if="loading" state="loading" />
@@ -205,6 +275,7 @@ function pictureOf(member: ProjectMember) {
         <tr class="border-border border-b">
           <th scope="col" class="font-label px-3 py-2 text-left">Person</th>
           <th scope="col" class="font-label px-3 py-2 text-left">Role</th>
+          <th v-if="showRunners" scope="col" class="font-label px-3 py-2 text-left">Runner</th>
           <th scope="col" class="w-10 px-3 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -241,6 +312,30 @@ function pictureOf(member: ProjectMember) {
               Here {{ implicitReason(member) }}
             </p>
           </td>
+          <td v-if="showRunners" class="px-3 py-2">
+            <select
+              :value="runnerOf(member)"
+              :disabled="!mayManage || busyUserId === member.userId"
+              :aria-label="`Runner for ${member.displayName} on this project`"
+              data-testid="member-runner"
+              class="border-input bg-background h-8 w-full max-w-48 rounded-md border px-2 text-sm disabled:opacity-50"
+              @change="setRunner(member, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">Not set</option>
+              <option v-if="unlistedRunner(member)" :value="runnerOf(member)">
+                {{ unlistedRunner(member) }}
+              </option>
+              <option v-for="runner in runners" :key="runner.id" :value="runner.id">
+                {{ runner.name }}{{ runner.isOnline ? '' : ' (offline)' }}
+              </option>
+            </select>
+            <p
+              v-if="runnerOf(member) && member.role === 'admin'"
+              class="text-muted-foreground mt-1 text-[11px]"
+            >
+              Preselected only: admins may pick any runner
+            </p>
+          </td>
           <td class="px-3 py-2 text-right">
             <Loader2
               v-if="busyUserId === member.userId"
@@ -267,8 +362,12 @@ function pictureOf(member: ProjectMember) {
 
     <p v-if="!loading && !failed && members.length > 0" class="text-muted-foreground pt-3 text-xs">
       Someone here without a membership of their own - an owner or admin of the organization, or
-      everyone at once while the project is organization-visible - cannot be removed from it.
-      Adding them explicitly is how their role is raised.
+      everyone at once while the project is organization-visible - cannot be removed from it. Adding
+      them explicitly is how their role is raised.
+      <template v-if="showRunners">
+        A member with a runner runs every chat, refine and Hand to agent run on it and cannot pick
+        another; with none, their runs go to the runner they pick or the project's default.
+      </template>
     </p>
   </SettingsSection>
 </template>

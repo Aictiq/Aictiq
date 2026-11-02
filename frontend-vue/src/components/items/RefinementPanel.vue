@@ -17,7 +17,7 @@ import {
   refineItem,
   type RefineBody,
 } from '@/api/refinement'
-import { listRunnerChoices, type RunnerChoice } from '@/api/runners'
+import { getMyRunner, listRunnerChoices, type MyRunner, type RunnerChoice } from '@/api/runners'
 import RefineRunPicker from '@/components/items/RefineRunPicker.vue'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
@@ -79,6 +79,18 @@ const runnerChoices = useQuery({
   queryFn: () => listRunnerChoices(props.slug).catch(() => [] as RunnerChoice[]),
   enabled: canRefine,
 })
+// The runner a project admin assigned to the caller: locked to it, or for an admin preselected.
+const myRunner = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'my-runner']),
+  queryFn: () => getMyRunner(props.slug, props.projectKey).catch(() => null as MyRunner | null),
+  enabled: canRefine,
+})
+const lockedRunner = computed(() => {
+  const mine = myRunner.data.value
+  return mine?.locked && mine.runnerId
+    ? { id: mine.runnerId, name: mine.runnerName ?? 'Assigned runner' }
+    : null
+})
 // The project's default runner, preselected when nothing is remembered.
 const factorySettings = useQuery({
   queryKey: computed(() => [props.slug, props.projectKey, 'factory-settings']),
@@ -110,22 +122,32 @@ watch(
     () => playbooks.data.value,
     () => runnerChoices.data.value,
     () => factorySettings.data.value,
+    () => myRunner.data.value,
     choiceReady,
   ],
-  ([projectPlaybooks, choices, projectSettings, ready]) => {
-    if (ready || !projectPlaybooks || !choices || projectSettings === undefined) return
+  ([projectPlaybooks, choices, projectSettings, mine, ready]) => {
+    if (
+      ready ||
+      !projectPlaybooks ||
+      !choices ||
+      projectSettings === undefined ||
+      mine === undefined
+    )
+      return
     // The choice this project used last, if it still names things that exist and fit.
     const remembered = readRefineRunChoice(props.projectKey)
     harness.value =
       remembered?.harness && (playbookHarnesses as readonly string[]).includes(remembered.harness)
         ? remembered.harness
         : playbookHarness.value
-    runnerId.value = preselectedRunnerId(
-      choices,
-      harness.value,
-      remembered?.runnerId,
-      projectSettings?.defaultRunnerId,
-    )
+    runnerId.value =
+      lockedRunner.value?.id ??
+      preselectedRunnerId(
+        choices,
+        harness.value,
+        remembered?.runnerId,
+        mine?.runnerId ?? projectSettings?.defaultRunnerId,
+      )
     choiceReady.value = true
   },
   { immediate: true },
@@ -133,6 +155,7 @@ watch(
 
 // Another harness may rule the chosen runner out.
 watch(harness, (chosen) => {
+  if (lockedRunner.value) return
   const runner = runners.value.find((r) => r.id === runnerId.value)
   if (runner && !runnerCanRun(runner, chosen)) runnerId.value = null
 })
@@ -165,7 +188,7 @@ async function refine(body: RefineBody = {}) {
   try {
     // One runner is no choice; the run goes to it as to any free runner.
     const choice = {
-      runnerId: runners.value.length > 1 ? runnerId.value : null,
+      runnerId: lockedRunner.value?.id ?? (runners.value.length > 1 ? runnerId.value : null),
       harness: harness.value,
     }
     await refineItem(props.slug, props.item.key, { ...body, ...choice })
@@ -284,6 +307,7 @@ async function confirm() {
         v-model:runner-id="runnerId"
         v-model:harness="harness"
         :runners="runners"
+        :locked="lockedRunner"
         :disabled="working !== null"
       />
       <div class="flex flex-wrap gap-2">
@@ -333,6 +357,7 @@ async function confirm() {
         v-model:runner-id="runnerId"
         v-model:harness="harness"
         :runners="runners"
+        :locked="lockedRunner"
         :disabled="working !== null"
       />
       <p v-if="dirty" class="text-muted-foreground text-xs">Save your edits before confirming.</p>
@@ -379,6 +404,7 @@ async function confirm() {
       v-model:runner-id="runnerId"
       v-model:harness="harness"
       :runners="runners"
+      :locked="lockedRunner"
       :disabled="working !== null"
     />
     <Button

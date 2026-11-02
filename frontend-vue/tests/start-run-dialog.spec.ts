@@ -72,8 +72,26 @@ const agents = [
 ]
 
 const members = [
-  { userId: 'a1', displayName: 'claude-dev', email: null, avatarKey: null, isAgent: true, role: 'member', isImplicit: false, addedAt: null },
-  { userId: 'a2', displayName: 'codex-dev', email: null, avatarKey: null, isAgent: true, role: 'member', isImplicit: false, addedAt: null },
+  {
+    userId: 'a1',
+    displayName: 'claude-dev',
+    email: null,
+    avatarKey: null,
+    isAgent: true,
+    role: 'member',
+    isImplicit: false,
+    addedAt: null,
+  },
+  {
+    userId: 'a2',
+    displayName: 'codex-dev',
+    email: null,
+    avatarKey: null,
+    isAgent: true,
+    role: 'member',
+    isImplicit: false,
+    addedAt: null,
+  },
 ]
 
 function stubFetch(routes: Record<string, unknown>) {
@@ -193,18 +211,24 @@ describe('StartRunDialog', () => {
     wrapper.unmount()
   })
 
-  it.each(['disabled', 'outside-project'])('ignores an organization default that is %s', async (reason) => {
-    stubFetch({
-      '/playbooks': playbooks,
-      '/agents': agents.map((agent) => ({ ...agent, isDefault: agent.userId === (reason === 'disabled' ? 'a3' : 'a2') })),
-      '/factory-settings': { defaultAgentId: null },
-      '/members': reason === 'outside-project' ? [members[0]] : members,
-    })
+  it.each(['disabled', 'outside-project'])(
+    'ignores an organization default that is %s',
+    async (reason) => {
+      stubFetch({
+        '/playbooks': playbooks,
+        '/agents': agents.map((agent) => ({
+          ...agent,
+          isDefault: agent.userId === (reason === 'disabled' ? 'a3' : 'a2'),
+        })),
+        '/factory-settings': { defaultAgentId: null },
+        '/members': reason === 'outside-project' ? [members[0]] : members,
+      })
 
-    const wrapper = await mountDialog()
-    expect((wrapper.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a1')
-    wrapper.unmount()
-  })
+      const wrapper = await mountDialog()
+      expect((wrapper.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('a1')
+      wrapper.unmount()
+    },
+  )
 
   it('forgets a remembered choice that names something gone', async () => {
     stubFetch({
@@ -268,13 +292,17 @@ describe('StartRunDialog', () => {
     await wrapper.find('form#start-run').trigger('submit.prevent')
     await flushPromises()
 
-    const [url, init] = fetchMock.mock.calls.find(
-      ([input]) => String(input).endsWith('/items/PROJ-1/runs'),
+    const [url, init] = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/items/PROJ-1/runs'),
     )!
     expect(String(url)).toBe('/api/v1/orgs/acme/items/PROJ-1/runs')
     expect(init?.method).toBe('POST')
     // One runner or none is no choice, so the run goes to any free runner.
-    expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: null })
+    expect(JSON.parse(String(init?.body))).toEqual({
+      playbookId: 'p1',
+      agentId: 'a2',
+      runnerId: null,
+    })
 
     expect(wrapper.emitted('dispatched')).toHaveLength(1)
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
@@ -318,13 +346,21 @@ describe('StartRunDialog', () => {
     expect(labels).toEqual(['Any free runner', 'hetzner-vm · online', 'laptop · offline'])
 
     await select.setValue('rn2')
-    expect(wrapper.text()).toContain('laptop is offline. The run waits in the queue until it comes back.')
+    expect(wrapper.text()).toContain(
+      'laptop is offline. The run waits in the queue until it comes back.',
+    )
 
     await wrapper.find('form#start-run').trigger('submit.prevent')
     await flushPromises()
 
-    const [, init] = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/items/PROJ-1/runs'))!
-    expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: 'rn2' })
+    const [, init] = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/items/PROJ-1/runs'),
+    )!
+    expect(JSON.parse(String(init?.body))).toEqual({
+      playbookId: 'p1',
+      agentId: 'a2',
+      runnerId: 'rn2',
+    })
     expect(JSON.parse(storage.get('aictiq.run.PROJ')!)).toMatchObject({ runnerId: 'rn2' })
   })
 
@@ -336,11 +372,16 @@ describe('StartRunDialog', () => {
       '/members': members,
       '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
     })
-    storage.set('aictiq.run.PROJ', JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn2' }))
+    storage.set(
+      'aictiq.run.PROJ',
+      JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn2' }),
+    )
 
     const wrapper = await mountDialog()
 
-    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn2')
+    expect(
+      (wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value,
+    ).toBe('rn2')
   })
 
   it('preselects the project default runner when nothing is remembered', async () => {
@@ -354,7 +395,9 @@ describe('StartRunDialog', () => {
 
     const wrapper = await mountDialog()
 
-    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn2')
+    expect(
+      (wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value,
+    ).toBe('rn2')
   })
 
   it('keeps the remembered runner ahead of the project default runner', async () => {
@@ -365,11 +408,63 @@ describe('StartRunDialog', () => {
       '/members': members,
       '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
     })
-    storage.set('aictiq.run.PROJ', JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn1' }))
+    storage.set(
+      'aictiq.run.PROJ',
+      JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn1' }),
+    )
 
     const wrapper = await mountDialog()
 
-    expect((wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value).toBe('rn1')
+    expect(
+      (wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement).value,
+    ).toBe('rn1')
+  })
+
+  it('locks the runner to the one a project admin assigned and sends it', async () => {
+    const fetchMock = stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2', defaultRunnerId: 'rn1' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop', false)],
+      '/member-runners/me': { runnerId: 'rn2', runnerName: 'laptop', locked: true },
+      '/items/PROJ-1/runs': { id: 'r1', scheduledFor: null },
+    })
+    storage.set(
+      'aictiq.run.PROJ',
+      JSON.stringify({ playbookId: 'p1', agentId: 'a1', runnerId: 'rn1' }),
+    )
+
+    const wrapper = await mountDialog()
+
+    const select = wrapper.find('[data-testid="start-run-runner"]')
+    expect((select.element as HTMLSelectElement).disabled).toBe(true)
+    expect(select.findAll('option').map((o) => o.text())).toEqual(['laptop · offline'])
+    expect(wrapper.find('[data-testid="start-run-runner-locked"]').exists()).toBe(true)
+
+    await wrapper.find('form#start-run').trigger('submit')
+    await flushPromises()
+    const sent = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/items/PROJ-1/runs'),
+    )
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ runnerId: 'rn2' })
+  })
+
+  it('shows an admin every runner with the assigned one preselected', async () => {
+    stubFetch({
+      '/playbooks': playbooks,
+      '/agents': agents,
+      '/factory-settings': { defaultAgentId: 'a2', defaultRunnerId: 'rn1' },
+      '/members': members,
+      '/runners/choices': [runnerLike('rn1', 'hetzner-vm'), runnerLike('rn2', 'laptop')],
+      '/member-runners/me': { runnerId: 'rn2', runnerName: 'laptop', locked: false },
+    })
+
+    const wrapper = await mountDialog()
+
+    const select = wrapper.find('[data-testid="start-run-runner"]').element as HTMLSelectElement
+    expect(select.disabled).toBe(false)
+    expect(select.value).toBe('rn2')
   })
 
   it('falls back to any free runner when the default runner is gone', async () => {
@@ -400,7 +495,9 @@ describe('StartRunDialog', () => {
     expect(wrapper.text()).toContain('No playbook yet')
     expect(wrapper.find('[data-testid="start-run-create-playbook"]').exists()).toBe(true)
     expect(wrapper.find('form#start-run').exists()).toBe(false)
-    expect(fetchMock.mock.calls.every(([input]) => !String(input).includes('/items/PROJ-1/runs'))).toBe(true)
+    expect(
+      fetchMock.mock.calls.every(([input]) => !String(input).includes('/items/PROJ-1/runs')),
+    ).toBe(true)
   })
 
   it('sends no run when no active agent can see the project', async () => {
@@ -494,8 +591,12 @@ describe('StartRunDialog', () => {
 
       expect(toggle.attributes('aria-checked')).toBe('true')
       expect(wrapper.get('button[form="start-run"]').text()).toBe('Schedule run')
-      expect(wrapper.text()).toContain('When you schedule this run, the item is reserved for the agent so another run cannot start.')
-      expect(wrapper.text()).toContain('Work begins at or after the selected time, when a runner is available.')
+      expect(wrapper.text()).toContain(
+        'When you schedule this run, the item is reserved for the agent so another run cannot start.',
+      )
+      expect(wrapper.text()).toContain(
+        'Work begins at or after the selected time, when a runner is available.',
+      )
       expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
       const input = wrapper.find('[data-testid="start-run-start-at"]')
       expect((input.element as HTMLInputElement).value).toBe('2026-10-02T20:30')
@@ -563,8 +664,14 @@ describe('StartRunDialog', () => {
       await wrapper.get('form#start-run').trigger('submit.prevent')
       await flushPromises()
 
-      const [, init] = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/items/PROJ-1/runs'))!
-      expect(JSON.parse(String(init?.body))).toEqual({ playbookId: 'p1', agentId: 'a2', runnerId: null })
+      const [, init] = fetchMock.mock.calls.find(([input]) =>
+        String(input).endsWith('/items/PROJ-1/runs'),
+      )!
+      expect(JSON.parse(String(init?.body))).toEqual({
+        playbookId: 'p1',
+        agentId: 'a2',
+        runnerId: null,
+      })
     })
 
     it('reopens with scheduling off', async () => {
@@ -575,7 +682,9 @@ describe('StartRunDialog', () => {
       await wrapper.setProps({ open: true })
       await flushPromises()
 
-      expect(wrapper.get('[data-testid="start-run-schedule"]').attributes('aria-checked')).toBe('false')
+      expect(wrapper.get('[data-testid="start-run-schedule"]').attributes('aria-checked')).toBe(
+        'false',
+      )
       expect(wrapper.find('[data-testid="start-run-start-at"]').exists()).toBe(false)
       expect(wrapper.get('button[form="start-run"]').text()).toBe('Hand to agent')
     })

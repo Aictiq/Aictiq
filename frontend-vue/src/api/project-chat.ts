@@ -65,8 +65,10 @@ export interface ProjectChatView {
   messages: ProjectChatMessage[]
   /** Any usable runner that offers the harness is online right now: the default runner, when there is one. */
   runnerOnline: boolean
-  /** The project's default runner, when questions go to it. Absent from older servers. */
+  /** The caller's assigned runner or the project's default runner, when questions go to it. Absent from older servers. */
   runnerName?: string | null
+  /** `runnerName` is the runner a project admin assigned to the caller. Absent from older servers. */
+  runnerAssigned?: boolean
 }
 
 const chatPath = (slug: string, projectKey: string) => `/orgs/${slug}/projects/${projectKey}/chat`

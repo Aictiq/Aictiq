@@ -206,6 +206,26 @@ describe('ProjectChatPanel', () => {
     )
   })
 
+  it('names the assigned runner when it is the one that is offline', async () => {
+    const queued = message({
+      status: 'pending',
+      runStatus: 'queued',
+      answer: null,
+      answeredAt: null,
+    })
+    api.getProjectChat.mockResolvedValue({
+      ...chat([queued], false),
+      runnerName: 'laptop',
+      runnerAssigned: true,
+    })
+    const wrapper = await mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.find('[data-testid="project-chat-no-runner"]').text()).toBe(
+      'laptop, the runner assigned to you, is offline. Your question will start when it connects.',
+    )
+  })
+
   it('shows why a question failed', async () => {
     api.getProjectChat.mockResolvedValue(
       chat([

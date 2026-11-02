@@ -7,11 +7,13 @@ import { runnerCanRun } from '@/lib/runs'
 
 /**
  * Where and with what a refine run goes: a harness, defaulting to the refine playbook's, and
- * with more than one runner, the runner - only those that can run the chosen harness.
+ * with more than one runner, the runner - only those that can run the chosen harness. A member
+ * a project admin assigned a runner sees only that one, and cannot change it.
  */
 const props = defineProps<{
   runners: RunnerChoice[]
   disabled?: boolean
+  locked?: { id: string; name: string } | null
 }>()
 
 const runnerId = defineModel<string | null>('runnerId', { required: true })
@@ -47,7 +49,21 @@ const chosenRunner = computed(
         </option>
       </select>
     </div>
-    <div v-if="showRunners" class="space-y-1">
+    <div v-if="locked" class="space-y-1">
+      <label for="refine-run-runner" class="text-muted-foreground block text-xs font-medium"
+        >Runner</label
+      >
+      <select
+        id="refine-run-runner"
+        disabled
+        data-testid="refine-run-runner"
+        title="A project admin assigned you this runner."
+        class="border-input bg-background block rounded border px-2 py-1 text-sm disabled:opacity-70"
+      >
+        <option :value="locked.id">{{ locked.name }}</option>
+      </select>
+    </div>
+    <div v-else-if="showRunners" class="space-y-1">
       <label for="refine-run-runner" class="text-muted-foreground block text-xs font-medium"
         >Runner</label
       >
@@ -65,7 +81,14 @@ const chosenRunner = computed(
       </select>
     </div>
     <p
-      v-if="showRunners && chosenRunner && !chosenRunner.isOnline"
+      v-if="locked"
+      class="text-muted-foreground basis-full text-xs"
+      data-testid="refine-run-runner-locked"
+    >
+      A project admin assigned you this runner, so your runs go to it.
+    </p>
+    <p
+      v-if="(locked || showRunners) && chosenRunner && !chosenRunner.isOnline"
       class="text-muted-foreground basis-full text-xs"
     >
       {{ chosenRunner.name }} is offline. The run waits in the queue until it comes back.

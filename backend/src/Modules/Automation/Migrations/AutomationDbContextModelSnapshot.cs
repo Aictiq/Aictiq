@@ -18,7 +18,7 @@ namespace Aictiq.Modules.Automation.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("automation")
-                .HasAnnotation("ProductVersion", "10.0.13")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -614,6 +614,54 @@ namespace Aictiq.Modules.Automation.Migrations
 
                             t.HasCheckConstraint("ck_project_settings_repo_source", "repo_source IN (0, 1)");
                         });
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectMemberRunner", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AssignedBy")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("assigned_by");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<Guid>("RunnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("runner_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_member_runners");
+
+                    b.HasIndex("RunnerId")
+                        .HasDatabaseName("ix_member_runners_runner");
+
+                    b.HasIndex("ProjectId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_member_runners_member");
+
+                    b.ToTable("member_runners", "automation");
                 });
 
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectRefinementSettings", b =>
@@ -1587,6 +1635,16 @@ namespace Aictiq.Modules.Automation.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_playbook_stages_playbooks_stage_playbook_id");
+                });
+
+            modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectMemberRunner", b =>
+                {
+                    b.HasOne("Aictiq.Modules.Automation.Domain.Runner", null)
+                        .WithMany()
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_member_runners_runners_runner_id");
                 });
 
             modelBuilder.Entity("Aictiq.Modules.Automation.Domain.ProjectRefinementSettings", b =>

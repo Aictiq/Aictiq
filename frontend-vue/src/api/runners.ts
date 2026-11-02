@@ -224,3 +224,45 @@ export const deleteRunner = (slug: string, runnerId: string) =>
 /** A new secret; the old one stops working at once, so the machine must be re-registered. */
 export const rotateRunner = (slug: string, runnerId: string) =>
   apiFetch<RunnerIssued>(`/orgs/${slug}/runners/${runnerId}/rotate`, { method: 'POST' })
+
+// ── A project member's runner ─────────────────────────────────────────────────────────
+
+/** The runner a project Admin assigned to one member under Settings → Members. */
+export interface MemberRunner {
+  userId: string
+  runnerId: string
+  /** Null once the runner is deleted. */
+  runnerName: string | null
+  /** Neither deleted nor disabled, so the member's runs go to it. */
+  runnerUsable: boolean
+}
+
+/** The caller's own assigned runner, while it is usable. */
+export interface MyRunner {
+  runnerId: string | null
+  runnerName: string | null
+  /** The caller is not a project Admin, so every run they start uses it and their pickers lock to it. */
+  locked: boolean
+}
+
+const memberRunnersPath = (slug: string, projectKey: string) =>
+  `/orgs/${slug}/projects/${projectKey}/member-runners`
+
+/** Project Admins only. */
+export const listMemberRunners = (slug: string, projectKey: string) =>
+  apiFetch<MemberRunner[]>(memberRunnersPath(slug, projectKey))
+
+export const getMyRunner = (slug: string, projectKey: string) =>
+  apiFetch<MyRunner>(`${memberRunnersPath(slug, projectKey)}/me`)
+
+/** Null clears it. Project Admins only. */
+export const setMemberRunner = (
+  slug: string,
+  projectKey: string,
+  userId: string,
+  runnerId: string | null,
+) =>
+  apiFetch<MemberRunner | void>(`${memberRunnersPath(slug, projectKey)}/${userId}`, {
+    method: 'PUT',
+    body: { runnerId },
+  })
