@@ -732,7 +732,7 @@ public sealed record RunView(
     RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
     IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<string>? Repositories = null,
     IReadOnlyList<string>? PullRequestUrls = null, IReadOnlyList<RunRepositoryStepView>? RepositorySteps = null,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null, IReadOnlyList<string>? MissingRepositories = null);
 
 public sealed record RunRepositoryStepView(
     IReadOnlyList<string> Aliases, IReadOnlyList<string> After, bool WaitForMerge, string State, Guid? RunId,

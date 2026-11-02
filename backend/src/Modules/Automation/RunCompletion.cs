@@ -65,6 +65,8 @@ internal static class RunCompletion
             Chained = chain?.Next is not null,
             ChainNote = chain?.Note,
             PullRequestUrls = run.PullRequestUrls,
+            Repositories = [.. run.CheckedOutRepositories.Select(repo => repo.Alias)],
+            MissingRepositories = run.MissingRepositoryAliases,
             StageName = stage ? chain?.StageName ?? "Follow-up" : null,
             StageVerdict = PlaybookChain.VerdictName(run.StageVerdict),
             StageFindings = run.StageVerdict == StageVerdict.ChangesRequested ? run.StageFindings : null,

@@ -27,7 +27,8 @@ public sealed record RefineContext(
 public static class RefinePromptComposer
 {
     public static string Compose(string agentDisplayName, string itemKey, string projectKey,
-        string projectName, string playbookName, string playbookMarkdown, RefineContext context)
+        string projectName, string playbookName, string playbookMarkdown, RefineContext context,
+        RepositoryPrompt? repositories = null)
     {
         var playbook = string.IsNullOrWhiteSpace(playbookMarkdown)
             ? "(The playbook page is empty.)"
@@ -53,6 +54,12 @@ public static class RefinePromptComposer
             - Stop as soon as you can write the ticket. Knowing the code in full is the implement run's job: a ticket that names the right behaviour and leaves the design open is finished.
             """);
         text.AppendLine();
+
+        if (RepositoryPrompts.ReadOnly(repositories) is { } checkouts)
+        {
+            text.AppendLine(checkouts);
+            text.AppendLine();
+        }
 
         AppendSection(text, "Product", context.ProductDescription);
         AppendSection(text, "Ticket-writing instructions", context.WritingInstructions);

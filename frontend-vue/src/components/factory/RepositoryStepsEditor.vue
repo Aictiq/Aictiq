@@ -52,10 +52,10 @@ function choices(step: RepositoryStep) {
   <div class="space-y-2" data-testid="playbook-repository-steps">
     <span class="text-sm font-medium">Repositories</span>
     <p class="text-muted-foreground text-xs">
-      The repositories this playbook's runs work in when the ticket names none (<code
-        >repo:&lt;alias&gt;</code
-      >
-      tags). Leave empty for the primary repository only.
+      Every run checks out all of the project's repositories. Add steps here only to order them, or
+      to give a repository its own working directory: a repository that waits for another runs in a
+      later run. The ticket's <code>repo:&lt;alias&gt;:after:&lt;dep&gt;</code> labels replace these
+      waits.
       <a
         :href="multiRepoDocsUrl"
         class="text-primary hover:underline"

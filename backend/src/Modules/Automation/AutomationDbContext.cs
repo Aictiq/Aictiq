@@ -225,6 +225,8 @@ public sealed class AutomationDbContext(DbContextOptions<AutomationDbContext> op
             b.Property(x => x.DeclinedRunnerIds).HasDefaultValueSql("'{}'::uuid[]");
             JsonList(b.Property(x => x.Repositories));
             b.Property(x => x.RepositoryAliases).HasDefaultValueSql("'{}'::text[]");
+            b.Property(x => x.MissingRepositoryAliases).HasDefaultValueSql("'{}'::text[]");
+            b.Ignore(x => x.CheckedOutRepositories);
             b.Property(x => x.WorkingDirectory).HasMaxLength(ProjectRepository.MaxWorkingDirectoryLength);
             b.Property(x => x.RepositoryPlan).HasColumnType("jsonb")
                 .HasConversion(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<RepositoryStep>?, string?>(

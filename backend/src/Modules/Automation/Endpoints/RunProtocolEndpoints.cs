@@ -279,6 +279,13 @@ public static partial class RunProtocolEndpoints
             run.Status = RunStatus.Assigned;
             run.RunnerId = runnerId;
             run.AssignedAt = now;
+            // A runner may take a run whose checkouts it has only some of (UnservedRunsAsync): it
+            // starts with those, and the run says which it missed. A continue reattaches the
+            // workspace its run kept, which has exactly the checkouts that run had.
+            var projectKey = run.Repositories.Count == 0 ? null : await ProjectKeyAsync(run.ProjectId);
+            run.MissingRepositoryAliases = projectKey is null || run.ContinuesRunId is not null
+                ? []
+                : [.. RepositoryRouting.MissingRepositories(reported, projectKey, run.Repositories)];
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
 
@@ -306,7 +313,8 @@ public static partial class RunProtocolEndpoints
 
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE automation.runs
-                    SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL
+                    SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL,
+                        missing_repository_aliases = ARRAY[]::text[]
                     WHERE id = {run.Id} AND status = {(short)RunStatus.Assigned} AND runner_id = {runnerId}
                     """, CancellationToken.None);
                 throw;
@@ -324,7 +332,7 @@ public static partial class RunProtocolEndpoints
             if (run.Repositories.Count > 0)
             {
                 repos = [];
-                foreach (var checkout in run.Repositories)
+                foreach (var checkout in run.CheckedOutRepositories)
                 {
                     var github = !RepositoryPlans.NeedsLocal(checkout);
                     repos.Add(new RunRepoEntry(checkout.Alias, github ? "github" : "local", checkout.RepoFullName,
@@ -399,7 +407,10 @@ public static partial class RunProtocolEndpoints
                     ? RunEndpoints.ProjectKeyOf(itemKey) ?? itemKey
                     : (await access.GetProjectAsync(run.ProjectId, ct))?.Key ?? "",
                 organization?.Slug ?? "",
-                run.Harness, SecurityPreamble.Include(run.PromptSnapshot), run.PlaybookRevisionId, repo,
+                run.Harness, SecurityPreamble.Include(run.MissingRepositoryAliases.Length == 0
+                    ? run.PromptSnapshot
+                    : run.PromptSnapshot + "\n\n" + RepositoryPrompts.Missing(projectKey!, run.MissingRepositoryAliases)),
+                run.PlaybookRevisionId, repo,
                 run.WorkOnDefaultBranch ? run.BranchName : settings?.DefaultBranch ?? "main", run.BranchName, run.MaxMinutes,
                 aictiqUrl, issued.Secret, issued.Token.Display,
                 options.Value.HeartbeatIntervalSeconds, run.WorkOnDefaultBranch, resume, followUp, SecurityPreamble.Text,
@@ -435,7 +446,19 @@ public static partial class RunProtocolEndpoints
         Task<Dictionary<Guid, ProjectServing>> ProjectServingAsync(Guid[] projectIds) =>
             ProjectServing.LoadAsync(db, access, projectIds, ct);
 
-        // Queued multi-repository runs with a checkout this runner plainly cannot find on its machine.
+        async Task<string> ProjectKeyAsync(Guid projectId)
+        {
+            if (!projectKeys.TryGetValue(projectId, out var key))
+            {
+                key = projectKeys[projectId] = (await access.GetProjectAsync(projectId, ct))?.Key ?? "";
+            }
+            return key;
+        }
+
+        // Queued multi-repository runs this runner should leave alone: those it has none of the
+        // local checkouts of, and those it lacks some of while another runner that could take
+        // them now has every one. A run sent to this runner is its own either way, and a runner
+        // that has only some of them starts with those rather than leave the run queued.
         async Task<Guid[]> UnservedRunsAsync()
         {
             if (!multiRepo)
@@ -444,17 +467,37 @@ public static partial class RunProtocolEndpoints
             }
             var queued = await db.Runs.AsNoTracking()
                 .Where(r => r.Status == RunStatus.Queued && r.RepositoryAliases.Length > 0)
-                .Select(r => new { r.Id, r.ProjectId, r.Repositories })
+                .Select(r => new { r.Id, r.ProjectId, r.Repositories, r.RequestedRunnerId, r.Harness, r.RequiredTags, r.DeclinedRunnerIds })
                 .Take(500)
                 .ToListAsync(ct);
+            List<Runner>? others = null;
             var unserved = new List<Guid>();
             foreach (var row in queued)
             {
-                if (!projectKeys.TryGetValue(row.ProjectId, out var key))
+                var key = await ProjectKeyAsync(row.ProjectId);
+                var missing = RepositoryRouting.MissingRepositories(reported, key, row.Repositories);
+                if (missing.Count == 0)
                 {
-                    key = projectKeys[row.ProjectId] = (await access.GetProjectAsync(row.ProjectId, ct))?.Key ?? "";
+                    continue;
                 }
-                if (RepositoryRouting.MissingRepository(reported, key, row.Repositories) is not null)
+                if (missing.Count == row.Repositories.Count)
+                {
+                    unserved.Add(row.Id);
+                    continue;
+                }
+                if (row.RequestedRunnerId == runnerId)
+                {
+                    continue;
+                }
+                var now = clock.GetUtcNow();
+                others ??= [.. (await db.Runners.AsNoTracking()
+                        .Where(r => r.Id != runnerId && r.DeletedAt == null && r.DisabledAt == null)
+                        .ToListAsync(ct))
+                    .Where(r => r.Capabilities?.MultiRepo == true && RunnerEndpoints.IsOnline(r, options.Value, now))];
+                if (others.Any(other => !row.DeclinedRunnerIds.Contains(other.Id)
+                        && other.Capabilities!.Harnesses.Any(h => h.Name == row.Harness)
+                        && (!fleet.Active || FleetTags.Satisfies(FleetTags.Effective(other), row.RequiredTags))
+                        && RepositoryRouting.MissingRepository(other.Capabilities, key, row.Repositories) is null))
                 {
                     unserved.Add(row.Id);
                 }
@@ -655,6 +698,7 @@ public static partial class RunProtocolEndpoints
         var released = await db.Database.ExecuteSqlAsync($"""
             UPDATE automation.runs
             SET status = 0, runner_id = NULL, assigned_at = NULL, agent_token_id = NULL,
+                missing_repository_aliases = ARRAY[]::text[],
                 declined_runner_ids = CASE WHEN {declined == true} AND NOT ({runnerId} = ANY(declined_runner_ids))
                     THEN array_append(declined_runner_ids, {runnerId}) ELSE declined_runner_ids END
             WHERE id = {runId} AND status = {(short)RunStatus.Assigned} AND runner_id = {runnerId}

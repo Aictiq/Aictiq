@@ -79,6 +79,15 @@ public sealed record RunFinished(
     /// </summary>
     public IReadOnlyList<string> PullRequestUrls { get; init; } = [];
 
+    /// <summary>
+    /// The repositories a multi-repository run had checked out, by alias; empty for a run with
+    /// one repository. Named in the outcome comment.
+    /// </summary>
+    public IReadOnlyList<string> Repositories { get; init; } = [];
+
+    /// <summary>The repositories the run's runner had no local clone of, so the run went without them.</summary>
+    public IReadOnlyList<string> MissingRepositories { get; init; } = [];
+
     /// <summary>What the playbook chain does next, or why it ended; added to the outcome comment.</summary>
     public string? ChainNote { get; init; }
 

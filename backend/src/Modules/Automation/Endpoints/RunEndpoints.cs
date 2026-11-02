@@ -56,7 +56,7 @@ public sealed record RunView(
     RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
     IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<string>? Repositories = null,
     IReadOnlyList<string>? PullRequestUrls = null, IReadOnlyList<RunRepositoryStepView>? RepositorySteps = null,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null, IReadOnlyList<string>? MissingRepositories = null);
 
 /// <summary>
 /// One step of a multi-repository run's graph, as the run page shows it.
@@ -382,11 +382,12 @@ public static class RunEndpoints
         var project = (await ProjectServing.LoadAsync(db, access, [run.ProjectId], ct))[run.ProjectId];
         var several = run.Repositories.Count > 0 || run.WorkingDirectory is not null;
         var projectKey = several ? (await access.GetProjectAsync(run.ProjectId, ct))?.Key ?? "" : project.Key;
-        // A run with several checkouts, or a sub-package, goes to a runner that can do it, and has each local one.
+        // A run with several checkouts, or a sub-package, goes to a runner that can do it and has
+        // at least one local checkout; one with only some starts with those.
         bool Serves(Runner runner) => run.ContinuesRunId is not null
             || (!run.DeclinedRunnerIds.Contains(runner.Id) && (several
                 ? runner.Capabilities?.MultiRepo == true
-                    && RepositoryRouting.MissingRepository(runner.Capabilities, projectKey, run.Repositories) is null
+                    && (run.Repositories.Count == 0 || RepositoryRouting.CanStart(runner.Capabilities, projectKey, run.Repositories))
                 : project.Serves(runner.Capabilities)));
         string? Missing(Runner runner) =>
             several ? RepositoryRouting.MissingRepository(runner.Capabilities, projectKey, run.Repositories) : null;
@@ -930,7 +931,7 @@ public static class RunEndpoints
             Repositories: run.RepositoryAliases,
             PullRequestUrls: run.PullRequestUrls.Length > 0 ? run.PullRequestUrls
                 : run.PullRequestUrl is { } single ? [single] : [],
-            WorkingDirectory: run.WorkingDirectory);
+            WorkingDirectory: run.WorkingDirectory, MissingRepositories: run.MissingRepositoryAliases);
 
     /// <summary>
     /// Someone else's project-chat run, as the run screens show it: that it ran, when and on

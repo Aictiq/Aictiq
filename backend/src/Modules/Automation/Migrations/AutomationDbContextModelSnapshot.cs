@@ -1054,6 +1054,13 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("max_minutes");
 
+                    b.PrimitiveCollection<string[]>("MissingRepositoryAliases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("missing_repository_aliases")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");

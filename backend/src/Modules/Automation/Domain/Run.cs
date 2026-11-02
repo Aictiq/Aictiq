@@ -280,6 +280,16 @@ public sealed class Run : TenantEntity
     /// <summary>The aliases of <see cref="Repositories"/>, for the claim query's routing.</summary>
     public string[] RepositoryAliases { get; init; } = [];
 
+    /// <summary>
+    /// The aliases of <see cref="Repositories"/> the runner that claimed the run has no local clone
+    /// of, so it started without them; empty until a runner claims it, and again if it is handed back.
+    /// </summary>
+    public string[] MissingRepositoryAliases { get; set; } = [];
+
+    /// <summary>The checkouts the run actually works in: <see cref="Repositories"/> less the missing ones.</summary>
+    public List<RunRepository> CheckedOutRepositories =>
+        [.. Repositories.Where(repo => !MissingRepositoryAliases.Contains(repo.Alias, StringComparer.Ordinal))];
+
     /// <summary>A single-checkout run's sub-directory (a monorepo package) the agent starts in; null is the checkout's root.</summary>
     public string? WorkingDirectory { get; init; }
 
