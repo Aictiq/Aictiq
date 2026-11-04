@@ -13,7 +13,9 @@ import { useOrganizationsStore } from '@/stores/organizations'
  */
 type Call = { method: string; url: string; body: unknown }
 
-function stubFetch(routes: [string, RegExp, unknown][]) {
+type Route = [string, RegExp, unknown] | [string, RegExp, unknown, number]
+
+function stubFetch(routes: Route[]) {
   const calls: Call[] = []
   vi.stubGlobal(
     'fetch',
@@ -22,11 +24,13 @@ function stubFetch(routes: [string, RegExp, unknown][]) {
       const method = (init?.method ?? 'GET').toUpperCase()
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : (init?.body ?? null)
       calls.push({ method, url, body })
-      for (const [verb, pattern, response] of routes) {
+      for (const [verb, pattern, response, status = 200] of routes) {
         if (verb === method && pattern.test(url)) {
           return new Response(JSON.stringify(response), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
+            status,
+            headers: {
+              'content-type': status < 400 ? 'application/json' : 'application/problem+json',
+            },
           })
         }
       }
@@ -209,8 +213,10 @@ describe('RefinementPanel', () => {
     runners: unknown[] = [],
     defaultRunnerId: string | null = null,
     myRunner: unknown = { runnerId: null, runnerName: null, locked: false },
+    { busy = false, routes = [] }: { busy?: boolean; routes?: Route[] } = {},
   ) {
     const calls = stubFetch([
+      ...routes,
       ['GET', /\/factory-settings\/?$/, { defaultRunnerId }],
       ['GET', /\/member-runners\/me$/, myRunner],
       ['GET', /\/refinement-settings\/$/, settings(enabled)],
@@ -224,7 +230,7 @@ describe('RefinementPanel', () => {
     const pinia = withOrganization(canOperateFactory)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const wrapper = mount(RefinementPanel, {
-      props: { slug: 'acme', projectKey: 'PROJ', item: item as never, dirty, busy: false },
+      props: { slug: 'acme', projectKey: 'PROJ', item: item as never, dirty, busy },
       global: {
         plugins: [pinia, [VueQueryPlugin, { queryClient }]],
         stubs: { RouterLink: RouterLinkStub },
@@ -328,7 +334,7 @@ describe('RefinementPanel', () => {
     })
   })
 
-  it('moves a confirmed ticket to the refined state, then confirms it', async () => {
+  it('confirms the reviewed ticket, then moves it to the refined state', async () => {
     const { wrapper, calls } = await mountPanel(
       refinement('ready', { summary: 'Wrote steps and criteria.' }),
     )
@@ -337,12 +343,64 @@ describe('RefinementPanel', () => {
     await flushPromises()
 
     const posts = calls.filter((call) => call.method === 'POST').map((call) => call.url)
-    expect(posts[0]).toMatch(/\/items\/PROJ-7\/transition$/)
-    expect(posts[1]).toMatch(/\/refinement\/confirm$/)
+    expect(posts[0]).toMatch(/\/refinement\/confirm$/)
+    expect(posts[1]).toMatch(/\/items\/PROJ-7\/transition$/)
+    // The item version the person reviewed guards the confirm and then the move.
+    expect(calls.find((call) => call.url.endsWith('/confirm'))?.body).toEqual({
+      version: 11,
+      itemVersion: 3,
+    })
     expect(calls.find((call) => call.url.endsWith('/transition'))?.body).toEqual({
       toStateId: 's-ready',
       version: 3,
     })
+  })
+
+  it('moves nothing when the confirm is refused', async () => {
+    const { wrapper, calls } = await mountPanel(
+      refinement('ready'),
+      false,
+      true,
+      true,
+      [],
+      null,
+      undefined,
+      {
+        routes: [
+          [
+            'POST',
+            /\/refinement\/confirm$/,
+            { title: 'Conflict.', status: 409, type: 'urn:problem:conflict' },
+            409,
+          ],
+        ],
+      },
+    )
+    await wrapper.find('[data-testid="refinement-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(calls.some((call) => call.url.endsWith('/confirm'))).toBe(true)
+    expect(calls.some((call) => call.url.endsWith('/transition'))).toBe(false)
+    // The panel refetches, so a newer refinement or item shows up for another look.
+    const refetches = calls.filter(
+      (call) => call.method === 'GET' && call.url.endsWith('/refinement/'),
+    )
+    expect(refetches.length).toBeGreaterThan(1)
+  })
+
+  it('waits for the refine run to end before confirming', async () => {
+    const { wrapper } = await mountPanel(
+      refinement('ready'),
+      false,
+      true,
+      true,
+      [],
+      null,
+      undefined,
+      { busy: true },
+    )
+    expect(wrapper.find('[data-testid="refinement-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="refinement-finishing"]').exists()).toBe(true)
   })
 
   it('will not confirm over unsaved edits', async () => {

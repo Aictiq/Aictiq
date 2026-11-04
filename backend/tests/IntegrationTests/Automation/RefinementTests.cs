@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Aictiq.IntegrationTests.Storage;
 using Aictiq.Modules.Automation.Domain;
 using Aictiq.Modules.Automation.Endpoints;
 using Aictiq.Modules.Tenancy.Domain;
 using Aictiq.Modules.Tenancy.Endpoints;
+using Aictiq.Modules.WorkItems.Contracts;
 using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel;
@@ -14,6 +16,7 @@ using Aictiq.SharedKernel.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using Npgsql;
 
 namespace Aictiq.IntegrationTests.Automation;
 
@@ -282,6 +285,72 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
     }
 
     [Fact]
+    public async Task a_refined_ticket_confirms_and_moves_once_the_run_lets_the_item_go()
+    {
+        var refinedState = await StateIdAsync("In Review");
+        var settings = await EnableAsync();
+        (await Owner.PutAsJsonAsync($"{ProjectBase}/refinement-settings/",
+            new UpdateRefinementSettingsRequest(settings.PlaybookId, null, "Product", null, null, null, refinedState, settings.Version),
+            ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+
+        await RefineAsync(ItemKey);
+        using var runner = RunnerClient(Runner.Secret);
+        var claimed = await ClaimAsync(runner);
+        var filed = await ItemAsync(ItemKey);
+        await using (var agent = await ConnectAsync(claimed.AgentToken))
+        {
+            var rewritten = await agent.CallToolAsync("update_item", new Dictionary<string, object?>
+            {
+                ["key"] = ItemKey, ["version"] = filed.Version, ["title"] = "Login fails in Safari",
+                ["description"] = "## Steps to reproduce\n\n1. Open the login page in Safari.",
+            }, cancellationToken: Ct);
+            Assert.NotEqual(true, rewritten.IsError);
+            // The rewrite reaches the page reviewing it, and with it the item's new version.
+            Assert.Contains(await StagedItemChangesAsync(filed.Id), fields => fields.SequenceEqual(["updated"]));
+            var ready = await agent.CallToolAsync("submit_refinement", new Dictionary<string, object?>
+            {
+                ["key"] = ItemKey, ["outcome"] = "ready", ["summary"] = "Wrote steps and criteria.",
+            }, cancellationToken: Ct);
+            Assert.NotEqual(true, ready.IsError);
+        }
+        (await StartedAsync(runner, claimed.RunId)).EnsureSuccessStatusCode();
+        (await FinishAsync(runner, claimed.RunId, RunOutcomes.Succeeded, "Refined.")).EnsureSuccessStatusCode();
+
+        // What a page holds when the run's end reaches it: the item still claimed by the agent.
+        var beforeRelease = await ItemAsync(ItemKey);
+        Assert.Equal(AgentId, beforeRelease.ClaimedBy);
+        var changesBefore = (await StagedItemChangesAsync(beforeRelease.Id)).Count;
+        await InvokeRunFinishedAsync(await StagedRunFinishedAsync(claimed.RunId));
+        var item = await ItemAsync(ItemKey);
+        Assert.Null(item.ClaimedBy);
+        Assert.NotEqual(beforeRelease.Version, item.Version);
+        // The release says so, the way the claim did: open pages refetch the new version.
+        var changes = await StagedItemChangesAsync(item.Id);
+        Assert.Equal(changesBefore + 1, changes.Count);
+        Assert.Equal(["claim"], changes[^1]);
+
+        // A page that missed it is refused before anything is confirmed, and nothing moved.
+        var refinement = await GetRefinementAsync(ItemKey);
+        var stale = await Owner.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/confirm",
+            new ConfirmRefinementRequest(refinement.Version, beforeRelease.Version), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal(RefinementStatus.Ready, (await GetRefinementAsync(ItemKey)).Status);
+        Assert.Equal(beforeRelease.StateId, (await ItemAsync(ItemKey)).StateId);
+
+        // The page's own version confirms on the first try, and the move after it goes with it.
+        var confirm = await Owner.PostAsJsonAsync($"{ItemRefinement(ItemKey)}/confirm",
+            new ConfirmRefinementRequest(refinement.Version, item.Version), ApiTestContext.Json, Ct);
+        Assert.True(confirm.IsSuccessStatusCode, await confirm.Content.ReadAsStringAsync(Ct));
+        var confirmed = (await confirm.Content.ReadFromJsonAsync<RefinementView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(RefinementStatus.Confirmed, confirmed.Status);
+        Assert.Equal(refinedState, confirmed.RefinedStateId);
+        var moved = await Owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/items/{ItemKey}/transition",
+            new TransitionRequest(refinedState, item.Version), ApiTestContext.Json, Ct);
+        Assert.True(moved.IsSuccessStatusCode, await moved.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(refinedState, (await ItemAsync(ItemKey)).StateId);
+    }
+
+    [Fact]
     public async Task the_refined_state_is_reported_for_the_client_to_move_to()
     {
         var resolved = await StateIdAsync("In Review");
@@ -396,6 +465,23 @@ public sealed class RefinementTests(PostgresFixture postgres, GarageFixture gara
         var response = await Owner.PostAsJsonAsync($"{ItemRefinement(itemKey)}/", new RefineItemRequest(), ApiTestContext.Json, Ct);
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
         return (await response.Content.ReadFromJsonAsync<RefinementView>(ApiTestContext.Json, Ct))!;
+    }
+
+    /// <summary>The changed fields of every <c>ItemChanged</c> staged for the item.</summary>
+    private async Task<List<string[]>> StagedItemChangesAsync(Guid itemId)
+    {
+        await using var connection = new NpgsqlConnection(Context.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand(
+            "SELECT payload FROM shared.outbox_messages WHERE type = @type AND payload::jsonb ->> 'ItemId' = @itemId ORDER BY id",
+            connection);
+        command.Parameters.AddWithValue("type", typeof(ItemChanged).FullName!);
+        command.Parameters.AddWithValue("itemId", itemId.ToString());
+        var changes = new List<string[]>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct))
+            changes.Add(JsonSerializer.Deserialize<ItemChanged>(reader.GetString(0))!.ChangedFields.ToArray());
+        return changes;
     }
 
     private async Task<RefinementView> GetRefinementAsync(string itemKey) =>

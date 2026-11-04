@@ -31,7 +31,11 @@ public sealed record RefineItemRequest(
     IReadOnlyList<RefinementAnswer>? Answers = null, string? Feedback = null, Guid? RunnerId = null,
     string? Harness = null);
 
-public sealed record ConfirmRefinementRequest(uint Version);
+/// <param name="Version">The refinement's version the person reviewed.</param>
+/// <param name="ItemVersion">The item's version the person reviewed, when given: an item that changed
+/// since then is refused before anything is confirmed, so the client's move to the refined state
+/// that follows cannot fail behind a confirmed refinement.</param>
+public sealed record ConfirmRefinementRequest(uint Version, uint? ItemVersion = null);
 
 public sealed record RefinementQuestionAnswer(string Question, string Answer);
 
@@ -349,6 +353,8 @@ public static class RefinementEndpoints
         var row = await db.Refinements.SingleOrDefaultAsync(row => row.ItemId == item.Id, ct);
         if (row is null) return RunEndpoints.NotFound();
         if (row.Version != request.Version) return Conflict();
+        if (request.ItemVersion is { } itemVersion && itemVersion != item.Version)
+            return Conflict("The item changed since you loaded it - review it again, then confirm.");
         if (row.Status == RefinementStatus.Refining)
             return Results.Problem(
                 title: "The ticket is still being refined.",
