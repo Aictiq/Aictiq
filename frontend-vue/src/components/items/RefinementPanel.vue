@@ -217,21 +217,27 @@ async function confirm() {
   const refined = current.value
   if (!canOperate.value || !refined || working.value) return
   working.value = 'confirm'
+  const { key, stateId, version } = props.item
   try {
-    // The move is the person's own transition, so the workflow's rules apply to it.
-    if (refined.refinedStateId && refined.refinedStateId !== props.item.stateId) {
-      await transitionItem(props.slug, props.item.key, {
-        toStateId: refined.refinedStateId,
-        version: props.item.version,
-      })
-    }
-    await confirmRefinement(props.slug, props.item.key, refined.version)
-    toast.success(`${props.item.key} confirmed.`)
-    await refresh()
+    // Confirming checks the item is still the one reviewed and leaves it untouched, so the
+    // move after it goes with the same version, and a refused confirm moves nothing.
+    await confirmRefinement(props.slug, key, refined.version, version)
   } catch (caught) {
     toast.error(caught, 'The ticket could not be confirmed.')
     await refresh()
+    working.value = null
+    return
+  }
+  try {
+    // The move is the person's own transition, so the workflow's rules apply to it.
+    if (refined.refinedStateId && refined.refinedStateId !== stateId) {
+      await transitionItem(props.slug, key, { toStateId: refined.refinedStateId, version })
+    }
+    toast.success(`${key} confirmed.`)
+  } catch (caught) {
+    toast.error(caught, `${key} is confirmed, but it could not be moved to the refined state.`)
   } finally {
+    await refresh()
     working.value = null
   }
 }
@@ -325,7 +331,7 @@ async function confirm() {
           type="button"
           size="sm"
           variant="ghost"
-          :disabled="working !== null || dirty"
+          :disabled="working !== null || dirty || props.busy"
           @click="confirm"
         >
           Confirm as it is
@@ -361,10 +367,18 @@ async function confirm() {
         :disabled="working !== null"
       />
       <p v-if="dirty" class="text-muted-foreground text-xs">Save your edits before confirming.</p>
+      <!-- The agent answers before its run ends; the run's end still lets go of the item. -->
+      <p
+        v-else-if="props.busy"
+        class="text-muted-foreground text-xs"
+        data-testid="refinement-finishing"
+      >
+        The agent is finishing its run. You can confirm once it is done.
+      </p>
       <div class="flex flex-wrap gap-2">
         <Button
           size="sm"
-          :disabled="working !== null || dirty"
+          :disabled="working !== null || dirty || props.busy"
           data-testid="refinement-confirm"
           @click="confirm"
         >

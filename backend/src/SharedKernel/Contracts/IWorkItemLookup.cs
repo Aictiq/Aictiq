@@ -13,7 +13,8 @@ public interface IWorkItemLookup
         Task.FromResult<IReadOnlyList<WorkItemSummary>>([]);
 }
 
-public sealed record WorkItemReference(Guid Id, string Key, string Title, string State, string? AssigneeId);
+/// <param name="Version">The item's optimistic-concurrency version, as its own endpoints report it.</param>
+public sealed record WorkItemReference(Guid Id, string Key, string Title, string State, string? AssigneeId, uint Version = 0);
 
 /// <param name="Type">The work-item type in camelCase, as the API spells it: <c>story</c>, <c>bug</c>.</param>
 /// <param name="State">The workflow state's display name, such as "In Review".</param>

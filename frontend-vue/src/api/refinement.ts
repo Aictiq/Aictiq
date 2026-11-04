@@ -91,8 +91,17 @@ export const getRefinement = async (slug: string, itemKey: string) =>
 export const refineItem = (slug: string, itemKey: string, body: RefineBody = {}) =>
   apiFetch<Refinement>(`${itemPath(slug, itemKey)}/`, { method: 'POST', body })
 
-export const confirmRefinement = (slug: string, itemKey: string, version: number) =>
+/**
+ * `itemVersion` is the item the person reviewed: one that changed since is refused before
+ * anything is confirmed, and the same version then moves the item to the refined state.
+ */
+export const confirmRefinement = (
+  slug: string,
+  itemKey: string,
+  version: number,
+  itemVersion?: number,
+) =>
   apiFetch<Refinement>(`${itemPath(slug, itemKey)}/confirm`, {
     method: 'POST',
-    body: { version },
+    body: { version, itemVersion },
   })

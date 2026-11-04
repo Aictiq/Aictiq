@@ -13,7 +13,7 @@ internal sealed class WorkItemLookup(WorkItemsDbContext db) : IWorkItemLookup
         var rows = await db.Items.AsNoTracking().Where(x => x.ProjectId == projectId)
             .Join(db.WorkflowStates.AsNoTracking(), item => item.StateId, state => state.Id, (item, state) => new { item, state })
             .ToListAsync(cancellationToken);
-        return rows.Where(x => wanted.Contains(x.item.Key)).Select(x => new WorkItemReference(x.item.Id, x.item.Key, x.item.Title, x.state.Category.ToString(), x.item.AssigneeId)).ToList();
+        return rows.Where(x => wanted.Contains(x.item.Key)).Select(x => new WorkItemReference(x.item.Id, x.item.Key, x.item.Title, x.state.Category.ToString(), x.item.AssigneeId, x.item.Version)).ToList();
     }
 
     public async Task<IReadOnlyList<WorkItemSummary>> GetSummariesAsync(IReadOnlyCollection<Guid> itemIds, CancellationToken cancellationToken = default)

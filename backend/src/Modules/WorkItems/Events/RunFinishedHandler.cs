@@ -109,7 +109,13 @@ public sealed class RunFinishedHandler(
         // Transition already cleared the claim in the terminal categories; a run that
         // changed nothing (cancelled, or a skipped transition) still lets the item go.
         // A stopped chain's run let the item go long ago; a claim now is somebody else's.
-        if (item.ClaimedBy is not null && (!@event.ChainStopped || item.ClaimedBy == @event.AgentId)) item.ReleaseStaleClaim(now);
+        // The release changes the item's version like the claim did, so it says so the same way:
+        // a page still holding the claimed version would have its next save refused.
+        if (item.ClaimedBy is not null && (!@event.ChainStopped || item.ClaimedBy == @event.AgentId))
+        {
+            item.ReleaseStaleClaim(now);
+            item.Changed(actorId, "claim");
+        }
 
         // A multi-repository run reports a pull request per changed repository; each is linked.
         var pullRequests = @event.PullRequestUrls.Count > 0 ? @event.PullRequestUrls
