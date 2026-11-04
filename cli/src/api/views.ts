@@ -281,6 +281,9 @@ export interface PlaybookView {
   harness: string
   onSuccessStateId: string | null
   onFailureStateId: string | null
+  /** One of the board columns showing the outcome state; absent from older servers. */
+  onSuccessColumnId?: string | null
+  onFailureColumnId?: string | null
   maxMinutes: number
   isDefault: boolean
   createdBy: string

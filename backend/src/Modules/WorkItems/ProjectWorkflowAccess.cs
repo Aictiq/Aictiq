@@ -1,9 +1,11 @@
+using Aictiq.Modules.Tenancy;
+using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.SharedKernel.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aictiq.Modules.WorkItems;
 
-internal sealed class ProjectWorkflowAccess(WorkItemsDbContext db) : IProjectWorkflowAccess
+internal sealed class ProjectWorkflowAccess(WorkItemsDbContext db, TenancyDbContext tenancy) : IProjectWorkflowAccess
 {
     public async Task<IReadOnlyDictionary<Guid, string>> GetStateNamesAsync(
         Guid projectId, IReadOnlyCollection<Guid> stateIds, CancellationToken cancellationToken = default) =>
@@ -24,5 +26,19 @@ internal sealed class ProjectWorkflowAccess(WorkItemsDbContext db) : IProjectWor
             .Distinct()
             .CountAsync(cancellationToken);
         return found == distinct.Length;
+    }
+
+    public async Task<bool> ColumnsShowStatesAsync(
+        Guid projectId, IReadOnlyCollection<(Guid ColumnId, Guid StateId)> columns, CancellationToken cancellationToken = default)
+    {
+        if (columns.Count == 0) return true;
+        var teamIds = await tenancy.Teams.AsNoTracking().Where(team => team.ProjectId == projectId)
+            .Select(team => team.Id).ToListAsync(cancellationToken);
+        // Board columns live in each board's jsonb config, so the project's boards are read whole.
+        var boardColumns = (await db.Boards.AsNoTracking()
+                .Where(board => teamIds.Contains(board.TeamId) && board.Kind == BoardKind.Kanban)
+                .ToListAsync(cancellationToken))
+            .SelectMany(board => board.Config.Columns).ToList();
+        return columns.All(pair => boardColumns.Any(column => column.Id == pair.ColumnId && column.StateIds.Contains(pair.StateId)));
     }
 }

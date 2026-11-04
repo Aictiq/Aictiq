@@ -59,6 +59,8 @@ internal static class RunCompletion
             outcome, onSuccess, onFailure,
             summary, pullRequestUrl, failureReason)
         {
+            OnSuccessColumnId = stage ? null : playbook?.OnSuccessColumnId,
+            OnFailureColumnId = stage ? null : playbook?.OnFailureColumnId,
             Refinement = refine, Chat = chat, TriggerCommentId = run.TriggerCommentId, RequestedBy = run.RequestedBy,
             NeedsInput = refinement is { Status: RefinementStatus.NeedsInput },
             Refined = refinement is { Status: RefinementStatus.Ready },

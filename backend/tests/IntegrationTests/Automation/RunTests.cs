@@ -455,6 +455,50 @@ public sealed class RunTests(PostgresFixture postgres, GarageFixture garage) : R
     }
 
     [Fact]
+    public async Task a_failed_run_puts_the_item_in_the_playbooks_failure_column()
+    {
+        var team = (await Owner.GetFromJsonAsync<List<TeamView>>($"{ProjectBase}/teams/", ApiTestContext.Json, Ct))![0];
+        var boardPath = $"/api/v1/orgs/{Slug}/teams/{team.Id}/board";
+        var current = (await Owner.GetFromJsonAsync<BoardView>($"{boardPath}?take=0", ApiTestContext.Json, Ct))!;
+        var newState = await StateIdAsync("New");
+        var active = await StateIdAsync("Active");
+        var savedBoard = await Owner.PutAsJsonAsync(boardPath, new UpdateBoardRequest(
+            [
+                new BoardColumnConfig("New", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Refined", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Failed", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Active", [active], null, Guid.Empty),
+            ], null, null, null, current.Version), ApiTestContext.Json, Ct);
+        Assert.True(savedBoard.IsSuccessStatusCode, await savedBoard.Content.ReadAsStringAsync(Ct));
+        var failedColumn = (await savedBoard.Content.ReadFromJsonAsync<BoardView>(ApiTestContext.Json, Ct))!
+            .Columns.Single(column => column.Name == "Failed").Id;
+        var playbook = (await Owner.GetFromJsonAsync<PlaybookView>($"{ProjectBase}/playbooks/{PlaybookId}", ApiTestContext.Json, Ct))!;
+        var updated = await Owner.PatchAsJsonAsync($"{ProjectBase}/playbooks/{PlaybookId}",
+            new UpdatePlaybookRequest { OnFailureStateId = newState, OnFailureColumnId = failedColumn, Version = playbook.Version },
+            ApiTestContext.Json, Ct);
+        Assert.True(updated.IsSuccessStatusCode, await updated.Content.ReadAsStringAsync(Ct));
+        var item = await ItemAsync(ItemKey);
+        (await Owner.PostAsJsonAsync($"{ProjectBase}/items/bulk",
+            new BulkUpdateItemsRequest([ItemKey], new BulkItemSet(null, null, null, team.Id, null, null, null),
+                new Dictionary<string, uint> { [ItemKey] = item.Version }), ApiTestContext.Json, Ct)).EnsureSuccessStatusCode();
+
+        var run = await DispatchAsync(ItemKey);
+        using var runner = RunnerClient(Runner.Secret);
+        await ClaimAsync(runner);
+        Assert.Equal(HttpStatusCode.NoContent, (await StartedAsync(runner, run.Id)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await FinishAsync(runner, run.Id, RunOutcomes.Failed, failureReason: "exit code 1")).StatusCode);
+        var staged = await StagedRunFinishedAsync(run.Id);
+        Assert.Equal(failedColumn, staged.OnFailureColumnId);
+        await InvokeRunFinishedAsync(staged);
+
+        var after = await ItemAsync(ItemKey);
+        Assert.Equal(newState, after.StateId);
+        Assert.Equal(failedColumn, after.BoardColumnId);
+        var board = (await Owner.GetFromJsonAsync<BoardView>(boardPath, ApiTestContext.Json, Ct))!;
+        Assert.Equal(ItemKey, Assert.Single(board.Columns.Single(column => column.Name == "Failed").Cards).Key);
+    }
+
+    [Fact]
     public async Task member_without_the_operator_flag_gets_403_on_dispatch_and_log_but_200_on_status()
     {
         var run = await DispatchAsync(ItemKey);

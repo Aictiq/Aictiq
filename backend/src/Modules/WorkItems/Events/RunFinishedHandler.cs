@@ -46,6 +46,11 @@ public sealed class RunFinishedHandler(
             RunOutcomes.Succeeded => @event.OnSuccessStateId,
             _ => @event.OnFailureStateId,
         };
+        var requestedColumn = !movesItem ? null : @event.Outcome switch
+        {
+            RunOutcomes.Succeeded => @event.OnSuccessColumnId,
+            _ => @event.OnFailureColumnId,
+        };
         if (@event.Outcome == RunOutcomes.Succeeded && requestedTarget is null && movesItem)
         {
             // No playbook success state named: fall back to the workflow's
@@ -85,6 +90,19 @@ public sealed class RunFinishedHandler(
                     Field = "auto-transition-skipped", OldValue = JsonSerializer.Serialize(previousStateId),
                     NewValue = JsonSerializer.Serialize(new { reason = "not allowed", targetStateId = requestedTarget }), EventId = @event.EventId,
                 });
+            }
+        }
+
+        // The playbook may name one of several columns showing the state. The item's team board
+        // must have it still and show the state there; otherwise the board places the item itself.
+        if (requestedColumn is { } columnId && requestedTarget is not null && item.StateId == requestedTarget
+            && item.TeamId is { } teamId && item.BoardColumnId != columnId)
+        {
+            var board = await db.Boards.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TeamId == teamId && x.Kind == BoardKind.Kanban, cancellationToken);
+            if (board?.Config.Columns.Any(x => x.Id == columnId && x.StateIds.Contains(item.StateId)) == true)
+            {
+                item.BoardColumnId = columnId;
             }
         }
 

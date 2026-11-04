@@ -24,6 +24,16 @@ public sealed class Playbook : TenantEntity, IAudited
     public required string Harness { get; set; }
     public Guid? OnSuccessStateId { get; set; }
     public Guid? OnFailureStateId { get; set; }
+
+    /// <summary>
+    /// The board column the item lands in on success: one of several columns that share
+    /// <see cref="OnSuccessStateId"/>. Null, or a column the item's team board does not have,
+    /// leaves the column to the board.
+    /// </summary>
+    public Guid? OnSuccessColumnId { get; set; }
+
+    /// <summary>The board column the item lands in on failure; see <see cref="OnSuccessColumnId"/>.</summary>
+    public Guid? OnFailureColumnId { get; set; }
     public int MaxMinutes { get; set; } = 60;
     public bool IsDefault { get; set; }
     public bool WorkOnDefaultBranch { get; set; }

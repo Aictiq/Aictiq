@@ -349,9 +349,17 @@ namespace Aictiq.Modules.Automation.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("OnFailureColumnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("on_failure_column_id");
+
                     b.Property<Guid?>("OnFailureStateId")
                         .HasColumnType("uuid")
                         .HasColumnName("on_failure_state_id");
+
+                    b.Property<Guid?>("OnSuccessColumnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("on_success_column_id");
 
                     b.Property<Guid?>("OnSuccessStateId")
                         .HasColumnType("uuid")

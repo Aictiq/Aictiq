@@ -44,39 +44,79 @@ export const boardMove = (slug: string, key: string, body: { toStateId: string; 
   apiFetch<WorkItem>(`/orgs/${slug}/items/${key}/board-move`, { method: 'POST', body })
 
 /**
- * Names each workflow state the way the project's boards show it. Teams rename columns
- * freely while the underlying states keep their workflow names, so a state picker that
- * lists raw state names does not match what people see on the board. A column that groups
- * several states keeps the state name in parentheses so the choice stays unambiguous.
- * Falls back to the state's own name when no board shows it or boards cannot be read.
+ * A place a playbook can send an item: a workflow state, and the board column that should show
+ * it when several columns share that state. `columnId` is null for a state no board shows.
+ */
+export interface BoardTarget {
+  stateId: string
+  columnId: string | null
+  /** The column's name, with the state in parentheses when the column groups several states. */
+  name: string
+  /** The team whose board has the column, when the project has more than one board. */
+  team: string | null
+}
+
+/** How a target reads in a picker: the column name, then its team when that is ambiguous. */
+export const boardTargetLabel = (target: BoardTarget) =>
+  target.team ? `${target.name} · ${target.team}` : target.name
+
+/**
+ * Every column of the project's team boards, once per state it shows, in workflow order. Teams
+ * rename columns freely while the underlying states keep their workflow names, so a picker that
+ * lists raw state names does not match what people see on the board. States no board shows keep
+ * their own name, and every state falls back to its own name when boards cannot be read.
+ */
+export async function boardTargets(
+  slug: string,
+  projectKey: string,
+  states: { id: string; name: string }[],
+): Promise<BoardTarget[]> {
+  let columns: { column: BoardColumn; team: string }[] = []
+  let boardCount = 0
+  try {
+    const teams = await listTeams(slug, projectKey)
+    const boards = await Promise.all(teams.map((team) => getBoard(slug, team.id, { take: 0 })))
+    boardCount = boards.length
+    columns = boards.flatMap((board, index) =>
+      board.columns.map((column) => ({ column, team: teams[index]!.name })),
+    )
+  } catch {
+    columns = []
+  }
+  return states.flatMap((state): BoardTarget[] => {
+    const showing = columns.filter(({ column }) => column.stateIds.includes(state.id))
+    if (showing.length === 0) {
+      return [{ stateId: state.id, columnId: null, name: state.name, team: null }]
+    }
+    return showing.map(({ column, team }) => ({
+      stateId: state.id,
+      columnId: column.id,
+      name: column.stateIds.length > 1 ? `${column.name} (${state.name})` : column.name,
+      team: boardCount > 1 ? team : null,
+    }))
+  })
+}
+
+/**
+ * Names each workflow state the way the project's boards show it (see `boardTargets`). A state
+ * several columns show is named after all of them, joined with " / ".
  */
 export async function boardStateLabels(
   slug: string,
   projectKey: string,
   states: { id: string; name: string }[],
 ): Promise<Map<string, string>> {
-  const columnsByState = new Map<string, Set<string>>()
-  try {
-    const teams = await listTeams(slug, projectKey)
-    const boards = await Promise.all(teams.map((team) => getBoard(slug, team.id, { take: 0 })))
-    for (const column of boards.flatMap((board) => board.columns)) {
-      for (const stateId of column.stateIds) {
-        const label =
-          column.stateIds.length > 1 ? `${column.name} (${stateNameOf(stateId)})` : column.name
-        if (!columnsByState.has(stateId)) columnsByState.set(stateId, new Set())
-        columnsByState.get(stateId)!.add(label)
-      }
-    }
-  } catch {
-    columnsByState.clear()
-  }
-  return new Map(
-    states.map((state) => [state.id, [...(columnsByState.get(state.id) ?? [state.name])].join(' / ')]),
-  )
+  return stateLabels(await boardTargets(slug, projectKey, states))
+}
 
-  function stateNameOf(stateId: string) {
-    return states.find((state) => state.id === stateId)?.name ?? 'state'
+/** One name per state from its targets, the way `boardStateLabels` names it. */
+export function stateLabels(targets: BoardTarget[]): Map<string, string> {
+  const names = new Map<string, Set<string>>()
+  for (const target of targets) {
+    if (!names.has(target.stateId)) names.set(target.stateId, new Set())
+    names.get(target.stateId)!.add(target.name)
   }
+  return new Map([...names].map(([stateId, set]) => [stateId, [...set].join(' / ')]))
 }
 
 /** The same states, renamed to what the project's boards call them (see `boardStateLabels`). */

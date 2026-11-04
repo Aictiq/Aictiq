@@ -11,4 +11,12 @@ public interface IProjectWorkflowAccess
     Task<bool> StatesBelongToProjectAsync(
         Guid projectId, IReadOnlyCollection<Guid> stateIds,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// True when every column is on a board of one of the project's teams and shows the state
+    /// paired with it there.
+    /// </summary>
+    Task<bool> ColumnsShowStatesAsync(
+        Guid projectId, IReadOnlyCollection<(Guid ColumnId, Guid StateId)> columns,
+        CancellationToken cancellationToken = default);
 }
