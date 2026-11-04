@@ -219,6 +219,32 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
     }
 
     [Fact]
+    public async Task an_admin_reads_a_members_chat_run_in_full()
+    {
+        using var member = await MemberAsync(canOperateFactory: true);
+        var asked = await AskAsync(member, "Why does the nightly export fail?");
+        var runId = asked.Messages[0].RunId!.Value;
+        using var runner = RunnerClient(Runner.Secret);
+        await StartAsync(runner, runId);
+        Assert.Equal(HttpStatusCode.NoContent, (await PostLogAsync(runner, runId, (0, "reading the export job\n"))).StatusCode);
+        await FinishAsync(runner, runId, new RunnerFinishRequest("succeeded", 0, "The bucket moved.", null, null, null, null, null));
+
+        // The Owner is an organization Admin: the member's question, answer and log are theirs to read.
+        var seen = await RunAsync(runId);
+        Assert.False(seen.Private);
+        Assert.Equal("The bucket moved.", seen.OutcomeSummary);
+        Assert.Contains("Why does the nightly export fail?", seen.PromptSnapshot);
+        Assert.Contains((await LogAsync(runId)).Items, entry => entry.Text.Contains("reading the export job", StringComparison.Ordinal));
+
+        // Another member does not.
+        using var colleague = await MemberAsync(canOperateFactory: true);
+        Assert.True((await colleague.GetFromJsonAsync<RunView>($"/api/v1/orgs/{Slug}/runs/{runId}", ApiTestContext.Json, Ct))!.Private);
+        Assert.Equal(HttpStatusCode.NotFound, (await colleague.GetAsync($"/api/v1/orgs/{Slug}/runs/{runId}/log", Ct)).StatusCode);
+        // The member who asked still reads their own.
+        Assert.Equal(HttpStatusCode.OK, (await member.GetAsync($"/api/v1/orgs/{Slug}/runs/{runId}/log", Ct)).StatusCode);
+    }
+
+    [Fact]
     public async Task the_run_token_creates_items_in_its_project_as_the_asker_and_writes_nothing_else()
     {
         var other = await CreateProjectAsync("Ops", "ops", ProjectVisibility.Organization);

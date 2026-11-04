@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Aictiq.Modules.Automation;
+using Aictiq.Modules.Automation.Access;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
@@ -82,7 +83,8 @@ public sealed class ProjectHub : Hub
     /// <summary>
     /// Subscribes to one run's live log - raw harness output, so the audience is the one
     /// <c>GET /orgs/{slug}/runs/{id}/log</c> admits: a member who can see the run's project
-    /// <em>and</em> operates the factory. A hub call has no route to resolve a tenant from,
+    /// <em>and</em> operates the factory, and who started the run or is an organization Admin.
+    /// A hub call has no route to resolve a tenant from,
     /// so the organization comes from the slug (or a bound token's claim) and the run is
     /// then read inside it, through the ordinary tenant filter and RLS - never past them.
     /// Every refusal is the same "not found", so trying teaches nothing.
@@ -113,11 +115,14 @@ public sealed class ProjectHub : Hub
         using var tenant = _tenant.Use(orgId);
         if (await _projects.GetOrgRoleAsync(userId, orgId, Context.ConnectionAborted) is null)
             throw new HubException("Run not found.");
-        var projectId = await _runs.Runs.AsNoTracking().Where(r => r.Id == id)
-            .Select(r => (Guid?)r.ProjectId).SingleOrDefaultAsync(Context.ConnectionAborted);
-        if (projectId is null
-            || await _projects.GetProjectRoleAsync(userId, projectId.Value, Context.ConnectionAborted) is null
-            || !await _projects.CanOperateFactoryAsync(userId, orgId, Context.ConnectionAborted))
+        var run = await _runs.Runs.AsNoTracking().Where(r => r.Id == id)
+            .Select(r => new { r.ProjectId, r.RequestedBy }).SingleOrDefaultAsync(Context.ConnectionAborted);
+        if (run is null
+            || await _projects.GetProjectRoleAsync(userId, run.ProjectId, Context.ConnectionAborted) is null
+            || !await _projects.CanOperateFactoryAsync(userId, orgId, Context.ConnectionAborted)
+            // The live log is the run's log: only its starter or an organization Admin reads it.
+            || !RunPrivacy.SeesInFull(run.RequestedBy, userId,
+                await RunPrivacy.IsOrgAdminAsync(_projects, userId, orgId, Context.ConnectionAborted)))
             throw new HubException("Run not found.");
 
         await Groups.AddToGroupAsync(Context.ConnectionId, RunGroup(id), Context.ConnectionAborted);

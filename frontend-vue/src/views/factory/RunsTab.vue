@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, ExternalLink, X } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, ExternalLink, Lock, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
@@ -519,6 +519,15 @@ watch(
               data-testid="run-row-continued"
             >
               → continued
+            </span>
+            <span
+              v-if="run.private"
+              class="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs"
+              title="Someone else started this run: its log, prompt and summary are theirs and organization admins' to read."
+              data-testid="run-row-private"
+            >
+              <Lock class="size-3" aria-hidden="true" />
+              private
             </span>
             <span class="ml-auto flex items-center gap-3">
               <a

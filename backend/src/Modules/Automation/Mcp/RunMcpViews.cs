@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Aictiq.Modules.Automation.Access;
 using Aictiq.Modules.Automation.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Contracts;
@@ -20,8 +21,9 @@ internal static class RunMcpViews
     public const int LogTail = 50;
 
     /// <param name="Hidden">
-    /// Someone else's project-chat run: its answer and log are that person's private chat, so
-    /// neither is shown - not even to an operator.
+    /// Someone else's run, seen by a viewer who is not an organization Admin: its answer, its
+    /// failure reason and its log belong to the person who started it (<see cref="RunPrivacy"/>),
+    /// so none is shown - not even to an operator.
     /// </param>
     public sealed record VisibleRun(Run Run, bool IsOperator, bool Hidden = false);
 
@@ -40,7 +42,7 @@ internal static class RunMcpViews
         {
             return null;
         }
-        var hidden = run.Kind == RunKind.ProjectChat && run.RequestedBy != userId;
+        var hidden = !RunPrivacy.SeesInFull(run, userId, await RunPrivacy.IsOrgAdminAsync(access, userId, organizationId, ct));
         return new VisibleRun(run, !hidden && await access.CanOperateFactoryAsync(userId, organizationId, ct), hidden);
     }
 

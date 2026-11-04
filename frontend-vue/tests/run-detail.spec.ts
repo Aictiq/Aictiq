@@ -392,6 +392,29 @@ describe('RunDetailView continue and retry', () => {
     expect(wrapper.find('[data-testid="run-retry"]').exists()).toBe(false)
   })
 
+  it("shows that someone else's private run has a log, but never asks for it", async () => {
+    const { wrapper, fetchMock } = await mountRun({
+      ...failed,
+      private: true,
+      outcomeSummary: null,
+      failureReason: null,
+      promptSnapshot: null,
+    })
+
+    expect(wrapper.get('[data-testid="run-log-private"]').text()).toContain(
+      'visible only to them and to organization admins',
+    )
+    expect(wrapper.find('[data-testid="run-log"]').exists()).toBe(false)
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/log'))).toBe(false)
+  })
+
+  it('reads the log of a run the viewer may see in full', async () => {
+    const { wrapper, fetchMock } = await mountRun({ ...failed, private: false })
+
+    expect(wrapper.find('[data-testid="run-log-private"]').exists()).toBe(false)
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/log'))).toBe(true)
+  })
+
   it('offers neither once the run was continued, and links the next run', async () => {
     const { wrapper } = await mountRun({ ...failed, continuable: false, continuedByRunId: 'r-3' })
 
