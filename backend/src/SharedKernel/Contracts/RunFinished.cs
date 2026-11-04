@@ -52,6 +52,15 @@ public sealed record RunFinished(
     /// </summary>
     public Guid? TriggerCommentId { get; init; }
 
+    /// <summary>
+    /// The board column the playbook names beside its success state, or null. Applied only
+    /// when the item reaches that state and its team board has that column.
+    /// </summary>
+    public Guid? OnSuccessColumnId { get; init; }
+
+    /// <summary>The board column the playbook names beside its failure state; see <see cref="OnSuccessColumnId"/>.</summary>
+    public Guid? OnFailureColumnId { get; init; }
+
     /// <summary>The person who dispatched the run, or null when an automation rule did.</summary>
     public string? RequestedBy { get; init; }
 

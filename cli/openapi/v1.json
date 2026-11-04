@@ -930,7 +930,21 @@
               "string"
             ]
           },
+          "onFailureColumnId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "onFailureStateId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "onSuccessColumnId": {
             "format": "uuid",
             "type": [
               "null",
@@ -3043,7 +3057,21 @@
               "string"
             ]
           },
+          "onFailureColumnId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "onFailureStateId": {
+            "format": "uuid",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "onSuccessColumnId": {
             "format": "uuid",
             "type": [
               "null",

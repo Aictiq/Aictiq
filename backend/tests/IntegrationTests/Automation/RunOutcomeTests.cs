@@ -186,6 +186,105 @@ public sealed class RunOutcomeTests(PostgresFixture postgres, GarageFixture gara
         Assert.Equal(1, row.Completed);
     }
 
+    [Fact]
+    public async Task failure_lands_in_the_playbooks_column_among_columns_sharing_its_state()
+    {
+        var team = await TeamAsync();
+        var board = await SharedNewColumnsAsync(team.Id);
+        var failedColumn = board.Columns.Single(column => column.Name == "Failed").Id;
+        var item = await CreateItemAsync("Fails on purpose");
+        await AssignTeamAsync(team.Id, item);
+        await ClaimByAgentAsync(item.Key);
+        var newState = await StateIdAsync("New");
+
+        await HandleAsync(new RunFinished(_organizationId, _project.Id, item.Id, item.Key, Guid.NewGuid(), _agentId,
+            RunOutcomes.Failed, null, newState, null, null, "exit code 1")
+        { OnFailureColumnId = failedColumn });
+
+        var after = await ItemAsync(item.Key);
+        Assert.Equal(newState, after.StateId);
+        Assert.Equal(failedColumn, after.BoardColumnId);
+        var rendered = (await _owner.GetFromJsonAsync<BoardView>(
+            $"/api/v1/orgs/{Slug}/teams/{team.Id}/board", ApiTestContext.Json, Ct))!;
+        Assert.Equal(item.Key, Assert.Single(rendered.Columns.Single(column => column.Name == "Failed").Cards).Key);
+        Assert.Empty(rendered.Columns.Single(column => column.Name == "New").Cards);
+        Assert.Empty(rendered.Columns.Single(column => column.Name == "Refined").Cards);
+    }
+
+    [Fact]
+    public async Task a_column_the_items_board_lacks_falls_back_to_the_state_alone()
+    {
+        var team = await TeamAsync();
+        await SharedNewColumnsAsync(team.Id);
+        var item = await CreateItemAsync("Column went away");
+        await AssignTeamAsync(team.Id, item);
+        await ClaimByAgentAsync(item.Key);
+        var newState = await StateIdAsync("New");
+        var gone = Guid.NewGuid();
+
+        await HandleAsync(new RunFinished(_organizationId, _project.Id, item.Id, item.Key, Guid.NewGuid(), _agentId,
+            RunOutcomes.Failed, null, newState, null, null, "exit code 1")
+        { OnFailureColumnId = gone });
+
+        var after = await ItemAsync(item.Key);
+        Assert.Equal(newState, after.StateId);
+        Assert.NotEqual(gone, after.BoardColumnId);
+        Assert.Contains((await CommentsAsync(item.Key)).Items, comment => comment.BodyMarkdown.Contains("failed"));
+    }
+
+    [Fact]
+    public async Task another_teams_column_falls_back_to_the_state_alone()
+    {
+        var team = await TeamAsync();
+        var otherResponse = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/projects/{ProjectKey}/teams",
+            new CreateTeamRequest("Other", "OTH"), ApiTestContext.Json, Ct);
+        Assert.True(otherResponse.IsSuccessStatusCode, await otherResponse.Content.ReadAsStringAsync(Ct));
+        var other = (await otherResponse.Content.ReadFromJsonAsync<TeamView>(ApiTestContext.Json, Ct))!;
+        var otherFailed = (await SharedNewColumnsAsync(other.Id)).Columns.Single(column => column.Name == "Failed").Id;
+        var item = await CreateItemAsync("Wrong team's column");
+        await AssignTeamAsync(team.Id, item);
+        await ClaimByAgentAsync(item.Key);
+        var newState = await StateIdAsync("New");
+
+        await HandleAsync(new RunFinished(_organizationId, _project.Id, item.Id, item.Key, Guid.NewGuid(), _agentId,
+            RunOutcomes.Failed, null, newState, null, null, "exit code 1")
+        { OnFailureColumnId = otherFailed });
+
+        var after = await ItemAsync(item.Key);
+        Assert.Equal(newState, after.StateId);
+        Assert.NotEqual(otherFailed, after.BoardColumnId);
+    }
+
+    private async Task<TeamView> TeamAsync() =>
+        (await _owner.GetFromJsonAsync<List<TeamView>>(
+            $"/api/v1/orgs/{Slug}/projects/{ProjectKey}/teams/", ApiTestContext.Json, Ct))![0];
+
+    /// <summary>New, Refined and Failed all show the New state; Active shows the claimed item.</summary>
+    private async Task<BoardView> SharedNewColumnsAsync(Guid teamId)
+    {
+        var path = $"/api/v1/orgs/{Slug}/teams/{teamId}/board";
+        var current = (await _owner.GetFromJsonAsync<BoardView>($"{path}?take=0", ApiTestContext.Json, Ct))!;
+        var newState = await StateIdAsync("New");
+        var active = await StateIdAsync("Active");
+        var saved = await _owner.PutAsJsonAsync(path, new UpdateBoardRequest(
+            [
+                new BoardColumnConfig("New", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Refined", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Failed", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Active", [active], null, Guid.Empty),
+            ], null, null, null, current.Version), ApiTestContext.Json, Ct);
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
+        return (await saved.Content.ReadFromJsonAsync<BoardView>(ApiTestContext.Json, Ct))!;
+    }
+
+    private async Task AssignTeamAsync(Guid teamId, WorkItemView item)
+    {
+        var response = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/projects/{ProjectKey}/items/bulk",
+            new BulkUpdateItemsRequest([item.Key], new BulkItemSet(null, null, null, teamId, null, null, null),
+                new Dictionary<string, uint> { [item.Key] = item.Version }), ApiTestContext.Json, Ct);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+    }
+
     private async Task<WorkItemView> CreateItemAsync(string title)
     {
         var response = await _owner.PostAsJsonAsync($"/api/v1/orgs/{Slug}/projects/{ProjectKey}/items/",

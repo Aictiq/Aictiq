@@ -124,6 +124,10 @@ public sealed class NullProjectWorkflowAccess : IProjectWorkflowAccess
     public Task<bool> StatesBelongToProjectAsync(
         Guid projectId, IReadOnlyCollection<Guid> stateIds,
         CancellationToken cancellationToken = default) => Task.FromResult(stateIds.Count == 0);
+
+    public Task<bool> ColumnsShowStatesAsync(
+        Guid projectId, IReadOnlyCollection<(Guid ColumnId, Guid StateId)> columns,
+        CancellationToken cancellationToken = default) => Task.FromResult(columns.Count == 0);
 }
 
 /// <summary>No Tenancy module means no invitations, so no registration is confirmed by one.</summary>

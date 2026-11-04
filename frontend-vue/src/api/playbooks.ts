@@ -21,6 +21,12 @@ export interface Playbook {
   harness: PlaybookHarness
   onSuccessStateId: string | null
   onFailureStateId: string | null
+  /**
+   * The board column, of several showing the success or failure state, the item lands in.
+   * Null leaves the column to the board. Absent from older servers.
+   */
+  onSuccessColumnId?: string | null
+  onFailureColumnId?: string | null
   workOnDefaultBranch: boolean
   maxMinutes: number
   isDefault: boolean
@@ -56,6 +62,9 @@ export interface SavePlaybookBody {
   harness: PlaybookHarness
   onSuccessStateId: string | null
   onFailureStateId: string | null
+  /** One of the board columns showing the state; left out or null leaves the column to the board. */
+  onSuccessColumnId?: string | null
+  onFailureColumnId?: string | null
   workOnDefaultBranch: boolean
   maxMinutes: number
   /** Fleet mode only; left out entirely while it is off, so a save never touches them. */

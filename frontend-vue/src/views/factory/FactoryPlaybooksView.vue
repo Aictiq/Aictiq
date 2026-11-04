@@ -28,7 +28,7 @@ import {
   type RepositoryStep,
   type SavePlaybookBody,
 } from '@/api/playbooks'
-import { withBoardNames } from '@/api/boards'
+import { boardTargetLabel, boardTargets, stateLabels, type BoardTarget } from '@/api/boards'
 import { listProjects, type Project } from '@/api/projects'
 import { listWorkflows, type WorkflowState } from '@/api/workflows'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -67,6 +67,8 @@ interface ProjectPlaybooks {
   playbooks: Playbook[]
   /** Named the way the project's boards show them, not by their workflow names. */
   states: WorkflowState[]
+  /** Where a run can send the item: each board column once per state it shows. */
+  targets: BoardTarget[]
 }
 
 const org = useOrgScope()
@@ -87,8 +89,9 @@ const confirmingDelete = ref<{ group: ProjectPlaybooks; playbook: Playbook } | n
 const name = ref('')
 const instructions = ref('')
 const harness = ref<PlaybookHarness>('claude')
-const onSuccessStateId = ref('')
-const onFailureStateId = ref('')
+/** A state id, or `stateId:columnId` for one of the board columns showing it (see `targetValue`). */
+const onSuccessTarget = ref('')
+const onFailureTarget = ref('')
 const maxMinutes = ref(60)
 const workOnDefaultBranch = ref(false)
 /** Fleet mode only: never shown, and never sent, while it is not active. */
@@ -150,14 +153,14 @@ async function load() {
           listPlaybooks(org.slug.value, project.key),
           listWorkflows(org.slug.value, project.key),
         ])
+        const states = workflows.find((workflow) => workflow.isDefault)?.states ?? []
+        const targets = await boardTargets(org.slug.value, project.key, states)
+        const labels = stateLabels(targets)
         return {
           project,
           playbooks,
-          states: await withBoardNames(
-            org.slug.value,
-            project.key,
-            workflows.find((workflow) => workflow.isDefault)?.states ?? [],
-          ),
+          states: states.map((state) => ({ ...state, name: labels.get(state.id) ?? state.name })),
+          targets,
         }
       }),
     )
@@ -184,8 +187,16 @@ async function openEditor(group: ProjectPlaybooks, playbook: Playbook | null = n
   instructions.value = ''
   legacyPage.value = null
   harness.value = playbook?.harness ?? 'claude'
-  onSuccessStateId.value = playbook?.onSuccessStateId ?? ''
-  onFailureStateId.value = playbook?.onFailureStateId ?? ''
+  onSuccessTarget.value = savedTarget(
+    group,
+    playbook?.onSuccessStateId,
+    playbook?.onSuccessColumnId,
+  )
+  onFailureTarget.value = savedTarget(
+    group,
+    playbook?.onFailureStateId,
+    playbook?.onFailureColumnId,
+  )
   maxMinutes.value = playbook?.maxMinutes ?? 60
   workOnDefaultBranch.value = playbook?.workOnDefaultBranch ?? false
   requiredTags.value = [...(playbook?.requiredTags ?? [])]
@@ -225,8 +236,10 @@ async function save() {
     name: name.value.trim(),
     instructionsMarkdown: instructions.value,
     harness: harness.value,
-    onSuccessStateId: onSuccessStateId.value || null,
-    onFailureStateId: onFailureStateId.value || null,
+    onSuccessStateId: parseTarget(onSuccessTarget.value).stateId,
+    onSuccessColumnId: parseTarget(onSuccessTarget.value).columnId,
+    onFailureStateId: parseTarget(onFailureTarget.value).stateId,
+    onFailureColumnId: parseTarget(onFailureTarget.value).columnId,
     maxMinutes: maxMinutes.value,
     workOnDefaultBranch: workOnDefaultBranch.value,
     // Left out entirely while fleet mode is off, so the request is the one it always was.
@@ -394,8 +407,54 @@ function removeStage(group: ProjectPlaybooks, playbook: Playbook, index: number)
   )
 }
 
-function stateName(group: ProjectPlaybooks, stateId: string | null) {
+function targetValue(stateId: string | null | undefined, columnId: string | null | undefined) {
+  if (!stateId) return ''
+  return columnId ? `${stateId}:${columnId}` : stateId
+}
+
+/** A state saved alone that only one column shows is that column: the item lands there anyway. */
+function savedTarget(
+  group: ProjectPlaybooks,
+  stateId: string | null | undefined,
+  columnId: string | null | undefined,
+) {
+  const showing = group.targets.filter((target) => target.stateId === stateId)
+  if (stateId && !columnId && showing.length === 1)
+    return targetValue(stateId, showing[0]!.columnId)
+  return targetValue(stateId, columnId)
+}
+
+function parseTarget(value: string) {
+  const [stateId, columnId] = value.split(':')
+  return { stateId: stateId || null, columnId: columnId || null }
+}
+
+/**
+ * The On success / On failure choices: one per board column, so columns sharing a state can
+ * be told apart. A playbook saved with a state alone, or with a column since deleted, keeps
+ * that state as a choice named after all its columns, so opening and saving changes nothing.
+ */
+function targetOptions(group: ProjectPlaybooks | undefined, current: string) {
+  if (!group) return []
+  const options = group.targets.map((target) => ({
+    value: targetValue(target.stateId, target.columnId),
+    label: boardTargetLabel(target),
+  }))
+  if (!current || options.some((option) => option.value === current)) return options
+  const { stateId } = parseTarget(current)
+  const state = group.states.find((entry) => entry.id === stateId)
+  if (!state) return options
+  const at = options.findIndex((option) => parseTarget(option.value).stateId === stateId)
+  options.splice(at < 0 ? options.length : at, 0, { value: current, label: state.name })
+  return options
+}
+
+function outcomeName(group: ProjectPlaybooks, stateId: string | null, columnId?: string | null) {
   if (!stateId) return 'No transition'
+  const target = columnId
+    ? group.targets.find((entry) => entry.stateId === stateId && entry.columnId === columnId)
+    : undefined
+  if (target) return boardTargetLabel(target)
   return group.states.find((state) => state.id === stateId)?.name ?? 'State unavailable'
 }
 </script>
@@ -490,8 +549,11 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
                     ? 'Push to default branch'
                     : 'Branch and pull request'
                 }}
-                · Success: {{ stateName(group, playbook.onSuccessStateId) }} · Failure:
-                {{ stateName(group, playbook.onFailureStateId) }} · {{ playbook.maxMinutes }} min
+                · Success:
+                {{ outcomeName(group, playbook.onSuccessStateId, playbook.onSuccessColumnId) }} ·
+                Failure:
+                {{ outcomeName(group, playbook.onFailureStateId, playbook.onFailureColumnId) }} ·
+                {{ playbook.maxMinutes }} min
               </p>
               <div
                 v-if="fleetActive && playbook.requiredTags?.length"
@@ -771,16 +833,16 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
               <label for="playbook-success" class="text-sm font-medium">On success</label>
               <select
                 id="playbook-success"
-                v-model="onSuccessStateId"
+                v-model="onSuccessTarget"
                 class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
               >
                 <option value="">Do not move the item</option>
                 <option
-                  v-for="state in editing?.group.states ?? []"
-                  :key="state.id"
-                  :value="state.id"
+                  v-for="option in targetOptions(editing?.group, onSuccessTarget)"
+                  :key="option.value"
+                  :value="option.value"
                 >
-                  {{ state.name }}
+                  {{ option.label }}
                 </option>
               </select>
             </div>
@@ -788,16 +850,16 @@ function stateName(group: ProjectPlaybooks, stateId: string | null) {
               <label for="playbook-failure" class="text-sm font-medium">On failure</label>
               <select
                 id="playbook-failure"
-                v-model="onFailureStateId"
+                v-model="onFailureTarget"
                 class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
               >
                 <option value="">Do not move the item</option>
                 <option
-                  v-for="state in editing?.group.states ?? []"
-                  :key="state.id"
-                  :value="state.id"
+                  v-for="option in targetOptions(editing?.group, onFailureTarget)"
+                  :key="option.value"
+                  :value="option.value"
                 >
-                  {{ state.name }}
+                  {{ option.label }}
                 </option>
               </select>
             </div>

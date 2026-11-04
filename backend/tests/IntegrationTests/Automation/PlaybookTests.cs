@@ -8,6 +8,7 @@ using Aictiq.Modules.Automation.Events;
 using Aictiq.Modules.Tenancy.Domain;
 using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.Modules.Wiki.Endpoints;
+using Aictiq.Modules.WorkItems.Domain;
 using Aictiq.Modules.WorkItems.Endpoints;
 using Aictiq.SharedKernel.Authorization;
 using Aictiq.SharedKernel.Contracts;
@@ -356,6 +357,69 @@ public sealed class PlaybookTests(PostgresFixture postgres, GarageFixture garage
             new UpdateFactorySettingsRequest((short)ProjectRepositorySource.RunnerLocal, null, "main", "/srv/aictiq", null, 0),
             ApiTestContext.Json, Ct);
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    }
+
+    [Fact]
+    public async Task an_outcome_column_must_show_its_state_and_a_new_state_drops_it()
+    {
+        var states = (await WorkflowsAsync(_project)).Single(workflow => workflow.IsDefault).States;
+        var newState = states.Single(state => state.Name == "New").Id;
+        var inReview = states.Single(state => state.Name == "In Review").Id;
+        var team = (await _owner.GetFromJsonAsync<List<TeamView>>($"{Base(_project)}/teams/", ApiTestContext.Json, Ct))![0];
+        var boardPath = $"/api/v1/orgs/{Slug}/teams/{team.Id}/board";
+        var current = (await _owner.GetFromJsonAsync<BoardView>($"{boardPath}?take=0", ApiTestContext.Json, Ct))!;
+        var savedBoard = await _owner.PutAsJsonAsync(boardPath, new UpdateBoardRequest(
+            [
+                new BoardColumnConfig("New", [newState], null, Guid.Empty),
+                new BoardColumnConfig("Failed", [newState], null, Guid.Empty),
+                new BoardColumnConfig("In Review", [inReview], null, Guid.Empty),
+            ], null, null, null, current.Version), ApiTestContext.Json, Ct);
+        savedBoard.EnsureSuccessStatusCode();
+        var board = (await savedBoard.Content.ReadFromJsonAsync<BoardView>(ApiTestContext.Json, Ct))!;
+        var failed = board.Columns.Single(column => column.Name == "Failed").Id;
+
+        var wrongState = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Wrong column", null, "claude", null, inReview, 60, "Implement the item.",
+                OnFailureColumnId: failed), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongState.StatusCode);
+        Assert.Contains("onFailureColumnId", await wrongState.Content.ReadAsStringAsync(Ct));
+        var noState = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("No state", null, "claude", null, null, 60, "Implement the item.",
+                OnFailureColumnId: failed), ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, noState.StatusCode);
+        Assert.Contains("onFailureColumnId", await noState.Content.ReadAsStringAsync(Ct));
+        // Another project's board columns are not this project's.
+        var otherStates = (await WorkflowsAsync(_otherProject)).Single(workflow => workflow.IsDefault).States;
+        var otherProject = await _owner.PostAsJsonAsync($"{Base(_otherProject)}/playbooks",
+            new CreatePlaybookRequest("Foreign column", null, "claude", null,
+                otherStates.Single(state => state.Name == "New").Id, 60, "Implement the item.", OnFailureColumnId: failed),
+            ApiTestContext.Json, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, otherProject.StatusCode);
+
+        var created = await _owner.PostAsJsonAsync($"{Base(_project)}/playbooks",
+            new CreatePlaybookRequest("Failed column", null, "claude", inReview, newState, 60, "Implement the item.",
+                OnFailureColumnId: failed), ApiTestContext.Json, Ct);
+        Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync(Ct));
+        var playbook = (await created.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(newState, playbook.OnFailureStateId);
+        Assert.Equal(failed, playbook.OnFailureColumnId);
+        Assert.Null(playbook.OnSuccessColumnId);
+
+        // A rename keeps the column; a new state without one clears it. Anonymous bodies leave
+        // out what they do not change, as the web client does.
+        var renamed = await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new { name = "Failed column kept", version = playbook.Version }, ApiTestContext.Json, Ct);
+        renamed.EnsureSuccessStatusCode();
+        playbook = (await renamed.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(failed, playbook.OnFailureColumnId);
+        var restated = await _owner.PatchAsJsonAsync($"{Base(_project)}/playbooks/{playbook.Id}",
+            new { onFailureStateId = inReview, version = playbook.Version }, ApiTestContext.Json, Ct);
+        Assert.True(restated.IsSuccessStatusCode, await restated.Content.ReadAsStringAsync(Ct));
+        playbook = (await restated.Content.ReadFromJsonAsync<PlaybookView>(ApiTestContext.Json, Ct))!;
+        Assert.Equal(inReview, playbook.OnFailureStateId);
+        Assert.Null(playbook.OnFailureColumnId);
+        Assert.Null((await _owner.GetFromJsonAsync<PlaybookView>($"{Base(_project)}/playbooks/{playbook.Id}", ApiTestContext.Json, Ct))!
+            .OnFailureColumnId);
     }
 
     private string Base(ProjectView project) => $"/api/v1/orgs/{Slug}/projects/{project.Key}";

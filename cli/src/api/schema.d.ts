@@ -4186,7 +4186,11 @@ export interface components {
             maxMinutes: number | string;
             name: null | string;
             /** Format: uuid */
+            onFailureColumnId?: null | string;
+            /** Format: uuid */
             onFailureStateId: null | string;
+            /** Format: uuid */
+            onSuccessColumnId?: null | string;
             /** Format: uuid */
             onSuccessStateId: null | string;
             /** Format: uuid */
@@ -4621,7 +4625,11 @@ export interface components {
             maxMinutes?: null | number | string;
             name?: null | string;
             /** Format: uuid */
+            onFailureColumnId?: null | string;
+            /** Format: uuid */
             onFailureStateId?: null | string;
+            /** Format: uuid */
+            onSuccessColumnId?: null | string;
             /** Format: uuid */
             onSuccessStateId?: null | string;
             /** Format: uint32 */

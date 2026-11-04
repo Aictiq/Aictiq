@@ -17,7 +17,7 @@ public sealed record PlaybookView(
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes, bool IsDefault,
     string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, uint Version, bool WorkOnDefaultBranch = false,
     IReadOnlyList<Guid>? StagePlaybookIds = null, IReadOnlyList<string>? RequiredTags = null,
-    IReadOnlyList<RepositoryStep>? RepositorySteps = null);
+    IReadOnlyList<RepositoryStep>? RepositorySteps = null, Guid? OnSuccessColumnId = null, Guid? OnFailureColumnId = null);
 
 /// <summary>A playbook's follow-up playbooks, in the order they run; empty removes them all.</summary>
 public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybookIds);
@@ -27,10 +27,13 @@ public sealed record PutPlaybookStagesRequest(IReadOnlyList<Guid>? StagePlaybook
 /// after the playbook. Give this or <paramref name="WikiPageId"/>, a page already in that section.
 /// </param>
 /// <param name="RequiredTags">Fleet mode: tags every run of the playbook requires of its runner. Kept, but ignored, while fleet mode is off.</param>
+/// <param name="OnSuccessColumnId">A board column showing <paramref name="OnSuccessStateId"/>, for when several columns share it.</param>
+/// <param name="OnFailureColumnId">A board column showing <paramref name="OnFailureStateId"/>, for when several columns share it.</param>
 public sealed record CreatePlaybookRequest(
     string? Name, Guid? WikiPageId, string? Harness,
     Guid? OnSuccessStateId, Guid? OnFailureStateId, int MaxMinutes = 60, string? InstructionsMarkdown = null, bool WorkOnDefaultBranch = false,
-    IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<RepositoryStep>? RepositorySteps = null);
+    IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<RepositoryStep>? RepositorySteps = null,
+    Guid? OnSuccessColumnId = null, Guid? OnFailureColumnId = null);
 
 /// <param name="InFactorySection">
 /// False for a playbook from before its page had to live in the Factory section: saving new
@@ -42,6 +45,8 @@ public sealed class UpdatePlaybookRequest
 {
     private Guid? _onSuccessStateId;
     private Guid? _onFailureStateId;
+    private Guid? _onSuccessColumnId;
+    private Guid? _onFailureColumnId;
 
     public string? Name { get; init; }
     public Guid? WikiPageId { get; init; }
@@ -56,6 +61,21 @@ public sealed class UpdatePlaybookRequest
         get => _onFailureStateId;
         init { _onFailureStateId = value; HasOnFailureStateId = true; }
     }
+    /// <summary>
+    /// A board column showing the success state. Sent alone it is checked against the stored
+    /// state; changing the state without it clears it.
+    /// </summary>
+    public Guid? OnSuccessColumnId
+    {
+        get => _onSuccessColumnId;
+        init { _onSuccessColumnId = value; HasOnSuccessColumnId = true; }
+    }
+    /// <summary>A board column showing the failure state; see <see cref="OnSuccessColumnId"/>.</summary>
+    public Guid? OnFailureColumnId
+    {
+        get => _onFailureColumnId;
+        init { _onFailureColumnId = value; HasOnFailureColumnId = true; }
+    }
     public int? MaxMinutes { get; init; }
     public bool? WorkOnDefaultBranch { get; init; }
     /// <summary>Fleet mode: the playbook's required tags, replacing the old ones. Null leaves them.</summary>
@@ -68,6 +88,8 @@ public sealed class UpdatePlaybookRequest
 
     [JsonIgnore] public bool HasOnSuccessStateId { get; private set; }
     [JsonIgnore] public bool HasOnFailureStateId { get; private set; }
+    [JsonIgnore] public bool HasOnSuccessColumnId { get; private set; }
+    [JsonIgnore] public bool HasOnFailureColumnId { get; private set; }
 }
 
 /// <param name="MultiRepoAvailability"><c>hidden</c> (self-hosted, no billing), <c>upgrade</c> (not a paid hosted plan) or <c>available</c>.</param>
@@ -181,8 +203,8 @@ public static class PlaybookEndpoints
             && !await pages.CanReadAsync(requestedPage, projectId, user.UserId!, ct))
             return NotFound();
         var errors = await ValidateAsync(request.Name, request.Harness,
-            request.OnSuccessStateId, request.OnFailureStateId, request.MaxMinutes,
-            projectId, workflows, ct);
+            request.OnSuccessStateId, request.OnFailureStateId, request.OnSuccessColumnId, request.OnFailureColumnId,
+            request.MaxMinutes, projectId, workflows, ct);
         await ValidateInstructionsAsync(errors, request.InstructionsMarkdown,
             request.InstructionsMarkdown is null ? request.WikiPageId : null, required: true, projectId, factoryPages, ct);
         var requiredTags = FleetTags.Normalize(request.RequiredTags);
@@ -209,6 +231,8 @@ public static class PlaybookEndpoints
             Harness = request.Harness!,
             OnSuccessStateId = request.OnSuccessStateId,
             OnFailureStateId = request.OnFailureStateId,
+            OnSuccessColumnId = request.OnSuccessColumnId,
+            OnFailureColumnId = request.OnFailureColumnId,
             MaxMinutes = request.MaxMinutes,
             WorkOnDefaultBranch = request.WorkOnDefaultBranch,
             RequiredTags = requiredTags!,
@@ -241,11 +265,16 @@ public static class PlaybookEndpoints
         var maxMinutes = request.MaxMinutes ?? row.MaxMinutes;
         var successStateId = request.HasOnSuccessStateId ? request.OnSuccessStateId : row.OnSuccessStateId;
         var failureStateId = request.HasOnFailureStateId ? request.OnFailureStateId : row.OnFailureStateId;
+        // A new state drops the old column, which showed the old state.
+        var successColumnId = request.HasOnSuccessColumnId ? request.OnSuccessColumnId
+            : successStateId == row.OnSuccessStateId ? row.OnSuccessColumnId : null;
+        var failureColumnId = request.HasOnFailureColumnId ? request.OnFailureColumnId
+            : failureStateId == row.OnFailureStateId ? row.OnFailureColumnId : null;
         if (request.InstructionsMarkdown is null && request.WikiPageId is { } requestedPage
             && !await pages.CanReadAsync(requestedPage, projectId, user.UserId!, ct))
             return NotFound();
         var errors = await ValidateAsync(name, harness,
-            successStateId, failureStateId, maxMinutes,
+            successStateId, failureStateId, successColumnId, failureColumnId, maxMinutes,
             projectId, workflows, ct);
         // A playbook whose page predates the Factory section keeps working until its
         // instructions are next saved; only a page named in this request must be there.
@@ -273,6 +302,8 @@ public static class PlaybookEndpoints
         row.Harness = harness;
         row.OnSuccessStateId = successStateId;
         row.OnFailureStateId = failureStateId;
+        row.OnSuccessColumnId = successColumnId;
+        row.OnFailureColumnId = failureColumnId;
         row.MaxMinutes = maxMinutes;
         row.WorkOnDefaultBranch = request.WorkOnDefaultBranch ?? row.WorkOnDefaultBranch;
         row.RequiredTags = requiredTags!;
@@ -663,7 +694,7 @@ public static class PlaybookEndpoints
 
     private static async Task<Dictionary<string, string[]>> ValidateAsync(
         string? name, string? harness, Guid? successStateId, Guid? failureStateId,
-        int maxMinutes, Guid projectId, IProjectWorkflowAccess workflows, CancellationToken ct)
+        Guid? successColumnId, Guid? failureColumnId, int maxMinutes, Guid projectId, IProjectWorkflowAccess workflows, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > Playbook.MaxNameLength)
@@ -679,7 +710,20 @@ public static class PlaybookEndpoints
             if (successStateId is not null) errors["onSuccessStateId"] = ["State must belong to a workflow in this project."];
             if (failureStateId is not null) errors["onFailureStateId"] = ["State must belong to a workflow in this project."];
         }
+        await ValidateColumnAsync(errors, "onSuccessColumnId", successColumnId, successStateId, projectId, workflows, ct);
+        await ValidateColumnAsync(errors, "onFailureColumnId", failureColumnId, failureStateId, projectId, workflows, ct);
         return errors;
+    }
+
+    /// <summary>A column names where on the board its state lands, so it needs that state and must show it.</summary>
+    private static async Task ValidateColumnAsync(Dictionary<string, string[]> errors, string field,
+        Guid? columnId, Guid? stateId, Guid projectId, IProjectWorkflowAccess workflows, CancellationToken ct)
+    {
+        if (columnId is not { } column) return;
+        if (stateId is not { } state)
+            errors[field] = ["Choose a state for the column."];
+        else if (!await workflows.ColumnsShowStatesAsync(projectId, [(column, state)], ct))
+            errors[field] = ["Column must be on a board in this project and show the chosen state."];
     }
 
     /// <summary>Shared with <c>RuleEndpoints</c>: the agent a run or a rule names must be an active agent this project can see.</summary>
@@ -697,7 +741,7 @@ public static class PlaybookEndpoints
         row.Id, row.ProjectId, row.Name, row.WikiPageId, row.Harness,
         row.OnSuccessStateId, row.OnFailureStateId, row.MaxMinutes, row.IsDefault,
         row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.Version, row.WorkOnDefaultBranch, stagePlaybookIds, row.RequiredTags,
-        row.RepositorySteps);
+        row.RepositorySteps, row.OnSuccessColumnId, row.OnFailureColumnId);
 
     private static FactorySettingsView ToView(ProjectFactorySettings row, MultiRepoAvailability availability,
         IReadOnlyList<ProjectRepository> additional) => new(
