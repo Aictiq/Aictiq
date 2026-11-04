@@ -1,3 +1,4 @@
+using Aictiq.Modules.Automation.Access;
 using Aictiq.Modules.Automation.Domain;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
@@ -40,6 +41,10 @@ namespace Aictiq.Modules.Automation.Endpoints;
 /// <param name="ReworkOfRunId">The stage run whose requested changes this implement run addresses, or null.</param>
 /// <param name="Waiting">Why a queued run whose time has come is not running yet (run detail only, for factory operators).</param>
 /// <param name="ItemId">The item the run works; null for a project-chat run, which has none.</param>
+/// <param name="Private">
+/// Someone else's run, seen by a viewer who is not an organization Admin: its prompt, summary,
+/// failure reason and log are withheld (see <see cref="Aictiq.Modules.Automation.Access.RunPrivacy"/>).
+/// </param>
 public sealed record RunView(
     Guid Id, Guid ProjectId, Guid? ItemId, string? ItemKey, Guid PlaybookId, string? PlaybookName,
     string AgentId, string? AgentName, string? RequestedBy, Guid? RuleId, string? RuleName,
@@ -56,7 +61,7 @@ public sealed record RunView(
     RunWaitView? Waiting = null, string? StageVerdict = null, int? StageIndex = null, Guid? ReworkOfRunId = null,
     IReadOnlyList<string>? RequiredTags = null, IReadOnlyList<string>? Repositories = null,
     IReadOnlyList<string>? PullRequestUrls = null, IReadOnlyList<RunRepositoryStepView>? RepositorySteps = null,
-    string? WorkingDirectory = null, IReadOnlyList<string>? MissingRepositories = null);
+    string? WorkingDirectory = null, IReadOnlyList<string>? MissingRepositories = null, bool Private = false);
 
 /// <summary>
 /// One step of a multi-repository run's graph, as the run page shows it.
@@ -231,8 +236,9 @@ public static class RunEndpoints
         var people = await directory.GetAsync([.. runs.Select(run => run.AgentUserId).Distinct()], ct);
         var names = await DisplayNamesAsync(db, runs, ct);
         var continuedBy = await ContinuedByAsync(db, runs, ct);
+        var isOrgAdmin = await RunPrivacy.IsOrgAdminAsync(access, user.UserId, tenant.OrganizationId!.Value, ct);
         return Results.Ok(new PagedResult<RunView>(
-            runs.Select(run => ToView(run, people, includeDetails: false, names).PrivateTo(run, user.UserId)
+            runs.Select(run => ToView(run, people, includeDetails: false, names).PrivateTo(run, user.UserId, isOrgAdmin)
                 with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
     }
@@ -295,7 +301,8 @@ public static class RunEndpoints
         var isOperator = await access.CanOperateFactoryAsync(userId, tenant.OrganizationId!.Value, ct);
         var people = await directory.GetAsync([run.AgentUserId], ct);
         var names = await DisplayNamesAsync(db, [run], ct);
-        var view = ToView(run, people, includeDetails: isOperator, names).PrivateTo(run, userId);
+        var isOrgAdmin = await RunPrivacy.IsOrgAdminAsync(access, userId, tenant.OrganizationId!.Value, ct);
+        var view = ToView(run, people, includeDetails: isOperator, names).PrivateTo(run, userId, isOrgAdmin);
         // A project chat has no item, so no chain of continues to walk.
         view = run.Kind == RunKind.ProjectChat ? view : await WithChainAsync(db, run, view, ct);
         view = run.RepositoryPlan is null ? view : view with { RepositorySteps = await RepositoryStepsAsync(db, run, ct) };
@@ -537,7 +544,7 @@ public static class RunEndpoints
     }
 
     private static async Task<IResult> LogAsync(
-        Guid runId, HttpContext http, AutomationDbContext db, ICurrentUser user,
+        Guid runId, HttpContext http, AutomationDbContext db, ICurrentUser user, ICurrentTenant tenant,
         IProjectAccess access, int after = -1, int pageSize = 200, CancellationToken ct = default)
     {
         if (user.UserId is not { } userId)
@@ -545,16 +552,21 @@ public static class RunEndpoints
             return NotFound();
         }
         var run = await db.Runs.AsNoTracking().SingleOrDefaultAsync(run => run.Id == runId, ct);
-        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is null
-            || run.Kind == RunKind.ProjectChat && run.RequestedBy != userId)
+        if (run is null || await access.GetProjectRoleAsync(userId, run.ProjectId, ct) is null)
         {
-            // Someone else's project chat: its log is their private conversation.
             return NotFound();
         }
         // The item is theirs to see; operating - and with it the raw agent output - is not.
         if (await AuthorizationFilters.FactoryOperatorRefusalAsync(http) is { } refusal)
         {
             return refusal;
+        }
+        if (!RunPrivacy.SeesInFull(run, userId,
+                await RunPrivacy.IsOrgAdminAsync(access, userId, tenant.OrganizationId!.Value, ct)))
+        {
+            // Someone else's run: only the person who started it, or an organization Admin,
+            // reads its log. The same "not found" as a run that is not there.
+            return NotFound();
         }
 
         var chunks = await db.RunLogChunks.AsNoTracking()
@@ -578,8 +590,8 @@ public static class RunEndpoints
     }
 
     private static async Task<IResult> ItemRunsAsync(
-        string itemKey, HttpContext http, AutomationDbContext db,
-        IWorkItemLookup items, IUserDirectory directory,
+        string itemKey, HttpContext http, AutomationDbContext db, ICurrentUser user, ICurrentTenant tenant,
+        IProjectAccess access, IWorkItemLookup items, IUserDirectory directory,
         int page = 1, int pageSize = 25, CancellationToken ct = default)
     {
         var project = http.ResolvedProject()!;
@@ -599,8 +611,9 @@ public static class RunEndpoints
         var people = await directory.GetAsync([.. runs.Select(run => run.AgentUserId).Distinct()], ct);
         var names = await DisplayNamesAsync(db, runs, ct);
         var continuedBy = await ContinuedByAsync(db, runs, ct);
+        var isOrgAdmin = await RunPrivacy.IsOrgAdminAsync(access, user.UserId, tenant.OrganizationId!.Value, ct);
         return Results.Ok(new PagedResult<RunView>(
-            runs.Select(run => ToView(run, people, includeDetails: false, names)
+            runs.Select(run => ToView(run, people, includeDetails: false, names).PrivateTo(run, user.UserId, isOrgAdmin)
                 with { ContinuedByRunId = continuedBy.GetValueOrDefault(run.Id) }).ToList(),
             normalizedPage, normalizedPageSize, total));
     }
@@ -934,14 +947,14 @@ public static class RunEndpoints
             WorkingDirectory: run.WorkingDirectory, MissingRepositories: run.MissingRepositoryAliases);
 
     /// <summary>
-    /// Someone else's project-chat run, as the run screens show it: that it ran, when and on
-    /// what, but not the question in its prompt or the answer in its summary - those are the
-    /// asker's private chat, which no other member or admin sees.
+    /// Someone else's run, as the run screens show it to a viewer who is not an organization
+    /// Admin: that it ran, when and on what, but not its prompt, its summary or why it failed -
+    /// those belong to the person who started it (<see cref="RunPrivacy"/>).
     /// </summary>
-    internal static RunView PrivateTo(this RunView view, Run run, string? viewerId) =>
-        run.Kind == RunKind.ProjectChat && run.RequestedBy != viewerId
-            ? view with { OutcomeSummary = null, PromptSnapshot = null, FailureReason = null }
-            : view;
+    internal static RunView PrivateTo(this RunView view, Run run, string? viewerId, bool isOrgAdmin) =>
+        RunPrivacy.SeesInFull(run, viewerId, isOrgAdmin)
+            ? view
+            : view with { OutcomeSummary = null, PromptSnapshot = null, FailureReason = null, Private = true };
 
     /// <summary>The project key of an item key is everything before the last dash: <c>PROJ-12</c> names project <c>PROJ</c>.</summary>
     internal static string? ProjectKeyOf(string itemKey)

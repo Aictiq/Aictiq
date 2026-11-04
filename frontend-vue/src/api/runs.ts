@@ -150,6 +150,11 @@ export interface Run {
   pullRequestUrls?: string[]
   /** Multiple repositories: the run's repository steps in order; null for a normal run. */
   repositorySteps?: RunRepositoryStep[] | null
+  /**
+   * Someone else's run, seen by a viewer who is not an organization Admin: its prompt,
+   * summary, failure reason and log are withheld, and the log endpoint answers 404.
+   */
+  private?: boolean
 }
 
 export type RunRepositoryStepState =

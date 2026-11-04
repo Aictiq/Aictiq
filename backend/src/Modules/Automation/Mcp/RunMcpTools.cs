@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Aictiq.Modules.Automation.Access;
 using Aictiq.Modules.Automation.Endpoints;
 using Aictiq.SharedKernel;
 using Aictiq.SharedKernel.Authorization;
@@ -82,6 +83,7 @@ public sealed class RunMcpTools(
         var runs = await db.Runs.AsNoTracking().Where(run => run.ItemId == item.Id)
             .OrderByDescending(run => run.QueuedAt).Take(limit).ToListAsync(cancellationToken);
         var people = await directory.GetAsync([.. runs.Select(run => run.AgentUserId).Distinct()], cancellationToken);
+        var isOrgAdmin = await RunPrivacy.IsOrgAdminAsync(access, user.UserId, tenant.OrganizationId!.Value, cancellationToken);
         var playbookIds = runs.Select(run => run.PlaybookId).Distinct().ToList();
         var playbooks = await db.Playbooks.AsNoTracking().Where(playbook => playbookIds.Contains(playbook.Id))
             .ToDictionaryAsync(playbook => playbook.Id, playbook => playbook.Name, cancellationToken);
@@ -91,7 +93,9 @@ public sealed class RunMcpTools(
             agentId = run.AgentUserId,
             agentName = people.TryGetValue(run.AgentUserId, out var agent) ? agent.DisplayName : null,
             playbook = playbooks.GetValueOrDefault(run.PlaybookId),
-            run.RequestedBy, run.QueuedAt, run.FinishedAt, run.OutcomeSummary, run.PullRequestUrl,
+            run.RequestedBy, run.QueuedAt, run.FinishedAt,
+            outcomeSummary = RunPrivacy.SeesInFull(run, user.UserId, isOrgAdmin) ? run.OutcomeSummary : null,
+            run.PullRequestUrl,
         }).ToList();
     }
 

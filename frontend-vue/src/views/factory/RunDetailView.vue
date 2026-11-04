@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarClock, ExternalLink, Hand, Play, RotateCcw, StepForward } from '@lucide/vue'
+import { CalendarClock, ExternalLink, Hand, Lock, Play, RotateCcw, StepForward } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
@@ -645,7 +645,17 @@ const tokens = computed(() => {
           >{{ run.promptSnapshot }}</pre>
       </details>
 
-      <RunLog ref="logRef" :slug="slug" :run="run" />
+      <RunLog v-if="!run.private" ref="logRef" :slug="slug" :run="run" />
+      <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="run-log-private">
+        <p class="font-label pb-2">Log</p>
+        <p
+          class="border-border text-muted-foreground flex items-center gap-2 rounded border p-3 text-xs"
+        >
+          <Lock class="size-3.5 shrink-0" aria-hidden="true" />
+          Someone else started this run. Its log, prompt and summary are visible only to them and to
+          organization admins.
+        </p>
+      </div>
     </div>
     <Dialog
       :open="editingTime"

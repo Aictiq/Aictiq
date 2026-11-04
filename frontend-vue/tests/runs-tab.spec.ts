@@ -289,6 +289,22 @@ describe('RunsTab', () => {
     Object.assign(runs.items[0]!, original)
   })
 
+  it("marks someone else's run private, and only that one", async () => {
+    stubFetch()
+    let { wrapper } = await mountTab()
+    expect(wrapper.find('[data-testid="run-row-private"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    const original = { ...runs.items[0]! }
+    Object.assign(runs.items[0]!, { private: true, outcomeSummary: null })
+    stubFetch()
+    ;({ wrapper } = await mountTab())
+
+    expect(wrapper.get('[data-testid="run-row-private"]').text()).toBe('private')
+
+    Object.assign(runs.items[0]!, original)
+  })
+
   it('rounds a filter change out to the URL, and resets the page with it', async () => {
     stubFetch()
     const { wrapper, router } = await mountTab('?page=3')
