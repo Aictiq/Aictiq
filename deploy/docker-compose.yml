@@ -9,10 +9,19 @@
 
 name: aictiq
 
+# Docker's json-file driver keeps container logs forever by default, which fills the
+# disk on a long-running host. Cap every long-running service at 3 x 50 MB.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: '3'
+
 services:
   postgres:
     image: postgres:17
     restart: unless-stopped
+    logging: *default-logging
     # Preloaded so pg_stat_statements can track every query; the extension itself is
     # created by the init script below (fresh volumes only - which smoke and perf always
     # use, and which is when a top-queries dump is meaningful anyway).
@@ -41,6 +50,7 @@ services:
   garage:
     image: dxflrs/garage:v2.1.0
     restart: unless-stopped
+    logging: *default-logging
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
       GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN in .env}
@@ -94,6 +104,7 @@ services:
       dockerfile: deploy/Dockerfile
       target: api
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -230,6 +241,7 @@ services:
       dockerfile: deploy/Dockerfile
       target: workers
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       # The API owns migrations, under a Postgres advisory lock. Workers must never
       # start against a database it has not migrated yet - hence healthy, not started.
@@ -282,6 +294,7 @@ services:
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - api
     ports:
@@ -344,6 +357,7 @@ services:
     image: axllent/mailpit:v1.27
     profiles: ['mailpit']
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
