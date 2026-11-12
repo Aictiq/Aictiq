@@ -53,6 +53,7 @@ public sealed class ApiTestContext : IAsyncDisposable
     public QueryCounter? QueryCount { get; private set; }
 
     private string? _appLogin;
+    private PostgresFixture _postgres = null!;
 
     private ApiTestContext(WebApplicationFactory<Program> factory) => Factory = factory;
 
@@ -154,7 +155,7 @@ public sealed class ApiTestContext : IAsyncDisposable
             }
         });
 
-        var context = new ApiTestContext(factory) { ConnectionString = connectionString, QueryCount = counter, _appLogin = appLogin };
+        var context = new ApiTestContext(factory) { ConnectionString = connectionString, QueryCount = counter, _appLogin = appLogin, _postgres = postgres };
         if (signInAdmin)
         {
             context.Admin = await context.ClientForAsync(AdminEmail, AdminPassword);
@@ -300,5 +301,6 @@ public sealed class ApiTestContext : IAsyncDisposable
             await using var drop = new NpgsqlCommand($"DROP ROLE IF EXISTS \"{_appLogin}\";", admin);
             await drop.ExecuteNonQueryAsync();
         }
+        await _postgres.DropDatabaseAsync(ConnectionString);
     }
 }

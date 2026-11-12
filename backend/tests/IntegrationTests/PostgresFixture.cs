@@ -114,6 +114,17 @@ public sealed class PostgresFixture : IAsyncLifetime
             MaxPoolSize = MaxPoolSizePerDatabase,
         }.ConnectionString;
 
+    /// <summary>
+    /// Drops a test database once its host is gone. The data directory is in RAM and a
+    /// clone is ~12 MB, so a full run that kept them all would hold ~13 GB - more than a
+    /// CI runner has. FORCE ends whatever the test left connected.
+    /// </summary>
+    public async Task DropDatabaseAsync(string connectionString)
+    {
+        var name = new NpgsqlConnectionStringBuilder(connectionString).Database;
+        await ExecuteAsync($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
+    }
+
     /// <summary>An empty database, for tests that run the migrations themselves.</summary>
     public async Task<string> CreateDatabaseAsync(string prefix)
     {
