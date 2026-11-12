@@ -56,7 +56,7 @@ public sealed class MultiRepoTests(PostgresFixture postgres, GarageFixture garag
     private Task SeedPaidSubscriptionAsync() => ExecuteSqlAsync($"""
         INSERT INTO billing.subscriptions (id, organization_id, plan, stripe_customer_id, stripe_subscription_id, status,
             cancel_at_period_end, seats_human, seats_agent, created_at, updated_at)
-        VALUES (gen_random_uuid(), '{OrganizationId}', 'hosted', 'cus_multi', 'sub_multi', 4, false, 1, 0, now(), now())
+        VALUES (gen_random_uuid(), '{OrganizationId}', 'hosted', 'cus_multi_{OrganizationId:N}', 'sub_multi_{OrganizationId:N}', 4, false, 1, 0, now(), now())
         """);
 
     /// <summary>A paid organization whose project has the primary <c>acme</c> (/srv/acme) and a local <c>api</c>.</summary>
@@ -423,11 +423,11 @@ public sealed class MultiRepoTests(PostgresFixture postgres, GarageFixture garag
 
         // Not merged yet: the sweeper leaves it waiting.
         await SweepAsync();
-        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.runs"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
 
         await ExecuteSqlAsync($"UPDATE work.item_links SET state = 'merged' WHERE url = '{backendPullRequest}'");
         await SweepAsync();
-        var second = await ScalarAsync("SELECT count(*) FROM automation.runs WHERE 'api' = ANY(repository_aliases)");
+        var second = await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE 'api' = ANY(repository_aliases) AND organization_id = '{OrganizationId}'");
         Assert.Equal(1, second);
         var next = await ClaimAsync(runner);
         Assert.Equal(["api"], next.Repos!.Select(repo => repo.Alias));

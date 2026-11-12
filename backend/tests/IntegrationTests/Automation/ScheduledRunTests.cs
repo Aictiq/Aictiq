@@ -94,7 +94,7 @@ public sealed class ScheduledRunTests(PostgresFixture postgres, GarageFixture ga
             problem.RootElement.GetProperty("errors").GetProperty("scheduledFor")[0].GetString());
 
         Assert.Null((await ItemAsync(ItemKey)).ClaimedBy);
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM automation.runs"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
     }
 
     [Fact]
@@ -122,8 +122,8 @@ public sealed class ScheduledRunTests(PostgresFixture postgres, GarageFixture ga
         Assert.Equal("queued", after.Status);
         Assert.Null(after.ScheduledFor);
         Assert.Equal(AgentId, (await ItemAsync(ItemKey)).ClaimedBy);
-        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.runs"));
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM shared.outbox_messages WHERE type LIKE '%RunFinished%'"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM shared.outbox_messages WHERE type LIKE '%RunFinished%' AND payload::jsonb ->> 'RunId' = '{run.Id}'"));
 
         using var runner = RunnerClient(Runner.Secret);
         Assert.Equal(run.Id, (await ClaimAsync(runner)).RunId);
@@ -190,8 +190,8 @@ public sealed class ScheduledRunTests(PostgresFixture postgres, GarageFixture ga
         Assert.Equal(originalItem.ClaimedBy, afterItem.ClaimedBy);
         Assert.Equal(originalItem.ClaimedAt, afterItem.ClaimedAt);
         Assert.Equal(originalItem.ClaimHeartbeatAt, afterItem.ClaimHeartbeatAt);
-        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.runs"));
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM shared.outbox_messages WHERE type LIKE '%RunFinished%'"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM shared.outbox_messages WHERE type LIKE '%RunFinished%' AND payload::jsonb ->> 'RunId' = '{run.Id}'"));
 
         using var runner = RunnerClient(Runner.Secret);
         Assert.Equal(HttpStatusCode.NoContent, (await ClaimMaybeAsync(runner))!.StatusCode);

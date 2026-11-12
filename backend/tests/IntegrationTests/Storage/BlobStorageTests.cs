@@ -117,6 +117,8 @@ public sealed class BlobStorageTests(GarageFixture garage)
     }
 
     [Fact]
+    // Slow tier: waits out a real presigned-URL expiry (see below).
+    [Trait("Tier", "Slow")]
     public async Task an_expired_url_is_refused()
     {
         var ct = TestContext.Current.CancellationToken;

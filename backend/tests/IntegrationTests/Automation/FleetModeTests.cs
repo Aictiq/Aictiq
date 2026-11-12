@@ -193,7 +193,7 @@ public sealed class FleetModeTests(PostgresFixture postgres, GarageFixture garag
         Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
         var secret = (await saved.Content.ReadFromJsonAsync<FleetSettingsSaved>(ApiTestContext.Json, Ct))!.WebhookSecret!;
         // The receiver is plain HTTP on loopback; the URL check that requires HTTPS is not under test here.
-        await ExecuteSqlAsync($"UPDATE automation.fleet_settings SET scale_webhook_url = '{receiver.Url}'");
+        await ExecuteSqlAsync($"UPDATE automation.fleet_settings SET scale_webhook_url = '{receiver.Url}' WHERE organization_id = '{OrganizationId}'");
 
         var run = await DispatchWithTagsAsync(ItemKey, ["gpu-enabled"]);
         // Not yet past the 60 s threshold: nothing is called.
@@ -218,7 +218,7 @@ public sealed class FleetModeTests(PostgresFixture postgres, GarageFixture garag
 
         // Past it, a failing endpoint is called once, and the run says why it still waits.
         receiver.Status = HttpStatusCode.InternalServerError;
-        await ExecuteSqlAsync("UPDATE automation.fleet_settings SET last_scale_call_at = now() - interval '1 hour'");
+        await ExecuteSqlAsync($"UPDATE automation.fleet_settings SET last_scale_call_at = now() - interval '1 hour' WHERE organization_id = '{OrganizationId}'");
         await SweepAsync();
         Assert.Equal(2, receiver.Requests.Count);
         var scaleUp = (await RunAsync(run.Id)).Waiting!.ScaleUp!;
@@ -276,7 +276,7 @@ public sealed class FleetModeTests(PostgresFixture postgres, GarageFixture garag
     private Task SeedPaidSubscriptionAsync() => ExecuteSqlAsync($"""
         INSERT INTO billing.subscriptions (id, organization_id, plan, stripe_customer_id, stripe_subscription_id, status,
             cancel_at_period_end, seats_human, seats_agent, created_at, updated_at)
-        VALUES (gen_random_uuid(), '{OrganizationId}', 'hosted', 'cus_fleet', 'sub_fleet', 4, false, 1, 0, now(), now())
+        VALUES (gen_random_uuid(), '{OrganizationId}', 'hosted', 'cus_fleet_{OrganizationId:N}', 'sub_fleet_{OrganizationId:N}', 4, false, 1, 0, now(), now())
         """);
 
     private async Task EnableFleetAsync()

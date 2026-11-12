@@ -60,10 +60,10 @@ public sealed class RunContinuationTests(PostgresFixture postgres, GarageFixture
     }
 
     private Task MakeAutoContinueDueAsync() => ExecuteSqlAsync(
-        "UPDATE automation.runs SET auto_continue_due_at = now() - interval '1 second' WHERE auto_continue_due_at IS NOT NULL");
+        $"UPDATE automation.runs SET auto_continue_due_at = now() - interval '1 second' WHERE auto_continue_due_at IS NOT NULL AND organization_id = '{OrganizationId}'");
 
     private Task<long> DueCountAsync() =>
-        ScalarAsync("SELECT count(*) FROM automation.runs WHERE auto_continue_due_at IS NOT NULL");
+        ScalarAsync($"SELECT count(*) FROM automation.runs WHERE auto_continue_due_at IS NOT NULL AND organization_id = '{OrganizationId}'");
 
     [Fact]
     public async Task a_failed_run_continues_its_session_on_the_runner_that_kept_it()

@@ -27,6 +27,10 @@ public sealed class LatencyCollection;
 /// the parallel pool; only the load test pays for running alone.
 /// </summary>
 [Trait("Category", "Mcp")]
+// Slow tier: a load test with real ten-second polls and a p95 target. It runs alone (no
+// parallelization), so it costs the whole suite its wall time, and a busy CI box can fail
+// it without a regression. Runs on main and nightly: dotnet test --filter "Tier=Slow".
+[Trait("Tier", "Slow")]
 [Collection("latency")]
 public sealed class McpLatencyTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
