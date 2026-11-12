@@ -479,7 +479,7 @@ public sealed class RuleTests(PostgresFixture postgres, GarageFixture garage) : 
         var firing = Assert.Single(await FiringsAsync(rule.Id));
         Assert.Null(firing.RunId);
         Assert.Equal(RuleSkipReasons.ProjectReadOnly, firing.SkipReason);
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM automation.runs"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
     }
 
     [Fact]

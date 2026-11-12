@@ -30,6 +30,9 @@ public sealed class PostgresFixture : IAsyncLifetime
         // The other half of the same problem: the default of 100 is a production-shaped
         // number, and this container serves the whole suite at once.
         .WithCommand("-c", "max_connections=400")
+        // The data directory in RAM: the suite creates hundreds of databases. (fsync,
+        // full_page_writes and synchronous_commit are already off - Testcontainers' default.)
+        .WithTmpfsMount("/var/lib/postgresql/data")
         // Parallel queries put their shared memory in /dev/shm, which Docker caps at 64 MB.
         // With the whole suite on one server that fills up, and a migration fails with
         // 53100: could not resize shared memory segment ... No space left on device.
@@ -38,8 +41,80 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync() => await _container.StartAsync();
 
-    public async ValueTask DisposeAsync() => await _container.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await SharedHosts.DisposeAllAsync();
+        await _container.DisposeAsync();
+    }
 
+    /// <summary>
+    /// The fully migrated, unseeded database every API host clones. Building it is a whole
+    /// API start - every module's migrations - which used to happen once per test; a clone
+    /// is a file copy. Built once, on first use, by whoever asks first.
+    /// </summary>
+    private const string TemplateDatabase = "aictiq_template";
+
+    private readonly SemaphoreSlim _templateLock = new(1, 1);
+    private bool _templateReady;
+
+    /// <summary>
+    /// A new database that is a copy of the migrated template. <paramref name="migrate"/>
+    /// builds the template on the first call only: it gets the template's connection string
+    /// and must leave no connection open to it.
+    /// </summary>
+    public async Task<string> CreateMigratedDatabaseAsync(string prefix, Func<string, Task> migrate)
+    {
+        if (!_templateReady)
+        {
+            await _templateLock.WaitAsync();
+            try
+            {
+                if (!_templateReady)
+                {
+                    await ExecuteAsync($"CREATE DATABASE \"{TemplateDatabase}\"");
+                    await migrate(ConnectionStringFor(TemplateDatabase));
+                    NpgsqlConnection.ClearAllPools();
+                    // A database can only be copied while nobody is connected to it; the
+                    // host that migrated it may have left LISTEN or pooled sessions behind.
+                    // ALLOW_CONNECTIONS false keeps it that way for the rest of the run.
+                    await ExecuteAsync($"""
+                        ALTER DATABASE "{TemplateDatabase}" WITH IS_TEMPLATE true ALLOW_CONNECTIONS false;
+                        SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{TemplateDatabase}';
+                        """);
+                    _templateReady = true;
+                }
+            }
+            finally
+            {
+                _templateLock.Release();
+            }
+        }
+
+        var name = $"{prefix}_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE DATABASE \"{name}\" TEMPLATE \"{TemplateDatabase}\" STRATEGY {CloneStrategy}");
+        return ConnectionStringFor(name);
+    }
+
+    /// <summary>Overridable for measuring: AICTIQ_TEST_CLONE_STRATEGY=WAL_LOG|FILE_COPY.</summary>
+    private static readonly string CloneStrategy =
+        Environment.GetEnvironmentVariable("AICTIQ_TEST_CLONE_STRATEGY") is { Length: > 0 } strategy ? strategy : "FILE_COPY";
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(_container.GetConnectionString());
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private string ConnectionStringFor(string database) =>
+        new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
+        {
+            Database = database,
+            MaxPoolSize = MaxPoolSizePerDatabase,
+        }.ConnectionString;
+
+    /// <summary>An empty database, for tests that run the migrations themselves.</summary>
     public async Task<string> CreateDatabaseAsync(string prefix)
     {
         // xunit instantiates the test class (and so InitializeAsync) once per test,

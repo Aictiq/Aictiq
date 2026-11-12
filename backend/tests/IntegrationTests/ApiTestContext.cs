@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -82,7 +83,8 @@ public sealed class ApiTestContext : IAsyncDisposable
         bool appRole = false,
         bool signInAdmin = true)
     {
-        var connectionString = await postgres.CreateDatabaseAsync(dbPrefix);
+        var connectionString = await postgres.CreateMigratedDatabaseAsync(dbPrefix,
+            template => MigrateTemplateAsync(template, garage));
         string? appLogin = null;
         var requestConnectionString = connectionString;
         if (appRole)
@@ -110,30 +112,7 @@ public sealed class ApiTestContext : IAsyncDisposable
                 Password = "app-role-test-password",
             }.ConnectionString;
         }
-        var settings = new Dictionary<string, string?>
-        {
-            ["ConnectionStrings:appdb"] = requestConnectionString,
-            ["Jwt:Key"] = "integration-test-signing-key-0123456789abcdef",
-            ["Seed:AdminEmail"] = AdminEmail,
-            ["Seed:AdminPassword"] = AdminPassword,
-            // WebApplicationFactory boots in Development, so appsettings.Development.json
-            // is in play. Blank it here rather than inherit a first-run organization the
-            // test did not ask for; the seeding tests set it back deliberately.
-            ["Seed:OrganizationName"] = "",
-            ["Seed:OrganizationSlug"] = "",
-            ["Seed:OrganizationTimeZone"] = "",
-            ["S3:Endpoint"] = garage.S3Endpoint,
-            ["S3:Bucket"] = GarageFixture.Bucket,
-            ["S3:AccessKey"] = GarageFixture.AccessKey,
-            ["S3:SecretKey"] = GarageFixture.SecretKey,
-            ["S3:Region"] = "garage",
-            ["S3:ForcePathStyle"] = "true",
-            // Tests hammer the auth endpoints far past the production budget.
-            ["RateLimiting:AuthPermitLimitPerMinute"] = "1000",
-            ["RateLimiting:GlobalPermitLimitPerMinute"] = "10000",
-            ["RateLimiting:McpPermitLimitPerMinute"] = "10000",
-            ["RateLimiting:McpRequestPermitLimitPerMinute"] = "10000"
-        };
+        var settings = BaseSettings(requestConnectionString, garage);
         if (appRole) settings["ConnectionStrings:appdb-admin"] = connectionString;
         configure?.Invoke(settings);
 
@@ -144,6 +123,14 @@ public sealed class ApiTestContext : IAsyncDisposable
             {
                 builder.UseSetting(key, value);
             }
+            builder.ConfigureTestServices(services =>
+            {
+                RemoveTimerServices(services);
+                // A password hash costs ~100k PBKDF2 rounds by design; every test signs in
+                // and registers users, so in tests it is one round. Verification reads the
+                // count from the stored hash, so nothing else changes.
+                services.Configure<PasswordHasherOptions>(options => options.IterationCount = 1);
+            });
             if (configureServices is not null)
             {
                 builder.ConfigureTestServices(configureServices);
@@ -173,6 +160,78 @@ public sealed class ApiTestContext : IAsyncDisposable
             context.Admin = await context.ClientForAsync(AdminEmail, AdminPassword);
         }
         return context;
+    }
+
+    private static Dictionary<string, string?> BaseSettings(string connectionString, GarageFixture garage) =>
+        new()
+        {
+            ["ConnectionStrings:appdb"] = connectionString,
+            ["Jwt:Key"] = "integration-test-signing-key-0123456789abcdef",
+            ["Seed:AdminEmail"] = AdminEmail,
+            ["Seed:AdminPassword"] = AdminPassword,
+            // WebApplicationFactory boots in Development, so appsettings.Development.json
+            // is in play. Blank it here rather than inherit a first-run organization the
+            // test did not ask for; the seeding tests set it back deliberately.
+            ["Seed:OrganizationName"] = "",
+            ["Seed:OrganizationSlug"] = "",
+            ["Seed:OrganizationTimeZone"] = "",
+            ["S3:Endpoint"] = garage.S3Endpoint,
+            ["S3:Bucket"] = GarageFixture.Bucket,
+            ["S3:AccessKey"] = GarageFixture.AccessKey,
+            ["S3:SecretKey"] = GarageFixture.SecretKey,
+            ["S3:Region"] = "garage",
+            ["S3:ForcePathStyle"] = "true",
+            // Tests hammer the auth endpoints far past the production budget.
+            ["RateLimiting:AuthPermitLimitPerMinute"] = "1000",
+            ["RateLimiting:GlobalPermitLimitPerMinute"] = "10000",
+            ["RateLimiting:McpPermitLimitPerMinute"] = "10000",
+            ["RateLimiting:McpRequestPermitLimitPerMinute"] = "10000"
+        };
+
+    /// <summary>
+    /// Builds the template every test database is cloned from: one API start with nothing
+    /// to seed, so the clone holds exactly what migrations create and each host still runs
+    /// its own seeding against the settings its test asked for.
+    /// </summary>
+    private static async Task MigrateTemplateAsync(string connectionString, GarageFixture garage)
+    {
+        var settings = BaseSettings(connectionString, garage);
+        settings["Seed:AdminEmail"] = "";
+        settings["Seed:AdminPassword"] = "";
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
+            builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
+        });
+        // Program migrates before it serves anything; resolving the services starts it.
+        _ = factory.Services;
+    }
+
+    /// <summary>
+    /// Timer-driven sweeps a test host does not run on its own. Every test of one of these
+    /// builds the service and calls it once, at a clock it controls; left running, they
+    /// only wake up mid-test, take connections and race those explicit calls. The
+    /// event-driven services (outbox, deliveries, imports, cache and realtime listeners)
+    /// stay: tests observe their effects.
+    /// </summary>
+    private static readonly HashSet<string> TimerServices =
+    [
+        "AnonymousTelemetryReporter", "DailySnapshotService", "RetentionCleanupService",
+        "RunSweeper", "RunLogRetentionService", "DailyNotificationDigestService",
+        "EmailConfigurationWarning", "AttachmentCleanupService", "StaleClaimReleaseService",
+    ];
+
+    private static void RemoveTimerServices(IServiceCollection services)
+    {
+        foreach (var descriptor in services
+                     .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType is { } type && TimerServices.Contains(type.Name))
+                     .ToList())
+        {
+            services.Remove(descriptor);
+        }
     }
 
     /// <summary>

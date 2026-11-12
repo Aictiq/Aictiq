@@ -21,7 +21,11 @@ namespace Aictiq.IntegrationTests.Automation;
 
 public abstract class RunTestBase(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
-    protected const string Slug = "acme";
+    /// <summary>
+    /// The test's own organization. The host is shared by every test in the class
+    /// (<see cref="SharedHosts"/>), so each test is isolated by tenant, not by database.
+    /// </summary>
+    protected string Slug { get; } = $"acme-{Guid.NewGuid():N}"[..20];
 
     private readonly PostgresFixture _postgres = postgres;
     private readonly GarageFixture _garage = garage;
@@ -41,9 +45,13 @@ public abstract class RunTestBase(PostgresFixture postgres, GarageFixture garage
 
     protected virtual Action<IDictionary<string, string?>>? Configure => null;
 
+    /// <summary>Serve requests as the RLS-bound app role (see <see cref="ApiTestContext.CreateAsync"/>).</summary>
+    protected virtual bool AppRole => false;
+
     public async ValueTask InitializeAsync()
     {
-        Context = await ApiTestContext.CreateAsync(_postgres, _garage, "runs", configure: Configure);
+        Context = await SharedHosts.GetAsync(GetType().FullName!,
+            () => ApiTestContext.CreateAsync(_postgres, _garage, "runs", configure: Configure, appRole: AppRole));
 
         var alice = await Context.RegisterAsync($"run-owner-{Guid.NewGuid():N}@test.local", "Alice", "Anderson");
         OwnerId = alice.User.Id;
@@ -69,10 +77,10 @@ public abstract class RunTestBase(PostgresFixture postgres, GarageFixture garage
         Item = await CreateItemAsync("Fix the login redirect");
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Owner.Dispose();
-        await Context.DisposeAsync();
+        return ValueTask.CompletedTask;
     }
 
     protected async Task<ProjectView> CreateProjectAsync(string name, string key, ProjectVisibility visibility)

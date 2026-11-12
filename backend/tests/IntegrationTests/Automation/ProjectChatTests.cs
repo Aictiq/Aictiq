@@ -686,7 +686,7 @@ public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture gar
         return (string)(await command.ExecuteScalarAsync(Ct))!;
     }
 
-    private static string Download(Guid attachmentId) => $"/api/v1/orgs/{Slug}/attachments/{attachmentId}/download";
+    private string Download(Guid attachmentId) => $"/api/v1/orgs/{Slug}/attachments/{attachmentId}/download";
 
     [Fact]
     public async Task files_go_with_a_question_and_only_the_asker_and_the_run_answering_them_read_them()

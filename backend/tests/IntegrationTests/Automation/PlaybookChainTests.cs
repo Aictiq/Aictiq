@@ -104,7 +104,7 @@ public sealed class PlaybookChainTests(PostgresFixture postgres, GarageFixture g
     }
 
     private Task<long> PendingStepsAsync() =>
-        ScalarAsync("SELECT count(*) FROM automation.chain_steps WHERE status = 0");
+        ScalarAsync($"SELECT count(*) FROM automation.chain_steps WHERE status = 0 AND organization_id = '{OrganizationId}'");
 
     [Fact]
     public async Task follow_up_playbooks_are_saved_in_order_and_validated()
@@ -139,7 +139,7 @@ public sealed class PlaybookChainTests(PostgresFixture postgres, GarageFixture g
         Assert.Equal([review.Id], single.StagePlaybookIds);
 
         (await PutStagesAsync(PlaybookId)).EnsureSuccessStatusCode();
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM automation.playbook_stages"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM automation.playbook_stages WHERE organization_id = '{OrganizationId}'"));
     }
 
     [Fact]

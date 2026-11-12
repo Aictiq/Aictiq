@@ -79,7 +79,7 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
             $"/api/v1/orgs/{Slug}/items/{itemKey}/runs", ApiTestContext.Json, Ct))!.Items];
 
     private Task<long> PendingMentionsAsync() =>
-        ScalarAsync("SELECT count(*) FROM automation.run_mentions WHERE status = 0");
+        ScalarAsync($"SELECT count(*) FROM automation.run_mentions WHERE status = 0 AND organization_id = '{OrganizationId}'");
 
     private async Task<RunnerRunClaimed> StartAsync(HttpClient runner, Guid runId)
     {
@@ -299,7 +299,7 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         await DeliverAsync(ofPerson);
 
         Assert.Empty(await ItemRunsAsync(ItemKey));
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM automation.run_mentions"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM automation.run_mentions WHERE organization_id = '{OrganizationId}'"));
     }
 
     [Fact]
@@ -347,6 +347,6 @@ public sealed class RunMentionTests(PostgresFixture postgres, GarageFixture gara
         var reply = (await CommentsAsync(item.Key)).Items.Single(c => c.Author.IsAgent);
         Assert.Equal(comment.Id, reply.ParentCommentId);
         Assert.Contains("no default playbook", reply.BodyMarkdown);
-        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.run_mentions WHERE status = 2"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM automation.run_mentions WHERE status = 2 AND organization_id = '{OrganizationId}'"));
     }
 }

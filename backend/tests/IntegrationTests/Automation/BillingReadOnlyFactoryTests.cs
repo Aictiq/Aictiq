@@ -89,7 +89,7 @@ public sealed class BillingReadOnlyFactoryTests(PostgresFixture postgres, Garage
         Assert.Equal(HttpStatusCode.NoContent, claim.StatusCode);
 
         // Nothing was started by any of them.
-        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM automation.runs"));
+        Assert.Equal(0, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE organization_id = '{OrganizationId}'"));
     }
 
     [Fact]
@@ -139,11 +139,11 @@ public sealed class BillingReadOnlyFactoryTests(PostgresFixture postgres, Garage
         Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
         Assert.Equal(ProblemTypes.TokenRevoked, await ProblemTypeAsync(session));
         Assert.Equal(1, await ScalarAsync(
-            "SELECT count(*) FROM identity.personal_access_tokens WHERE revoked_at IS NOT NULL"));
+            $"SELECT count(*) FROM identity.personal_access_tokens WHERE revoked_at IS NOT NULL AND organization_id = '{OrganizationId}'"));
 
         // A second sweep has nothing left to do.
         await SweepAsync();
-        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM automation.runs WHERE status = 5"));
+        Assert.Equal(1, await ScalarAsync($"SELECT count(*) FROM automation.runs WHERE status = 5 AND organization_id = '{OrganizationId}'"));
     }
 
     // --------------------------------------------------------------------------- helpers
@@ -211,6 +211,11 @@ public sealed class BillingReadOnlyFactoryTests(PostgresFixture postgres, Garage
 public sealed class RunLogRetentionEntitlementTests(PostgresFixture postgres, GarageFixture garage)
     : RunTestBase(postgres, garage)
 {
+    // The purge is scoped to an organization by row-level security alone - its DELETE names
+    // no tenant - so it is only meaningful as the role RLS binds. As the superuser every
+    // organization's sweep would reach every other organization's runs.
+    protected override bool AppRole => true;
+
     protected override Action<IDictionary<string, string?>>? Configure => settings =>
     {
         settings["Billing:Mode"] = "saas";
