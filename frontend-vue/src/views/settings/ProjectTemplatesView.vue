@@ -12,6 +12,7 @@ import {
 } from '@/api/templates'
 import { listLabels, type Label } from '@/api/labels'
 import { hasProjectRole } from '@/api/projects'
+import MarkdownTextarea from '@/components/common/MarkdownTextarea.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import UiPageState from '@/components/UiPageState.vue'
 import { Button } from '@/components/ui/button'
@@ -185,9 +186,9 @@ onMounted(() => reset())
           placeholder="Template name"
           aria-label="Template name"
         />
-        <textarea
+        <MarkdownTextarea
           v-model="form.descriptionMarkdown"
-          class="border-input bg-background min-h-40 rounded border p-2 font-mono text-xs"
+          :disabled="saving"
           placeholder="Markdown description"
           aria-label="Template description"
         />

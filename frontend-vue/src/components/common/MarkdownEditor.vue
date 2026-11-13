@@ -8,6 +8,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { closeHistory } from '@tiptap/pm/history'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
@@ -17,6 +18,7 @@ import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { routerKey, useRouter } from 'vue-router'
 
 import { searchProject, type SearchItem } from '@/api/search'
+import EmojiPicker from '@/components/common/EmojiPicker.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { useResolvedItemKeys } from '@/composables/useResolvedItemKeys'
 import { useToast } from '@/composables/useToast'
@@ -73,6 +75,24 @@ defineExpose({
   uploading: computed(() => uploading.value > 0),
   focus: () => editor.value?.commands.focus('end'),
 })
+
+let emojiSelection: { from: number; to: number } | null = null
+function rememberEmojiSelection() {
+  const current = editor.value
+  if (current) {
+    const { from, to } = current.state.selection
+    emojiSelection = { from, to }
+  }
+}
+
+function insertEmoji(emoji: string) {
+  const current = editor.value
+  if (!current?.isEditable || props.disabled || !emojiSelection) return
+  // A separate history group lets Undo remove just the emoji, preserving earlier typing.
+  current.chain().focus().setTextSelection(emojiSelection)
+    .command(({ tr }) => { closeHistory(tr); return true })
+    .insertContent({ type: 'text', text: emoji }).run()
+}
 
 // ── Mentions ───────────────────────────────────────────────────────────────────────
 // "@" followed by the start of a name opens a list of the people who can see this item.
@@ -425,6 +445,7 @@ onBeforeUnmount(() => editor.value?.destroy())
       >
         <component :is="action.icon" class="size-4" aria-hidden="true" />
       </button>
+      <EmojiPicker :disabled="disabled || !editor?.isEditable" @open="rememberEmojiSelection" @select="insertEmoji" />
       <div
         v-if="inTable && !disabled"
         class="bg-primary text-primary-foreground ml-1 inline-flex items-center gap-0.5 rounded-md py-0.5 pr-0.5 pl-2 shadow-sm"
