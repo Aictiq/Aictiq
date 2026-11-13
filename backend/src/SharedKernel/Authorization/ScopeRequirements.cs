@@ -11,7 +11,7 @@ public static class Scopes
     public const string Mcp = "mcp";
 
     /// <summary>
-    /// A project-chat run's token: create items in that run's project, as the person who asked,
+    /// A project-chat run's token: create items and wiki pages in that run's project, as the person who asked,
     /// and nothing else that writes. Not in <see cref="All"/>, so no personal access token can be
     /// minted with it; only the runner protocol issues it, beside read and mcp.
     /// </summary>

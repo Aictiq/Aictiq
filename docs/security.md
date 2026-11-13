@@ -68,9 +68,11 @@ The two factory credentials have deliberately different reach:
   success, failure, cancellation, timeout, or runner loss, and expires on its own
   at the playbook limit plus ten minutes if revocation cannot complete.
 - A project-chat run's PAT gets `read`, `mcp`, and `project-chat` instead, with no
-  `write`. Its only write is MCP `create_item`, and only in the run's own project
-  while the run is live. The item records the person who asked as its reporter, and
-  that person must still be a project Member. No PAT can be created with
+  `write`. It can use MCP `create_item`, `create_subtask`, and `create_page` only in
+  the run's own project while the run is live. The person who asked is recorded as
+  the item reporter or page and initial-revision author, and must still be a project
+  Member. Wiki parents must be writable by both the agent and that person. Existing
+  items, wiki pages, playbooks and settings cannot be changed. No PAT can be created with
   `project-chat` through the token endpoints.
 
 A playbook is prompt text, not trusted code. Its Markdown comes from a versioned

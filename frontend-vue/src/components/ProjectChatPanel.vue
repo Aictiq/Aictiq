@@ -389,8 +389,9 @@ onBeforeUnmount(() => {
           Loading
         </p>
         <p v-else-if="messages.length === 0" class="text-muted-foreground text-sm">
-          Ask the agent about this project: how something works, what is left to do, or to file
-          tickets for you. It reads the project's code, wiki and items to answer.
+          Ask about the project's code, wiki and items, or ask for a playbook review. On your
+          request, the agent can file tickets or save a discussion as a new wiki page. Saved pages
+          use normal project wiki visibility and remain after you clear chat history.
         </p>
 
         <div

@@ -39,7 +39,7 @@ public sealed record ReplaceWikiPagePermissionsRequest(IReadOnlyList<WikiPagePer
 
 public static partial class WikiPageEndpoints
 {
-    private const int MaxDepth = 10;
+    internal const int MaxDepth = 10;
     /// <summary>The wiki's hard page limit. Content is retained forever in revisions.</summary>
     public const int MaxMarkdownLength = 1_048_576;
     public const int MaxHtmlLength = 2_097_152;
@@ -450,7 +450,7 @@ public static partial class WikiPageEndpoints
     private static async Task<int> NextPositionAsync(WikiDbContext db, Guid projectId, Guid? parentId, CancellationToken ct) =>
         (await db.Pages.Where(x => x.ProjectId == projectId && x.ParentId == parentId)
             .Select(x => (int?)x.Position).MaxAsync(ct) ?? -1) + 1;
-    private static Task<int> DepthAsync(WikiDbContext db, Guid pageId, CancellationToken ct) => db.Database.SqlQuery<int>($"""
+    internal static Task<int> DepthAsync(WikiDbContext db, Guid pageId, CancellationToken ct) => db.Database.SqlQuery<int>($"""
         WITH RECURSIVE ancestors AS (SELECT id, parent_id, 1 AS depth FROM wiki.pages WHERE id = {pageId}
         UNION ALL SELECT p.id, p.parent_id, a.depth + 1 FROM wiki.pages p JOIN ancestors a ON p.id = a.parent_id)
         SELECT COALESCE(MAX(depth), 0) AS "Value" FROM ancestors

@@ -24,10 +24,10 @@ namespace Aictiq.IntegrationTests.Automation;
 /// <summary>
 /// A person's private project chat: a question is a project-chat run with no item on the
 /// project's runner, its answer lands in the chat, the chat keeps the last ten pairs, nobody
-/// else can read it, and the run's token may create items in the project and write nothing else.
+/// else can read it, and the run's token may create requested items and wiki pages only in its project.
 /// </summary>
 [Trait("Category", "Automation")]
-public sealed class ProjectChatTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
+public sealed partial class ProjectChatTests(PostgresFixture postgres, GarageFixture garage) : RunTestBase(postgres, garage)
 {
     protected override Action<IDictionary<string, string?>>? Configure => settings =>
     {
