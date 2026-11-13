@@ -584,13 +584,22 @@ lives or what a change would take. The automatically selected agent answers on o
   the project has none. Agent selection follows the project, organization and single-agent
   fallback described above.
 - **Tickets from the chat.** Ask the agent to "make tickets for these 3 bugs", and it creates them
-  in this project, with you as the reporter, and links them in its answer. Creating items is the
-  only change the run's token allows. You can also ask for one parent ticket with subtasks:
+  in this project, with you as the reporter, and links them in its answer. You can also ask for
+  one parent ticket with subtasks:
   it creates the parent first, then linked Tasks with the agreed titles. Tasks inherit the
   parent's team unless you name another team. The answer groups and links the created items;
   if creation fails partway through, it reports the failure and what was already created,
   without replacing subtasks with standalone tickets. It has no `write` scope, so it cannot
   edit, transition, comment on or delete items, and it can create items only in this project.
+- **Wiki pages from the chat.** Ask to "save this reference as a wiki page" to create a new page
+  from the established discussion, with you as author of the page and its first revision. The
+  answer links the saved page or explains why saving failed. Saved pages use normal project wiki
+  visibility, remain after clearing chat, and can be edited through the wiki. A page-only request
+  creates no ticket. Existing pages, playbooks and settings cannot be changed by chat.
+- **Playbook reviews.** Ask the agent to explain or review a wiki-based playbook. It reads the
+  accessible source, links it, and grounds suggestions in its content. Missing or inaccessible
+  sources are reported without guessing. Reviews create no pages or tickets unless you explicitly
+  ask to save the suggestions as a new wiki page.
 - **Who can chat.** Project members who may operate the factory. Stakeholders and Guests see no
   chat button, and the API answers them with 403.
 

@@ -22,7 +22,8 @@ public sealed record McpWikiContent(Guid Id, string Slug, string Title, int Vers
 /// tool and resource reads; a page id is never enough to cross a project boundary.</summary>
 [McpServerToolType]
 public sealed class WikiMcpTools(WikiDbContext db, TenancyDbContext tenancy, ICurrentTenant tenant,
-    ICurrentUser user, IProjectAccess access, IWikiPageAccess pageAccess, IWorkItemLookup items, TimeProvider clock)
+    ICurrentUser user, IProjectAccess access, IWikiPageAccess pageAccess, IWorkItemLookup items, TimeProvider clock,
+    IProjectChatGrants chatGrants)
 {
     private const int DefaultBodyLimit = 20_000;
 
@@ -73,15 +74,19 @@ public sealed class WikiMcpTools(WikiDbContext db, TenancyDbContext tenancy, ICu
     {
         if (!ValidTitle(title) || !ValidMarkdown(markdown)) throw new McpException("title must contain 1 to 500 characters and markdown may not exceed 1 MB.");
         var visible = await ProjectAsync(project, true, cancellationToken); if (visible is null) throw new McpAnswerException($"project '{project}' not found or no access");
+        var author = await ChatAuthorAsync(visible, cancellationToken) ?? user.UserId!;
         if (parent is { } parentId && (!await db.Pages.AnyAsync(x => x.Id == parentId && x.ProjectId == visible.Id, cancellationToken)
-            || !await pageAccess.CanWriteAsync(parentId, visible.Id, user.UserId!, cancellationToken))) throw new McpAnswerException("parent page not found or no access");
+            || !await pageAccess.CanWriteAsync(parentId, visible.Id, user.UserId!, cancellationToken)
+            || author != user.UserId && !await pageAccess.CanWriteAsync(parentId, visible.Id, author, cancellationToken))) throw new McpAnswerException("parent page not found or no access");
+        if (parent is { } ancestor && await WikiPageEndpoints.DepthAsync(db, ancestor, cancellationToken) >= WikiPageEndpoints.MaxDepth)
+            throw new McpAnswerException($"Pages can be nested at most {WikiPageEndpoints.MaxDepth} levels.");
         var now = clock.GetUtcNow();
         var page = new WikiPage { OrganizationId = tenant.OrganizationId!.Value, ProjectId = visible.Id, ParentId = parent,
             Title = title.Trim(), Slug = await UniqueSlugAsync(visible.Id, parent, title, cancellationToken),
-            Position = await NextPositionAsync(visible.Id, parent, cancellationToken), CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
+            Position = await NextPositionAsync(visible.Id, parent, cancellationToken), CreatedBy = author, CreatedAt = now, UpdatedAt = now };
         var revision = new WikiPageRevision { OrganizationId = page.OrganizationId, PageId = page.Id, Number = 1,
-            ContentMarkdown = markdown.Trim(), ContentHtml = WikiPageEndpoints.Render(markdown.Trim()), AuthorId = user.UserId!, At = now };
-        page.CurrentRevisionId = revision.Id; page.Updated(user.UserId!, "created");
+            ContentMarkdown = markdown.Trim(), ContentHtml = WikiPageEndpoints.Render(markdown.Trim()), AuthorId = author, At = now };
+        page.CurrentRevisionId = revision.Id; page.Updated(author, "created");
         db.Pages.Add(page); db.PageRevisions.Add(revision);
         await WikiPageEndpoints.ReplaceItemLinksAsync(db, page, revision, items, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -111,6 +116,18 @@ public sealed class WikiMcpTools(WikiDbContext db, TenancyDbContext tenancy, ICu
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { throw new McpAnswerException("conflict: version changed"); }
         return Content(page, revision, null);
+    }
+
+    // Match item creation's live chat grant: the requester must still be a Member in
+    // this run's project. Ordinary write-scoped callers continue to author as themselves.
+    private async Task<string?> ChatAuthorAsync(Project project, CancellationToken ct)
+    {
+        if (!user.Scopes.Contains(Scopes.ProjectChat, StringComparer.Ordinal) || ScopeRequirements.IsSatisfiedBy(user.Scopes, Scopes.Write)) return null;
+        var grant = user.TokenId is { } tokenId ? await chatGrants.FindAsync(tokenId, ct) : null;
+        if (grant is null || grant.ProjectId != project.Id
+            || await access.GetProjectRoleAsync(grant.RequestedBy, project.Id, ct) is not { } role || !role.Satisfies(ProjectRole.Member))
+            throw new McpAnswerException($"project '{project.Key}' not found or no access");
+        return grant.RequestedBy;
     }
 
     private async Task<Project?> ProjectAsync(string key, bool write, CancellationToken ct)

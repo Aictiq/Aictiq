@@ -1,15 +1,15 @@
 namespace Aictiq.SharedKernel.Contracts;
 
 /// <summary>
-/// What a project-chat run's token may create: items in <paramref name="ProjectId"/>, reported
-/// by <paramref name="RequestedBy"/>, the person whose question the run answers.
+/// What a project-chat run's token may create: items and wiki pages in <paramref name="ProjectId"/>,
+/// attributed to <paramref name="RequestedBy"/>, the person whose question the run answers.
 /// </summary>
 public sealed record ProjectChatGrant(Guid ProjectId, string RequestedBy);
 
 /// <summary>
 /// Resolves the grant behind a token with the <see cref="Authorization.Scopes.ProjectChat"/>
-/// scope. Implemented by Automation, which owns runs; asked by WorkItems before it creates an
-/// item for such a token.
+/// scope. Implemented by Automation, which owns runs; asked by WorkItems and Wiki before
+/// creating an item or page for such a token.
 /// </summary>
 public interface IProjectChatGrants
 {
