@@ -19,6 +19,17 @@ public sealed record WorkItemTransitioned(
 /// <summary>The public result of the exact run that moved the item. No prompts or logs.</summary>
 public sealed record TransitionRun(Guid Id, string Outcome, string? Summary, string? PullRequestUrl);
 
+/// <summary>A new assignee's durable notification input, committed with the item change.</summary>
+public sealed record WorkItemAssigned(
+    Guid OrganizationId, Guid ProjectId, Guid ItemId, string Key, string AssigneeId, string ActorId)
+    : DomainEvent, IIntegrationEvent
+{
+    public string? ItemTitle { get; init; }
+    public Guid StateId { get; init; }
+    public string? ItemPriority { get; init; }
+    public DateOnly? DueDate { get; init; }
+}
+
 /// <summary>Post-commit item update pushed to project subscribers.</summary>
 /// <remarks>Carries the organization because it is an integration event: webhook fan-out
 /// must be able to say whose event this is without a tenant in scope.</remarks>

@@ -45,10 +45,14 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
             .Where(n => n.ReadAt == null).OrderBy(n => n.CreatedAt).Take(5000).ToListAsync(ct);
         if (unread.Count == 0) return;
         var userIds = unread.Select(n => n.UserId).Distinct().ToArray();
-        var preferences = await db.Preferences.AsNoTracking().Where(p => userIds.Contains(p.UserId)
-            && p.EmailMode == EmailNotificationMode.Digest).ToListAsync(ct);
-        var digestKinds = preferences.Select(p => (p.UserId, p.Kind)).ToHashSet();
-        var pending = unread.Where(n => digestKinds.Contains((n.UserId, n.Kind)))
+        var tenant = services.GetRequiredService<AmbientCurrentTenant>();
+        var modes = new Dictionary<Guid, NotificationModes>();
+        foreach (var organizationId in unread.Select(n => n.OrganizationId).Distinct())
+        {
+            using var organizationScope = tenant.Use(organizationId);
+            modes[organizationId] = await NotificationModes.LoadAsync(db, userIds, [organizationId], ct);
+        }
+        var pending = unread.Where(n => modes[n.OrganizationId].Email(n.UserId, n.OrganizationId, n.Kind) == EmailNotificationMode.Digest)
             .GroupBy(n => n.UserId).ToArray();
         var profiles = await services.GetRequiredService<IUserDirectory>().GetDeliveryProfilesAsync(pending.Select(g => g.Key).ToArray(), ct);
         var digests = await db.Digests.Where(d => pending.Select(g => g.Key).Contains(d.UserId))
@@ -72,6 +76,13 @@ public sealed class DailyNotificationDigestService(IServiceScopeFactory scopes, 
             var items = new List<Notification>();
             foreach (var notification in group)
             {
+                if (notification.Kind == NotificationKind.Assigned)
+                {
+                    using var organizationScope = tenant.Use(notification.OrganizationId);
+                    if (notification.ProjectId is not { } projectId ||
+                        await access.GetProjectRoleAsync(person.Id, projectId, ct) is null)
+                        continue;
+                }
                 if (ChatNotificationService.IsRunKind(notification.Kind))
                 {
                     if (!factoryAccess.TryGetValue(notification.OrganizationId, out var canOperate))

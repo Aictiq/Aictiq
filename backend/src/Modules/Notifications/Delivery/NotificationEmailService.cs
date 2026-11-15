@@ -18,14 +18,17 @@ public sealed class NotificationEmailService(
     IOptions<NotificationEmailOptions> options, IOptions<EmailOptions> emailOptions, TimeProvider clock)
 {
     public async Task QueueImmediateAsync(IReadOnlyList<Notification> notifications, CancellationToken ct,
-        WorkItemTransitioned? transition = null)
+        WorkItemTransitioned? transition = null, WorkItemAssigned? assignment = null)
     {
         if (!options.Value.EmailEnabled || notifications.Count == 0) return;
         var ids = notifications.Select(n => n.UserId).Distinct().ToArray();
         var profiles = await users.GetDeliveryProfilesAsync(ids, ct);
-        var actor = transition is null ? null : (await users.GetAsync([transition.ActorId], ct)).GetValueOrDefault(transition.ActorId);
+        var actorId = transition?.ActorId ?? assignment?.ActorId;
+        var actor = actorId is null ? null : (await users.GetAsync([actorId], ct)).GetValueOrDefault(actorId);
         var states = transition is null ? new Dictionary<Guid, string>() :
             await workflows.GetStateNamesAsync(transition.ProjectId, [transition.FromStateId, transition.ToStateId], ct);
+        if (assignment is not null)
+            states = await workflows.GetStateNamesAsync(assignment.ProjectId, [assignment.StateId], ct);
         var modes = await NotificationModes.LoadAsync(db, ids, notifications.Select(n => n.OrganizationId).Distinct().ToArray(), ct);
         var organizationDetails = new Dictionary<Guid, OrganizationRef?>();
         foreach (var notification in notifications)
@@ -40,6 +43,8 @@ public sealed class NotificationEmailService(
                 continue;
             if (transition is not null && await access.GetProjectRoleAsync(notification.UserId, transition.ProjectId, ct) is null)
                 continue;
+            if (assignment is not null && await access.GetProjectRoleAsync(notification.UserId, assignment.ProjectId, ct) is null)
+                continue;
             if (!organizationDetails.TryGetValue(notification.OrganizationId, out var organization))
             {
                 organization = await organizations.FindByIdAsync(notification.OrganizationId, ct);
@@ -48,6 +53,17 @@ public sealed class NotificationEmailService(
             var variables = Variables(notification, recipient, unsubscribe.Create(notification.UserId, notification.Kind),
                 emailOptions.Value.BaseUrl, organization?.Slug);
             var template = "notification";
+            if (assignment is not null)
+            {
+                template = "assignment";
+                variables["organizationName"] = organization?.Name ?? "";
+                variables["actorName"] = actor?.DisplayName ?? "Someone";
+                variables["itemTitle"] = assignment.ItemTitle ?? "";
+                variables["itemUrl"] = Link(assignment.Key, emailOptions.Value.BaseUrl, organization?.Slug);
+                variables["stateName"] = states.GetValueOrDefault(assignment.StateId) ?? "";
+                variables["priorityName"] = assignment.ItemPriority ?? "";
+                variables["dueOn"] = assignment.DueDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            }
             // Run notifications reach only Factory operators and open the run itself.
             if (notification.RunId is { } runId && isRun && organization is not null
                 && !string.IsNullOrWhiteSpace(emailOptions.Value.BaseUrl))
@@ -83,7 +99,7 @@ public sealed class NotificationEmailService(
             });
         }
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException) { db.ChangeTracker.Clear(); } // notification replay already queued it
+        catch (DbUpdateException) when (assignment is null) { db.ChangeTracker.Clear(); } // notification replay already queued it
     }
 
     private static string Excerpt(string? text) =>
