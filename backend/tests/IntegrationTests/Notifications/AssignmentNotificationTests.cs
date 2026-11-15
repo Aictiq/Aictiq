@@ -79,7 +79,7 @@ public sealed class AssignmentNotificationTests(PostgresFixture postgres, Garage
         var next = await context.RegisterAsync("next-assignee@test.local", "Next", "Assignee");
         await AddMemberAsync(context, organization.Id, next.User.Id, ct);
         var updated = await UpdateAsync(context, item, next.User.Id, ct);
-        var reassigned = Assert.Single((await EventsAsync(context, item.Id, ct)).Where(e => e.EventId != assignment.EventId));
+        var reassigned = Assert.Single(await EventsAsync(context, item.Id, ct), e => e.EventId != assignment.EventId);
         Assert.Equal(next.User.Id, reassigned.AssigneeId);
         await HandleAsync(context, reassigned, ct);
         await using var inspection = context.Factory.Services.CreateAsyncScope();
