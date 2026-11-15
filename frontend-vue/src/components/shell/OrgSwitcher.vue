@@ -66,7 +66,7 @@ function openOrganizationSettings() {
 </script>
 
 <template>
-  <div class="border-sidebar-border border-b p-2.5" :class="mobile && 'pr-12'">
+  <div class="border-sidebar-border border-b p-2.5" :class="mobile && 'mobile-org-switcher'">
     <DropdownMenu>
       <DropdownMenuTrigger
         data-tour="org-switcher"
@@ -94,7 +94,7 @@ function openOrganizationSettings() {
         />
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" class="w-56">
+      <DropdownMenuContent align="start" class="w-56" :class="mobile && 'mobile-navigation-menu'">
         <template v-if="others.length > 0">
           <DropdownMenuLabel class="font-label">Switch organization</DropdownMenuLabel>
           <DropdownMenuItem
@@ -130,3 +130,26 @@ function openOrganizationSettings() {
     <CreateOrganizationDialog v-model:open="creating" @created="switchTo" />
   </div>
 </template>
+
+<style scoped>
+.mobile-org-switcher {
+  flex-shrink: 0;
+  padding: 6px 44px 6px 6px;
+}
+
+.mobile-org-switcher [data-tour='org-switcher'] {
+  min-height: 44px;
+  padding: 4px 6px;
+}
+
+.mobile-org-switcher .tracking-tight {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.mobile-org-switcher .font-label {
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+}
+</style>
