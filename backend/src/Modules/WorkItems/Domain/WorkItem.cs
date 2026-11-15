@@ -47,6 +47,18 @@ public sealed class WorkItem : TenantEntity, IAudited
     public uint Version { get; private set; }
     public string Key => $"{ProjectKey}-{Number}";
 
+    public void Assign(string? assigneeId, string actorId, DateTimeOffset now)
+    {
+        if (AssigneeId == assigneeId) return;
+        AssigneeId = assigneeId;
+        if (string.IsNullOrWhiteSpace(assigneeId) || assigneeId == actorId) return;
+        Raise(new WorkItemAssigned(OrganizationId, ProjectId, Id, Key, assigneeId, actorId)
+        {
+            OccurredAt = now, ItemTitle = Title, StateId = StateId,
+            ItemPriority = Priority.ToString(), DueDate = DueDate
+        });
+    }
+
     public void Transition(Guid toStateId, WorkflowStateCategory category, string actorId, DateTimeOffset now, TransitionRun? run = null)
     {
         var fromStateId = StateId;

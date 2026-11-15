@@ -300,7 +300,26 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     // http(s) only, like the REST endpoint: a stored javascript: or file: URL is rendered as a
     // link on the item page, and a private address is a way to point a person at a neighbour.
     [McpServerTool(Name = "link_item")] public async Task<bool> LinkItem(string key, string url, CancellationToken cancellationToken = default) { var item = await TryWritableAsync(key, cancellationToken); if (item is null || !LinkPreviewFetcher.TryParsePublicUrl(url, out var parsed, out _)) return false; var uri = parsed!; db.ItemLinks.Add(new ItemLink { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, Kind = ItemLinkKind.Url, Provider = "url", ExternalId = uri.AbsoluteUri, Url = uri.AbsoluteUri, CreatedAt = clock.GetUtcNow() }); try { await db.SaveChangesAsync(cancellationToken); return true; } catch (DbUpdateException) { return true; } }
-    [McpServerTool(Name = "bulk_update")] public async Task<int> BulkUpdate(string project, IReadOnlyList<string> keys, string? assigneeId = null, CancellationToken cancellationToken = default) { var writable = await ProjectAsync(project, write: true, cancellationToken) ?? throw new McpAnswerException($"project '{project}' not found or no access"); if (!await WorkItemEndpoints.AssignableAsync(access, writable.Id, assigneeId, cancellationToken)) throw new McpAnswerException("assigneeId must be someone who can see this project"); var numbers = keys.Select(WorkItemEndpoints.ParseKey).Where(k => k.Number is not null && k.ProjectKey == writable.Key).Select(k => k.Number!.Value).Distinct().ToArray(); var rows = numbers.Length == 0 ? [] : await db.Items.Where(x => x.ProjectId == writable.Id && numbers.Contains(x.Number)).ToListAsync(cancellationToken); foreach (var row in rows) { row.AssigneeId = assigneeId; row.UpdatedAt = clock.GetUtcNow(); } await db.SaveChangesAsync(cancellationToken); return rows.Count; }
+    [McpServerTool(Name = "bulk_update")]
+    public async Task<int> BulkUpdate(string project, IReadOnlyList<string> keys, string? assigneeId = null, CancellationToken cancellationToken = default)
+    {
+        var writable = await ProjectAsync(project, write: true, cancellationToken)
+            ?? throw new McpAnswerException($"project '{project}' not found or no access");
+        if (!await WorkItemEndpoints.AssignableAsync(access, writable.Id, assigneeId, cancellationToken))
+            throw new McpAnswerException("assigneeId must be someone who can see this project");
+        var numbers = keys.Select(WorkItemEndpoints.ParseKey).Where(k => k.Number is not null && k.ProjectKey == writable.Key)
+            .Select(k => k.Number!.Value).Distinct().ToArray();
+        var rows = numbers.Length == 0 ? [] : await db.Items.Where(x => x.ProjectId == writable.Id && numbers.Contains(x.Number)).ToListAsync(cancellationToken);
+        var now = clock.GetUtcNow();
+        foreach (var row in rows)
+        {
+            row.Assign(assigneeId, user.UserId!, now);
+            row.UpdatedAt = now;
+            await ItemWatcherRules.AddAsync(db, row, row.AssigneeId, ItemWatchReason.Assignee, now, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return rows.Count;
+    }
 
     private static WorkItemType ParseType(string? type)
     {

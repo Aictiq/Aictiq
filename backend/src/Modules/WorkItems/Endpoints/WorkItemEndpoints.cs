@@ -211,7 +211,8 @@ public static class WorkItemEndpoints
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await NextNumberAsync(db, tenant.OrganizationId!.Value, project.Id, ct);
         var now = clock.GetUtcNow(); var markdown = request.DescriptionMarkdown?.Trim() ?? "";
-        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = project.Id, ProjectKey = project.Key, Number = number, Type = request.Type, Title = request.Title!.Trim(), DescriptionMarkdown = markdown, DescriptionHtml = Render(markdown), StateId = state, Priority = request.Priority ?? WorkItemPriority.None, AssigneeId = request.AssigneeId, TeamId = teamId, ParentId = request.ParentId, Rank = await ItemRanking.AfterLastAsync(db, project.Id, ct), Points = request.Points, EstimateHours = request.EstimateHours, RemainingHours = request.RemainingHours ?? (request.Type is WorkItemType.Task or WorkItemType.Bug ? request.EstimateHours : null), CompletedHours = request.CompletedHours, DueDate = request.DueDate, CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
+        var item = new WorkItem { OrganizationId = tenant.OrganizationId!.Value, ProjectId = project.Id, ProjectKey = project.Key, Number = number, Type = request.Type, Title = request.Title!.Trim(), DescriptionMarkdown = markdown, DescriptionHtml = Render(markdown), StateId = state, Priority = request.Priority ?? WorkItemPriority.None, TeamId = teamId, ParentId = request.ParentId, Rank = await ItemRanking.AfterLastAsync(db, project.Id, ct), Points = request.Points, EstimateHours = request.EstimateHours, RemainingHours = request.RemainingHours ?? (request.Type is WorkItemType.Task or WorkItemType.Bug ? request.EstimateHours : null), CompletedHours = request.CompletedHours, DueDate = request.DueDate, CreatedBy = user.UserId!, CreatedAt = now, UpdatedAt = now };
+        item.Assign(request.AssigneeId, user.UserId!, now);
         db.Items.Add(item);
         if (request.LabelIds is { Count: > 0 })
             foreach (var labelId in request.LabelIds.Distinct())
@@ -395,7 +396,6 @@ public static class WorkItemEndpoints
             item.Transition(targetState.Id, targetState.Category, actorId, now);
             changed = true;
         }
-        if (set.AssigneeId is not null && item.AssigneeId != set.AssigneeId) { item.AssigneeId = set.AssigneeId; await ItemWatcherRules.AddAsync(db, item, item.AssigneeId, ItemWatchReason.Assignee, now, ct); changed = true; }
         if (set.Priority is { } priority && item.Priority != priority) { item.Priority = priority; changed = true; }
         if (set.TeamId is { } teamId && item.TeamId != teamId) { var oldSprintId = item.SprintId; item.TeamId = teamId; item.SprintId = null; await SprintEndpoints.LogScopeAsync(db, item, oldSprintId, null, now, ct); changed = true; }
         if (set.SprintId is { } sprintId && item.SprintId != sprintId) { var oldSprintId = item.SprintId; item.SprintId = sprintId; await SprintEndpoints.LogScopeAsync(db, item, oldSprintId, sprintId, now, ct); changed = true; }
@@ -410,6 +410,12 @@ public static class WorkItemEndpoints
                 db.ItemLabels.Add(new ItemLabel { OrganizationId = item.OrganizationId, ItemId = item.Id, LabelId = labelId, AddedAt = now, AddedBy = actorId });
                 changed = true;
             }
+        }
+        if (set.AssigneeId is not null && item.AssigneeId != set.AssigneeId)
+        {
+            item.Assign(set.AssigneeId, actorId, now);
+            await ItemWatcherRules.AddAsync(db, item, item.AssigneeId, ItemWatchReason.Assignee, now, ct);
+            changed = true;
         }
         if (changed && targetState is null) item.UpdatedAt = now;
         return changed;
@@ -457,7 +463,8 @@ public static class WorkItemEndpoints
             var targetState = await db.WorkflowStates.FirstAsync(x => x.Id == requestedStateId, ct);
             item.Transition(targetState.Id, targetState.Category, user.UserId!, updatedAt);
         }
-        item.Priority = request.Priority ?? item.Priority; item.AssigneeId = request.AssigneeId; var oldSprintId = item.SprintId; var oldTeamId = item.TeamId; item.TeamId = request.TeamId; if (oldSprintId is not null && oldTeamId != item.TeamId) { item.SprintId = null; await SprintEndpoints.LogScopeAsync(db, item, oldSprintId, null, updatedAt, ct); } item.ParentId = request.ParentId; item.Points = request.Points; item.EstimateHours = request.EstimateHours; item.RemainingHours = request.RemainingHours; item.CompletedHours = request.CompletedHours; item.DueDate = request.DueDate; item.UpdatedAt = updatedAt;
+        item.Priority = request.Priority ?? item.Priority; var oldSprintId = item.SprintId; var oldTeamId = item.TeamId; item.TeamId = request.TeamId; if (oldSprintId is not null && oldTeamId != item.TeamId) { item.SprintId = null; await SprintEndpoints.LogScopeAsync(db, item, oldSprintId, null, updatedAt, ct); } item.ParentId = request.ParentId; item.Points = request.Points; item.EstimateHours = request.EstimateHours; item.RemainingHours = request.RemainingHours; item.CompletedHours = request.CompletedHours; item.DueDate = request.DueDate; item.UpdatedAt = updatedAt;
+        item.Assign(request.AssigneeId, user.UserId!, updatedAt);
         await ItemWatcherRules.AddAsync(db, item, item.AssigneeId, ItemWatchReason.Assignee, updatedAt, ct);
         // null/absent leaves labels untouched; [] clears them. Diffed against the current
         // set rather than replaced wholesale so an unchanged label is never re-inserted.

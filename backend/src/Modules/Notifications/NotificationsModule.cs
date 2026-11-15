@@ -82,6 +82,7 @@ public static class NotificationsModule
         services.AddScoped<IDomainEventHandler<CommentReactionAdded>, CommentReactionNotificationHandler>();
         services.AddScoped<IDomainEventHandler<CommentMentionsAdded>, CommentMentionsNotificationHandler>();
         services.AddScoped<IDomainEventHandler<WorkItemTransitioned>, TransitionNotificationHandler>();
+        services.AddScoped<IDomainEventHandler<WorkItemAssigned>, AssignmentNotificationHandler>();
         services.AddScoped<IDomainEventHandler<RunFinished>, RunNotificationHandler>();
         services.AddScoped<IDomainEventHandler<SprintStarted>, SprintStartedChannelHandler>();
         services.AddScoped<IDomainEventHandler<SprintCompleted>, SprintCompletedChannelHandler>();
