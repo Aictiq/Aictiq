@@ -7,6 +7,7 @@ import AppShell from '@/components/shell/AppShell.vue'
 import DashboardWidgetRenderer from '@/components/dashboard/DashboardWidgetRenderer.vue'
 import { createDashboard, deleteDashboard, getDashboardData, listDashboards, updateDashboard, type DashboardWidget } from '@/api/analytics'
 import { useToast } from '@/composables/useToast'
+import { newId } from '@/utils/id'
 
 const props = defineProps<{ slug: string; projectKey: string }>(); const client = useQueryClient(); const toast = useToast(); const edit = ref(false); const selected = ref('')
 const dashboards = useQuery({ queryKey: computed(() => ['dashboards', props.slug, props.projectKey]), queryFn: () => listDashboards(props.slug, props.projectKey) })
@@ -35,8 +36,8 @@ watch(
 const saving = computed(() => save.isPending.value)
 const catalog = ['velocity', 'burndown', 'cfd', 'cycle-time', 'sprint-health', 'items-by-state', 'items-by-assignee', 'recent-activity', 'saved-view-count', 'markdown']
 const save = useMutation({ mutationFn: () => updateDashboard(props.slug, props.projectKey, dashboard.value!.id, { layout: draft.value, version: dashboard.value!.version }), onSuccess: async () => { await client.invalidateQueries({ queryKey: ['dashboards', props.slug, props.projectKey] }); toast.saved('Dashboard saved.') }, onError: error => toast.saveFailed(error, 'Dashboard could not be saved.') })
-async function add() { const layout: DashboardWidget[] = [{ id: crypto.randomUUID(), type: 'velocity', x: 0, y: 0, w: 6, h: 3, config: {} }]; const result = await createDashboard(props.slug, props.projectKey, { name: 'My dashboard', layout }); selected.value = result.id; await client.invalidateQueries({ queryKey: ['dashboards', props.slug, props.projectKey] }); edit.value = true }
-function addWidget(type: string) { if (!dashboard.value || draft.value.length >= 25) return; draft.value.push({ id: crypto.randomUUID(), type, x: (draft.value.length % 2) * 6, y: Math.floor(draft.value.length / 2) * 3, w: 6, h: 3, config: type === 'markdown' ? { markdown: 'Add a note' } : {} }) }
+async function add() { const layout: DashboardWidget[] = [{ id: newId(), type: 'velocity', x: 0, y: 0, w: 6, h: 3, config: {} }]; const result = await createDashboard(props.slug, props.projectKey, { name: 'My dashboard', layout }); selected.value = result.id; await client.invalidateQueries({ queryKey: ['dashboards', props.slug, props.projectKey] }); edit.value = true }
+function addWidget(type: string) { if (!dashboard.value || draft.value.length >= 25) return; draft.value.push({ id: newId(), type, x: (draft.value.length % 2) * 6, y: Math.floor(draft.value.length / 2) * 3, w: 6, h: 3, config: type === 'markdown' ? { markdown: 'Add a note' } : {} }) }
 function remove(id: string) { draft.value = draft.value.filter(widget => widget.id !== id) }
 function positioned(layout: { i: string; x: number; y: number; w: number; h: number }[]) { for (const position of layout) { const widget = draft.value.find(item => item.id === position.i); if (widget) Object.assign(widget, { x: position.x, y: position.y, w: position.w, h: position.h }) } }
 async function destroy() { if (!dashboard.value || dashboard.value.isDefault) return; await deleteDashboard(props.slug, props.projectKey, dashboard.value.id); selected.value = ''; await client.invalidateQueries({ queryKey: ['dashboards', props.slug, props.projectKey] }) }
