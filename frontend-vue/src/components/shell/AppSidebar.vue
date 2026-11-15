@@ -269,6 +269,7 @@ const organization = computed<NavItem[]>(() => {
           ? 'var(--spacing-sidebar-collapsed)'
           : 'var(--spacing-sidebar)',
     }"
+    :class="mobile && 'mobile-navigation'"
     aria-label="Primary"
   >
     <OrgSwitcher :collapsed="collapsed" :mobile="mobile" />
@@ -390,7 +391,12 @@ const organization = computed<NavItem[]>(() => {
           </div>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="start" side="top" class="w-56">
+        <DropdownMenuContent
+          align="start"
+          side="top"
+          class="w-56"
+          :class="mobile && 'mobile-navigation-menu'"
+        >
           <DropdownMenuLabel class="min-w-0">
             <div class="truncate text-xs font-medium">{{ session.user?.fullName }}</div>
             <div class="text-muted-foreground truncate text-[10.5px] font-normal">
@@ -448,3 +454,59 @@ const organization = computed<NavItem[]>(() => {
     </div>
   </aside>
 </template>
+
+<style scoped>
+/* Phone navigation stays readable in either content density. */
+.mobile-navigation {
+  min-height: 0;
+}
+
+.mobile-navigation nav {
+  min-height: 0;
+  overflow-x: hidden;
+  padding: 4px 6px;
+}
+
+.mobile-navigation nav :is(a, button) {
+  min-height: 44px;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.mobile-navigation nav .font-label {
+  overflow: hidden;
+  padding: 6px 6px 2px;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-navigation nav .font-mono {
+  font-size: 12px;
+}
+
+.mobile-navigation > .border-t {
+  flex-shrink: 0;
+  padding: 6px;
+}
+
+.mobile-navigation [data-tour='account-menu'] {
+  min-height: 44px;
+  margin: 0;
+  padding: 4px 6px;
+}
+
+.mobile-navigation [data-tour='account-menu'] .truncate.font-medium {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.mobile-navigation [data-tour='account-menu'] .text-muted-foreground {
+  font-size: 13px;
+  line-height: 18px;
+}
+</style>

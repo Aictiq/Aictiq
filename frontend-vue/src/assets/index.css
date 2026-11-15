@@ -457,3 +457,40 @@
 .aictiq-markdown input[type='checkbox'] {
   accent-color: var(--primary);
 }
+
+/* These two mobile navigation menus are portalled outside the drawer. */
+@layer utilities {
+  .mobile-navigation-menu {
+    width: min(288px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+    padding: 4px;
+  }
+
+  .mobile-navigation-menu [data-slot='dropdown-menu-item'] {
+    min-width: 0;
+    min-height: 44px;
+    gap: 8px;
+    padding: 4px 8px;
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  .mobile-navigation-menu [data-slot='dropdown-menu-label'] {
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 18px;
+    letter-spacing: 0.08em;
+  }
+
+  .mobile-navigation-menu [data-slot='dropdown-menu-label'] .font-medium {
+    font-size: 16px;
+    line-height: 22px;
+    letter-spacing: normal;
+  }
+
+  .mobile-navigation-menu [data-slot='dropdown-menu-label'] .font-normal {
+    font-size: 13px;
+    line-height: 18px;
+    letter-spacing: normal;
+  }
+}
