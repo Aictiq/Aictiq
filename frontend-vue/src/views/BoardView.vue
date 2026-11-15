@@ -51,6 +51,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useTeamsStore } from '@/stores/teams'
 import { ConflictError } from '@/utils/api'
+import { newId } from '@/utils/id'
 
 const organizations = useOrganizationsStore()
 const projects = useProjectsStore()
@@ -526,7 +527,7 @@ async function saveSettings() {
 function addColumn() {
   const state = unmappedStates(settings.value.columns, workflowStates.value)[0]
   settings.value.columns.push({
-    id: crypto.randomUUID(),
+    id: newId(),
     name: state?.name ?? 'New column',
     stateIds: state ? [state.id] : [],
     generalState: 'doing',
