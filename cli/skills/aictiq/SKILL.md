@@ -44,9 +44,8 @@ or belong to an Epic/Feature; Bugs may stand alone or belong to an Epic/Feature/
 Tasks require a Story/Bug. Ask for missing or ambiguous required parents before creating;
 explain invalid types or parents without substituting a type or standalone item.
 `create_subtask(parentKey, title, team?)` still creates a Task. Without an explicit team,
-Stories, Bugs and Tasks use their parent's team or the project's default; Epics and Features
-remain unteamed. Creation returns `key`, `version`, `type` and `parentKey`; confirm the type
-and link each real key. Project chat may create only in its current project and records the
+all item types use their parent's team or the project's default. Creation returns `key`,
+`version`, `type` and `parentKey`; confirm the type and link each real key. Project chat may create only in its current project and records the
 requesting person as reporter.
 
 ## 2. Fall back to the `aictiq` CLI

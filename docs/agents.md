@@ -274,9 +274,10 @@ for clients that use them.
 `list_projects`) lists the project's teams with `id`, `key`, `name` and `isDefault`.
 `create_item` and `create_subtask` take a team
 key or id; a team that is not in the item's project is refused and nothing is created. Without
-`team`, Stories, Bugs and Tasks use their parent's team, or the project's default team if
-the parent has none. Epics and Features remain unteamed. `create_subtask` follows the same
-Task defaults.
+`team`, all item types use their parent's team, or the project's default team if the parent
+has none. This includes Epics and Features, so they appear in that team's Backlog. An item's
+team can be changed or cleared with **No team** in ItemDetail. Changing team clears its sprint.
+`create_subtask` follows the same defaults.
 
 **Delegating** is how an orchestrating agent hands a subtask to a worker the way a person
 does from the item page: `start_run(key, playbook?, agent?, runner?)` queues a factory run (the

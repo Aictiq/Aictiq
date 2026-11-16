@@ -51,6 +51,7 @@ import {
 } from '@/api/items'
 import { boardMove, getBoard } from '@/api/boards'
 import { listMembers } from '@/api/members'
+import { listTeams } from '@/api/teams'
 import { avatarUrl } from '@/api/profile'
 import { addItemLabel, listLabels, removeItemLabel, type Label } from '@/api/labels'
 import { listItemRuns, listRuns, type Run } from '@/api/runs'
@@ -93,6 +94,8 @@ import { useProjectRealtime } from '@/composables/useProjectRealtime'
 import { useToast } from '@/composables/useToast'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
+import { useTeamsStore } from '@/stores/teams'
 import {
   isLiveRun,
   runDuration,
@@ -212,6 +215,40 @@ const pullRequestItems = computed(() =>
 const branchItems = computed(() => linkItems.value.filter((link) => link.kind === 'branch'))
 const watcherItems = computed(() => (Array.isArray(watchers.data.value) ? watchers.data.value : []))
 const session = useSessionStore()
+const organizations = useOrganizationsStore()
+const projects = useProjectsStore()
+const teams = useTeamsStore()
+const usesSelectedProjectTeams = computed(
+  () => organizations.currentSlug === props.slug && projects.currentKey === props.projectKey,
+)
+watch(
+  () => usesSelectedProjectTeams.value && teams.status === 'unknown',
+  (load) => {
+    if (load) void teams.load()
+  },
+  { immediate: true },
+)
+// A dialog can open an item from another project without changing the sidebar's scope.
+const otherProjectTeams = useQuery({
+  queryKey: computed(() => [props.slug, props.projectKey, 'item-teams']),
+  queryFn: () => listTeams(props.slug, props.projectKey),
+  enabled: computed(() => !usesSelectedProjectTeams.value),
+})
+const teamOptions = computed(() =>
+  usesSelectedProjectTeams.value ? teams.teams : (otherProjectTeams.data.value ?? []),
+)
+const currentTeamMissing = computed(() => {
+  const teamId = currentItem.value?.teamId
+  return teamId && !teamOptions.value.some((team) => team.id === teamId)
+})
+const teamsLoading = computed(() =>
+  usesSelectedProjectTeams.value
+    ? teams.status === 'unknown' || teams.status === 'loading'
+    : otherProjectTeams.isPending.value,
+)
+const teamsFailed = computed(() =>
+  usesSelectedProjectTeams.value ? teams.status === 'error' : otherProjectTeams.isError.value,
+)
 // Only fetched while something is actually claimed: the banner is the one place on this
 // screen that needs a name for an id, and most items are not claimed.
 const claimedBy = computed(() => currentItem.value?.claimedBy ?? null)
@@ -344,7 +381,6 @@ const releasing = ref(false)
 
 // ── Agent runs ──────────────────────────────────────────────────────────────────────
 // Factory details belong to operators, including the history shown on the item.
-const organizations = useOrganizationsStore()
 const canOperateFactory = computed(() => organizations.current?.canOperateFactory === true)
 const runsQuery = useQuery({
   queryKey: computed(() => [props.slug, props.itemKey, 'runs']),
@@ -436,6 +472,8 @@ const saving = ref(false)
 const conflict = ref(false)
 const changingAssignee = ref(false)
 const assigneeError = ref<string | null>(null)
+const changingTeam = ref(false)
+const teamError = ref<string | null>(null)
 // ── Labels ──────────────────────────────────────────────────────────────────────────
 // Applied one at a time through the item-scoped endpoints, which leave the item's version
 // alone, so labelling never races a pending title or description edit into a 409.
@@ -837,6 +875,37 @@ async function duplicate() {
 function openChild(key: string) {
   if (props.modal) itemModal.open(key)
   else void router.push(`/o/${props.slug}/p/${props.projectKey}/items/${key}`)
+}
+async function changeTeam(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const current = currentItem.value
+  const teamId = select.value || null
+  if (!current || current.teamId === teamId || changingTeam.value || !mayLabel.value) return
+  changingTeam.value = true
+  teamError.value = null
+  try {
+    const updated = await editItem(props.slug, current, { teamId })
+    client.setQueryData<WorkItem>([props.slug, props.itemKey], updated)
+    await Promise.all([
+      invalidateLists(current),
+      invalidateLists(updated),
+      // A team change clears the sprint server-side; refresh its cached capacity too.
+      ...(current.sprintId
+        ? [client.invalidateQueries({ queryKey: [props.slug, current.sprintId, 'capacity'] })]
+        : []),
+      client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === props.slug && query.queryKey[2] === 'children',
+      }),
+    ])
+  } catch (error) {
+    const problem = toApiError(error)
+    teamError.value =
+      Object.values(problem.fieldErrors).flat()[0] ?? problem.problem?.detail ?? problem.title
+    if (problem.status === 409) await item.refetch()
+    select.value = currentItem.value?.teamId ?? ''
+  } finally {
+    changingTeam.value = false
+  }
 }
 async function changeAssignee(event: Event) {
   const current = item.data.value
@@ -1948,6 +2017,34 @@ function logged(updated: TimeTrackingItem) {
         </select>
         <p v-if="changingStatus" class="text-muted-foreground mt-1 text-xs">Moving…</p>
         <p v-else-if="statusError" class="text-destructive mt-1 text-xs">{{ statusError }}</p>
+      </div>
+      <div class="rounded-md border p-3">
+        <label for="item-team" class="font-label">Team</label>
+        <select
+          id="item-team"
+          :value="currentItem.teamId ?? ''"
+          class="border-input bg-background mt-2 w-full rounded border px-2 py-1.5 text-sm disabled:opacity-50"
+          :disabled="!mayLabel || changingTeam || teamsLoading || teamsFailed"
+          :aria-describedby="currentItem.sprintId ? 'item-team-sprint-note' : undefined"
+          @change="changeTeam"
+        >
+          <option value="">No team</option>
+          <option v-if="currentTeamMissing" :value="currentItem.teamId">Current team</option>
+          <option v-for="team in teamOptions" :key="team.id" :value="team.id">
+            {{ team.name }}
+          </option>
+        </select>
+        <p
+          v-if="currentItem.sprintId"
+          id="item-team-sprint-note"
+          class="text-muted-foreground mt-1 text-xs"
+        >
+          Changing the team removes this item from its sprint.
+        </p>
+        <p v-if="changingTeam" class="text-muted-foreground mt-1 text-xs">Updating team…</p>
+        <p v-else-if="teamError || teamsFailed" role="alert" class="text-destructive mt-1 text-xs">
+          {{ teamError ?? 'Teams could not be loaded.' }}
+        </p>
       </div>
       <div class="rounded-md border p-3">
         <p class="font-label">Assigned to</p>

@@ -321,7 +321,7 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     private const string ChatAttachmentIdsDescription = "Optional attachment ids of files shared in this project's chat (the ids its prompt lists, from this or earlier questions). Each is copied onto the new item as its own attachment, ZIPs as archives; the chat keeps its files. An id that is not one of the asker's chat files in this project creates nothing. The result lists the attached files and any attachmentFailures.";
 
     [McpServerTool(Name = "create_item")]
-    [Description("Creates an Epic, Feature, Story, Task or Bug in a project (default Bug). Features require an Epic parent; Tasks require a Story or Bug parent. Ask for a missing or ambiguous required parent before calling. Without team, Stories, Bugs and Tasks follow their parent's team or the project's default; Epics and Features remain unteamed. Returns the real key, type and parentKey, and the attachments it copied from chat.")]
+    [Description("Creates an Epic, Feature, Story, Task or Bug in a project (default Bug). Features require an Epic parent; Tasks require a Story or Bug parent. Ask for a missing or ambiguous required parent before calling. Without team, all item types follow their parent's team or the project's default. Returns the real key, type and parentKey, and the attachments it copied from chat.")]
     public Task<object?> CreateItem(string project, string title, string? description = null,
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it to use the existing defaults for this type and parent.")] string? team = null,
         [Description("Epic, Feature, Story, Task or Bug (case-insensitive). Omit for Bug.")] string? type = null,
@@ -395,7 +395,7 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         await WorkflowEndpoints.EnsureDefaultAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
         var state = await db.WorkflowStates.Where(s => s.IsInitial && db.Workflows.Any(w => w.Id == s.WorkflowId && w.ProjectId == projectId)).Select(s => s.Id).FirstOrDefaultAsync(ct); if (state == Guid.Empty) throw new McpAnswerException($"project '{projectKey}' has no initial workflow state");
         var teamId = string.IsNullOrWhiteSpace(team)
-            ? await WorkItemEndpoints.DefaultTeamAsync(db, tenancy, type, parent?.Id, projectId.Value, ct)
+            ? await WorkItemEndpoints.DefaultTeamAsync(db, tenancy, parent?.Id, projectId.Value, ct)
             : await TeamAsync(team, projectId.Value, projectKey, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await WorkItemEndpoints.NextNumberAsync(db, tenant.OrganizationId!.Value, projectId.Value, ct);
