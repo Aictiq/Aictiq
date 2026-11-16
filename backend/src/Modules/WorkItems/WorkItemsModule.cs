@@ -27,6 +27,7 @@ public static class WorkItemsModule
         services.AddScoped<IStorageUsageSource, WorkItemsStorageUsageSource>();
         services.AddScoped<IProjectChatAttachments, WorkItemsProjectChatAttachments>();
         services.AddScoped<IWorkItemLookup, WorkItemLookup>();
+        services.AddScoped<BoardMoveService>();
         services.AddScoped<IProjectWorkflowAccess, ProjectWorkflowAccess>();
         services.AddScoped<IWorkItemLabels, WorkItemLabelsAccess>();
         services.AddScoped<IProjectMcpDetails, WorkItemsProjectMcpDetails>();

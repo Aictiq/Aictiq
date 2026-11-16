@@ -667,32 +667,21 @@ public static class WorkItemEndpoints
         try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); } catch (DbUpdateConcurrencyException) { return Conflict(); }
         return Results.Ok((await ViewsAsync(db, user.UserId!, [item], await StatesAsync(db, [item], ct), ct))[0]);
     }
-    private static async Task<IResult> BoardMove(string itemKey, BoardMoveRequest request, WorkItemsDbContext db, TenancyDbContext tenancy, IProjectAccess access, ICurrentUser user, TimeProvider clock, CancellationToken ct)
+    private static async Task<IResult> BoardMove(string itemKey, BoardMoveRequest request, BoardMoveService moves, WorkItemsDbContext db, ICurrentUser user, CancellationToken ct)
     {
-        var item = await FindWritable(db, access, user, itemKey, ct); if (item is null || item.TeamId is null) return Results.NotFound();
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({item.ProjectId.ToString()}))", ct);
-        db.ChangeTracker.Clear(); item = await FindWritable(db, access, user, itemKey, ct); if (item is null || item.TeamId is null) return Results.NotFound(); if (item.Version != request.Version) return Conflict();
-        var board = await BoardEndpoints.FindAsync(db, item.TeamId.Value, ct); if (board is null || !BoardEndpoints.ContainsState(board, request.ToStateId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["toStateId"] = ["The target state is not on this team's board."] });
-        var target = await db.WorkflowStates.FirstOrDefaultAsync(x => x.Id == request.ToStateId && db.Workflows.Any(w => w.Id == x.WorkflowId && w.ProjectId == item.ProjectId), ct); if (target is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["toStateId"] = ["Unknown project workflow state."] });
-        var transitions = db.WorkflowTransitions.Where(x => x.WorkflowId == target.WorkflowId); if (item.StateId != target.Id && await transitions.AnyAsync(ct) && !await transitions.AnyAsync(x => x.ToStateId == target.Id && (x.FromStateId == null || x.FromStateId == item.StateId), ct)) return Results.Problem("That transition is not allowed.", statusCode: 409, type: ProblemTypes.Conflict);
-        var column = BoardEndpoints.ColumnFor(board, request.ToColumnId) ?? BoardEndpoints.ColumnFor(board, target.Id)!;
-        if (!column.StateIds.Contains(target.Id)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["toColumnId"] = ["The target column does not allow this workflow state."] });
-        var boardItems = await db.Items.Where(x => x.TeamId == item.TeamId && x.Id != item.Id && x.Rank != null).OrderBy(x => x.Rank).ToListAsync(ct);
-        var count = boardItems.Count(x => BoardEndpoints.ColumnFor(x, board)?.Id == column.Id && x.Type is WorkItemType.Story or WorkItemType.Bug);
-        if (column.WipLimit is { } limit && count >= limit)
-        {
-            var team = await tenancy.Teams.AsNoTracking().SingleOrDefaultAsync(x => x.Id == item.TeamId, ct);
-            if (!request.Force || team is null || !await BoardEndpoints.CanManageAsync(team, tenancy, access, user, ct)) return Results.Problem("The destination column has reached its WIP limit.", type: ProblemTypes.WipLimit, statusCode: 409);
-        }
-        var after = request.AfterKey is null ? null : await FindVisible(db, access, user, request.AfterKey, ct); if (after is not null && (after.ProjectId != item.ProjectId || BoardEndpoints.ColumnFor(after, board)?.Id != column.Id)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["afterKey"] = ["The preceding card must be in the destination column."] });
-        var before = boardItems.FirstOrDefault(x => BoardEndpoints.ColumnFor(x, board)?.Id == column.Id && (after == null || string.CompareOrdinal(x.Rank, after.Rank) > 0));
-        var rank = ItemRanking.Between(after?.Rank, before?.Rank); while (await db.Items.AnyAsync(x => x.ProjectId == item.ProjectId && x.Id != item.Id && x.Rank == rank, ct)) rank = ItemRanking.Between(rank, before?.Rank);
-        db.Entry(item).Property(x => x.Version).OriginalValue = request.Version;
-        var now = clock.GetUtcNow(); if (item.StateId != target.Id) item.Transition(target.Id, target.Category, user.UserId!, now); else item.UpdatedAt = now;
-        item.BoardColumnId = column.Id; item.Rank = rank; item.Moved(user.UserId!); if (target.Category == WorkflowStateCategory.Completed && item.Type is WorkItemType.Task or WorkItemType.Bug) item.RemainingHours = 0;
-        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); } catch (DbUpdateConcurrencyException) { return Conflict(); }
-        return Results.Ok((await ViewsAsync(db, user.UserId!, [item], new Dictionary<Guid, WorkflowState> { [target.Id] = target }, ct))[0]);
+        var result = await moves.MoveAsync(itemKey, new BoardMoveCommand(request.Version, request.ToStateId,
+            request.ToColumnId, AfterKey: request.AfterKey, Force: request.Force), ct);
+        if (result.Failure is { } failure)
+            return failure.Error switch
+            {
+                BoardMoveError.NotFound or BoardMoveError.NoTeam => Results.NotFound(),
+                BoardMoveError.VersionConflict => Conflict(),
+                BoardMoveError.Validation => Results.ValidationProblem(new Dictionary<string, string[]> { [failure.Field!] = [failure.Message] }),
+                _ => Results.Problem(failure.Message, statusCode: 409,
+                    type: failure.Error == BoardMoveError.WipLimit ? ProblemTypes.WipLimit : ProblemTypes.Conflict),
+            };
+        return Results.Ok((await ViewsAsync(db, user.UserId!, [result.Item!],
+            new Dictionary<Guid, WorkflowState> { [result.State!.Id] = result.State }, ct))[0]);
     }
     private static async Task<IResult> Children(string itemKey, HttpContext http, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, CancellationToken ct) { var item = await FindVisible(db, access, user, itemKey, ct); if (item is null) return Results.NotFound(); var children = await db.Items.AsNoTracking().Where(x => x.ParentId == item.Id).OrderBy(x => x.Number).ToListAsync(ct); return Results.Ok(await ViewsAsync(db, user.UserId!, children, await StatesAsync(db, children, ct), ct)); }
     private static async Task<IResult> Ancestors(string itemKey, HttpContext http, WorkItemsDbContext db, IProjectAccess access, ICurrentUser user, CancellationToken ct) { var item = await FindVisible(db, access, user, itemKey, ct); if (item is null) return Results.NotFound(); var all = new List<WorkItem>(); for (var id = item.ParentId; id is { } current && all.Count < 6;) { var ancestor = await db.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Id == current, ct); if (ancestor is null) break; all.Add(ancestor); id = ancestor.ParentId; } return Results.Ok(await ViewsAsync(db, user.UserId!, all, await StatesAsync(db, all, ct), ct)); }

@@ -20,7 +20,7 @@ using SkiaSharp;
 namespace Aictiq.IntegrationTests.Mcp;
 
 [Trait("Category", "Mcp")]
-public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
+public sealed partial class McpTests(PostgresFixture postgres, GarageFixture garage) : IAsyncLifetime
 {
     private ApiTestContext _context = null!;
     private HttpClient _owner = null!;
@@ -863,7 +863,7 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         "get_project" or "get_workflow" => new() { ["projectKey"] = project },
         "search_items" => new() { ["project"] = project, ["limit"] = 1 },
         "list_ready_work" => new() { ["project"] = project },
-        "get_item" or "release_item" or "heartbeat" or "list_comments" => new() { ["key"] = key },
+        "get_item" or "get_board" or "release_item" or "heartbeat" or "list_comments" => new() { ["key"] = key },
         "get_attachment" => new() { ["id"] = Guid.NewGuid() },
         "list_sprints" => new() { ["team"] = Guid.NewGuid() },
         "get_sprint" => new() { ["id"] = Guid.NewGuid() },
@@ -876,6 +876,7 @@ public sealed class McpTests(PostgresFixture postgres, GarageFixture garage) : I
         "add_comment" => new() { ["key"] = key, ["bodyMarkdown"] = "matrix" },
         "update_comment" => new() { ["key"] = key, ["commentId"] = Guid.NewGuid(), ["bodyMarkdown"] = "matrix" },
         "transition_item" => new() { ["key"] = key, ["version"] = version, ["toState"] = "Active" },
+        "move_item" => new() { ["key"] = key, ["version"] = version, ["column"] = "Active" },
         "set_remaining_hours" => new() { ["key"] = key, ["version"] = version, ["hours"] = 1m },
         "create_item" => new() { ["project"] = project, ["title"] = "Matrix item" },
         "create_subtask" => new() { ["parentKey"] = key, ["title"] = "Matrix subtask" },

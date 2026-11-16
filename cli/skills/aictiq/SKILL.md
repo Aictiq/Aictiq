@@ -17,13 +17,15 @@ searching for "aictiq"), call them directly. Do not guess URLs or scrape the web
 
 | Tool | Use it to |
 | --- | --- |
-| `get_item` | Read an item by key: title, description, state, comments, links, attachments. Start here for "fetch ACME-123". |
+| `get_item` | Read an item by key: title, description, state, board column, comments, links, attachments. Start here for "fetch ACME-123". |
 | `search_items` | Find items in a project with the item-filter grammar (`state:active assignee:@me`). |
 | `list_ready_work` | List work that is ready to pick up in a project. |
 | `get_attachment` | Read an item's attachment (images come back as images). |
 | `list_comments` | Read an item's comments. |
 | `add_comment` / `update_comment` | Post a comment, or edit one you wrote (one progress comment beats many). |
 | `create_item` / `create_subtask` / `update_item` | Create or change items. |
+| `get_board` | List the columns on an item's team board, their mapped workflow states and WIP limits (`key`). |
+| `move_item` | Move an item to a board column by name (`key`, `version`, `column`); follows board transition and WIP rules. |
 | `transition_item` | Move an item to another workflow state (check `get_workflow` for the states). |
 | `claim_item` / `heartbeat` / `release_item` | Claim an item for yourself, keep the claim alive, release it. |
 | `link_item` | Link a pull request or URL to an item. |
