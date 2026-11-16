@@ -9,6 +9,7 @@ using Aictiq.Modules.Notifications.Domain;
 using Aictiq.Modules.Notifications.Endpoints;
 using Aictiq.Modules.Notifications.Events;
 using Aictiq.Modules.Notifications.Templates;
+using Aictiq.Modules.Tenancy.Access;
 using Aictiq.Modules.Tenancy.Domain;
 using Aictiq.Modules.Tenancy.Endpoints;
 using Aictiq.Modules.WorkItems.Contracts;
@@ -19,6 +20,7 @@ using Aictiq.SharedKernel.Contracts;
 using Aictiq.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -332,6 +334,12 @@ public sealed class AssignmentNotificationTests(PostgresFixture postgres, Garage
         command.Parameters.AddWithValue("user", userId);
         command.Parameters.AddWithValue("role", (int)OrgRole.Member);
         await command.ExecuteNonQueryAsync(ct);
+        // Raw SQL skips the membership endpoint's invalidation. Reassignment adds a
+        // member after the first assignment has already cached the project's audience.
+        await TenancyCache.InvalidateAsync(
+            context.Factory.Services.GetRequiredService<HybridCache>(),
+            context.Factory.Services.GetRequiredService<NpgsqlDataSource>(),
+            organizationId, "assignments", ct);
     }
 
     private static async Task<WorkItemView> CreateItemAsync(ApiTestContext context, string? assigneeId, CancellationToken ct)
@@ -348,7 +356,7 @@ public sealed class AssignmentNotificationTests(PostgresFixture postgres, Garage
     {
         var response = await context.Admin.PatchAsJsonAsync(ItemRoute + item.Key,
             new { assigneeId, version = item.Version, title }, ApiTestContext.Json, ct);
-        response.EnsureSuccessStatusCode();
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(ct));
         return (await response.Content.ReadFromJsonAsync<WorkItemView>(ApiTestContext.Json, ct))!;
     }
 
