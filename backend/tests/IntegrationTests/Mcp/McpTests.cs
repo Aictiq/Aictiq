@@ -169,8 +169,8 @@ public sealed partial class McpTests(PostgresFixture postgres, GarageFixture gar
                 var persisted = await GetItemAsync(created.GetProperty("key").GetString()!);
                 Assert.Equal(type, persisted.Type);
                 Assert.Equal(parent?.Id, persisted.ParentId);
-                if (type is WorkItemType.Epic or WorkItemType.Feature) Assert.Null(persisted.TeamId);
-                else Assert.NotNull(persisted.TeamId);
+                Assert.NotNull(persisted.TeamId);
+                if (parent is not null) Assert.Equal(parent.TeamId, persisted.TeamId);
                 Assert.Equal(persisted.Version, created.GetProperty("version").GetUInt32());
                 createdCount++;
             }
@@ -260,6 +260,15 @@ public sealed partial class McpTests(PostgresFixture postgres, GarageFixture gar
         Assert.Contains("<strong>Platform</strong>", described.DescriptionHtml);
         var byId = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "By id", ["team"] = platform.Id.ToString() })).GetProperty("key").GetString()!;
         Assert.Equal(platform.Id, (await GetItemAsync(byId)).TeamId);
+
+        // Portfolio items use the same default/inherited/explicit rules as execution items.
+        var defaultEpic = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Default epic", ["type"] = "Epic" })).GetProperty("key").GetString()!;
+        Assert.Equal(defaultTeam, (await GetItemAsync(defaultEpic)).TeamId);
+        var platformEpic = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Platform epic", ["type"] = "Epic", ["team"] = "PLAT" })).GetProperty("key").GetString()!;
+        var inheritedFeature = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Inherited feature", ["type"] = "Feature", ["parentKey"] = platformEpic })).GetProperty("key").GetString()!;
+        Assert.Equal(platform.Id, (await GetItemAsync(inheritedFeature)).TeamId);
+        var explicitFeature = Json(await CallAsync(client, "create_item", new() { ["project"] = project.Key, ["title"] = "Explicit feature", ["type"] = "Feature", ["parentKey"] = platformEpic, ["team"] = defaultTeam.ToString() })).GetProperty("key").GetString()!;
+        Assert.Equal(defaultTeam, (await GetItemAsync(explicitFeature)).TeamId);
 
         // An unknown team, or another project's, is refused and creates nothing.
         foreach (var team in new[] { "NOPE", "FRN", foreign.Id.ToString(), Guid.NewGuid().ToString() })

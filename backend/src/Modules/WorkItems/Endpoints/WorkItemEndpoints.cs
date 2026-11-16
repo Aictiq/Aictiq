@@ -207,7 +207,7 @@ public static class WorkItemEndpoints
         var defaultWorkflowId = await db.Workflows.Where(x => x.ProjectId == project.Id && x.IsDefault).Select(x => x.Id).SingleOrDefaultAsync(ct);
         if (defaultWorkflowId == Guid.Empty) return Results.Problem("The project workflow is still being initialized.", statusCode: StatusCodes.Status409Conflict);
         var state = request.StateId is { } id ? id : await db.WorkflowStates.Where(x => x.WorkflowId == defaultWorkflowId && x.IsInitial).Select(x => x.Id).SingleAsync(ct);
-        var teamId = request.TeamId ?? await DefaultTeamAsync(db, tenancy, request.Type, request.ParentId, project.Id, ct);
+        var teamId = request.TeamId ?? await DefaultTeamAsync(db, tenancy, request.ParentId, project.Id, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var number = await NextNumberAsync(db, tenant.OrganizationId!.Value, project.Id, ct);
         var now = clock.GetUtcNow(); var markdown = request.DescriptionMarkdown?.Trim() ?? "";
@@ -717,14 +717,11 @@ public static class WorkItemEndpoints
     internal static async Task<bool> AssignableAsync(IProjectAccess access, Guid projectId, string? assigneeId, CancellationToken ct) =>
         string.IsNullOrWhiteSpace(assigneeId) || (await access.ListProjectMemberIdsAsync(projectId, ct)).Contains(assigneeId, StringComparer.Ordinal);
     /// <summary>
-    /// The team a new item lands on when its creator names none. Backlogs and boards are per
-    /// team, so an unteamed Story or Bug is invisible on both. A Task follows its parent; a
-    /// Story or Bug goes to the project's default team. Epics and Features span teams and stay
-    /// unteamed.
+    /// All item types follow their parent's team, or the project's default when the parent
+    /// has none, so they appear in team planning alongside their children.
     /// </summary>
-    internal static async Task<Guid?> DefaultTeamAsync(WorkItemsDbContext db, TenancyDbContext tenancy, WorkItemType type, Guid? parentId, Guid projectId, CancellationToken ct)
+    internal static async Task<Guid?> DefaultTeamAsync(WorkItemsDbContext db, TenancyDbContext tenancy, Guid? parentId, Guid projectId, CancellationToken ct)
     {
-        if (type is not (WorkItemType.Story or WorkItemType.Bug or WorkItemType.Task)) return null;
         if (parentId is not null && await db.Items.AsNoTracking().Where(x => x.Id == parentId).Select(x => x.TeamId).FirstOrDefaultAsync(ct) is { } parentTeam) return parentTeam;
         return await tenancy.Teams.AsNoTracking().Where(t => t.ProjectId == projectId && t.IsDefault).Select(t => (Guid?)t.Id).FirstOrDefaultAsync(ct);
     }
