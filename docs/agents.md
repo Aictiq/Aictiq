@@ -164,6 +164,13 @@ factory run (`AICTIQ_RUN` is present), link the pull request and report the outc
 not transition the item. Aictiq consumes the terminal run result, releases the claim, and
 applies the playbook's success or failure state itself.
 
+For board placement, call `get_board(key)` to see the item's team columns, mapped states
+and WIP limits, then `move_item(key, version, column)` with a column name such as `Blocked`.
+The move follows the board's transition and WIP rules. It preserves the current state when
+the destination column shows it; otherwise it uses the first mapped state a transition
+allows. `get_item(key)` reports the effective column. Board tools require an item with a
+team and an existing board; `get_board` does not create one.
+
 **Stop cleanly.** `release_item(key)` when you stop without finishing. An item left claimed
 by an agent that will not come back is worse than an unclaimed one: it looks like work in
 progress.
@@ -186,7 +193,7 @@ least one content block.
 | Where | Meaning | Do |
 | --- | --- | --- |
 | `claim_item` | Someone else holds it, or it changed since you read it | Take another item. Do not retry the same one in a loop |
-| `update_item`, `transition_item`, `set_remaining_hours` | Your `version` is stale - someone saved first | Re-read with `get_item`, reconcile, retry **once** with the fresh version |
+| `update_item`, `transition_item`, `move_item`, `set_remaining_hours` | Your `version` is stale - someone saved first | Re-read with `get_item`, reconcile, retry **once** with the fresh version |
 | `heartbeat` | You are not the claimant any more (your claim went stale and was taken) | Stop working on it; re-claim only if it is free again |
 | Anything, repeatedly | You are racing a person or another agent | Comment what you were trying to do, release, and move on |
 
@@ -224,10 +231,10 @@ administrator can clear that for an agent: it can still work items, but may not 
 
 | Area | Tools |
 | --- | --- |
-| Context | `whoami`, `list_projects`, `get_project`, `get_workflow` |
+| Context | `whoami`, `list_projects`, `get_project`, `get_workflow`, `get_board` |
 | Finding work | `search_items`, `list_ready_work`, `get_item` |
 | Claiming | `claim_item`, `release_item`, `heartbeat` |
-| Changing work | `create_item`, `create_subtask`, `update_item`, `transition_item`, `set_remaining_hours`, `bulk_update` |
+| Changing work | `create_item`, `create_subtask`, `update_item`, `transition_item`, `move_item`, `set_remaining_hours`, `bulk_update` |
 | Talking | `add_comment`, `update_comment`, `list_comments` |
 | Linking | `link_item` |
 | Delegating | `start_run`, `get_run`, `list_runs` |

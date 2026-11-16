@@ -45,7 +45,7 @@ public sealed record McpCreatedItem(string Key, uint Version, string Type,
 [McpServerToolType]
 public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenant, ICurrentUser user,
     IProjectAccess access, TenancyDbContext tenancy, IWikiPageAccess pages, IUserDirectory directory, IBlobStorage storage, TimeProvider clock, IConfiguration configuration,
-    IPlanLimits planLimits, IOptions<AttachmentsOptions> attachmentOptions, IProjectChatGrants chatGrants)
+    IPlanLimits planLimits, IOptions<AttachmentsOptions> attachmentOptions, IProjectChatGrants chatGrants, BoardMoveService moves)
 {
     private const int MaxMcpTextAttachmentBytes = 64 * 1024;
     private const int MaxCommentAttachments = 20;
@@ -99,6 +99,10 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
     public async Task<object?> GetItem(string key, string? range = null, CancellationToken cancellationToken = default)
     {
         var item = await Visible(key, cancellationToken); if (item is null) throw new McpAnswerException($"item '{key}' not found or no access");
+        var board = item.TeamId is { } teamId
+            ? await db.Boards.AsNoTracking().FirstOrDefaultAsync(x => x.TeamId == teamId && x.Kind == BoardKind.Kanban, cancellationToken)
+            : null;
+        var column = board is null ? null : BoardEndpoints.ColumnFor(item, board)?.Name;
         var chain = new List<string>();
         for (var parent = item.ParentId; parent is { } id && chain.Count < 10;)
         { var row = await db.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken); if (row is null) break; chain.Add(row.Key); parent = row.ParentId; }
@@ -119,7 +123,7 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
             contentStart = McpContentBoundary.Begin,
             item.Key, item.Title, descriptionMarkdown = body.Substring(start, take), truncated,
             range = truncated ? $"{start + take}:20000" : null,
-            item.Version, parentChain = chain, comments, links, attachments,
+            item.Version, column, parentChain = chain, comments, links, attachments,
             contentEnd = McpContentBoundary.End
         };
     }
@@ -264,6 +268,40 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         comment.EditedAt = now;
         await db.SaveChangesAsync(cancellationToken);
         return new { comment.Id, comment.EditedAt, unchanged = false };
+    }
+
+    [McpServerTool(Name = "get_board", ReadOnly = true)]
+    [Description("Gets the item's team board columns, including custom columns, with mapped workflow states and WIP limits. Does not create a board.")]
+    public async Task<object> GetBoard(string key, CancellationToken cancellationToken = default)
+    {
+        var item = await Visible(key, cancellationToken) ?? throw new McpAnswerException($"item '{key}' not found or no access");
+        if (item.TeamId is not { } teamId) throw new McpAnswerException("The item has no team.");
+        var board = await db.Boards.AsNoTracking().FirstOrDefaultAsync(x => x.TeamId == teamId && x.Kind == BoardKind.Kanban, cancellationToken)
+            ?? throw new McpAnswerException("The item's team has no board.");
+        var ids = board.Config.Columns.SelectMany(x => x.StateIds).Distinct().ToArray();
+        var states = await db.WorkflowStates.AsNoTracking().Where(x => ids.Contains(x.Id)
+            && db.Workflows.Any(w => w.Id == x.WorkflowId && w.ProjectId == item.ProjectId)).ToDictionaryAsync(x => x.Id, cancellationToken);
+        return new
+        {
+            board.TeamId,
+            columns = board.Config.Columns.Select(column => new
+            {
+                column.Id, column.Name,
+                states = column.StateIds.Where(states.ContainsKey).Select(id => new { id, states[id].Name }),
+                column.WipLimit,
+            }),
+        };
+    }
+
+    [McpServerTool(Name = "move_item")]
+    [Description("Moves an item to a named column on its team board, following the same transition and WIP rules as dragging a card. Use get_board(key) to find columns and get_item(key) for the version. Keeps the current state when the column shows it; otherwise uses its first reachable state.")]
+    public async Task<object> MoveItem(string key, uint version, string column, CancellationToken cancellationToken = default)
+    {
+        await WritableAsync(key, cancellationToken);
+        if (string.IsNullOrWhiteSpace(column)) throw new McpAnswerException("column must name a column on the item's team board");
+        var result = await moves.MoveAsync(key, new BoardMoveCommand(version, Column: column), cancellationToken);
+        if (result.Failure is { } failure) throw new McpAnswerException(failure.Message);
+        return new { result.Item!.Key, result.Item.Version, column = result.Column!.Name };
     }
 
     [McpServerTool(Name = "transition_item")]
