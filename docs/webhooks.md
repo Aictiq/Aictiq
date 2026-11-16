@@ -11,6 +11,11 @@ The creation response contains a randomly generated secret exactly once. Store i
 receiver. Aictiq retains an encrypted delivery copy and a SHA-256 audit hash, never returns
 the plaintext again.
 
+In organization settings, creating a webhook shows its signing secret in a one-time panel.
+Use **Copy** or select the secret and copy it manually if your browser blocks clipboard
+access (including plain HTTP installs). Save it at the receiver before choosing **Done** or
+leaving the page. If it is lost, delete the webhook and create another.
+
 Every delivery is an HTTPS `POST` with JSON and these headers:
 
 | Header | Value |

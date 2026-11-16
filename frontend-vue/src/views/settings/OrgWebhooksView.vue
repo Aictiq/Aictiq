@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Check, Copy, TriangleAlert } from '@lucide/vue'
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
@@ -18,6 +19,7 @@ import {
   redeliverWebhook,
   testWebhook,
   type Webhook,
+  type WebhookCreated,
   type WebhookDelivery,
   type WebhookEvent,
 } from '@/api/webhooks'
@@ -34,6 +36,9 @@ const githubDeliveries = ref<GitHubDelivery[]>([])
 const githubAvailable = ref(true)
 const githubBusy = ref<number | string | null>(null)
 const url = ref('')
+const submitting = ref(false)
+const justCreated = ref<WebhookCreated | null>(null)
+const copied = ref(false)
 const events = ref<WebhookEvent[]>(['item.updated'])
 const allEvents: WebhookEvent[] = [
   'item.created',
@@ -101,14 +106,32 @@ async function reprocess(delivery: GitHubDelivery) {
   }
 }
 async function add() {
+  if (submitting.value || justCreated.value) return
+  submitting.value = true
+  const creationSlug = slug()
   try {
-    const made = await createWebhook(slug(), { url: url.value, events: events.value })
-    await navigator.clipboard?.writeText(made.secret)
-    toast.success('Webhook created. Its secret was copied; it will not be shown again.')
+    const made = await createWebhook(creationSlug, { url: url.value, events: events.value })
+    if (slug() !== creationSlug) return
+    // Keep the only copy on screen even when clipboard access or the list refresh fails.
+    justCreated.value = made
+    copied.value = false
+    toast.success('Webhook created. Copy its secret before leaving this page.')
     url.value = ''
     await load()
   } catch (e) {
     toast.error(e)
+  } finally {
+    submitting.value = false
+  }
+}
+async function copy() {
+  if (!justCreated.value) return
+  try {
+    await navigator.clipboard.writeText(justCreated.value.secret)
+    copied.value = true
+    toast.success('Secret copied')
+  } catch (e) {
+    toast.error(e, 'Could not copy - select the secret and copy it manually.')
   }
 }
 async function open(hook: Webhook) {
@@ -132,6 +155,7 @@ async function remove(hook: Webhook) {
   try {
     await deleteWebhook(slug(), hook.id)
     if (selected.value?.id === hook.id) selected.value = null
+    if (justCreated.value?.subscription.id === hook.id) justCreated.value = null
     await load()
   } catch (e) {
     toast.error(e)
@@ -146,7 +170,13 @@ async function retry(delivery: WebhookDelivery) {
     toast.error(e)
   }
 }
-watch(() => route.params.slug, load)
+watch(
+  () => route.params.slug,
+  () => {
+    justCreated.value = null
+    load()
+  },
+)
 onMounted(load)
 </script>
 
@@ -224,6 +254,33 @@ onMounted(load)
         Send signed project events to Zapier, n8n, or your own service.
       </p>
     </div>
+    <div
+      v-if="justCreated"
+      class="border-primary/40 bg-accent/40 rounded-lg border p-3"
+      role="status"
+    >
+      <div class="flex items-start gap-2">
+        <TriangleAlert class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium">Copy it now - this is the only time it is shown.</p>
+          <p class="text-muted-foreground mt-0.5 text-xs">
+            Save this signing secret before leaving this page. It cannot be shown again. If you lose
+            it, delete the webhook and create another.
+          </p>
+          <code
+            class="bg-background border-border mt-2 block select-all rounded border px-2 py-1.5 font-mono text-xs break-all"
+            >{{ justCreated.secret }}</code
+          >
+        </div>
+        <Button variant="ghost" size="icon" aria-label="Copy the webhook secret" @click="copy">
+          <Check v-if="copied" class="size-4" aria-hidden="true" />
+          <Copy v-else class="size-4" aria-hidden="true" />
+        </Button>
+      </div>
+      <div class="mt-2 flex justify-end">
+        <Button variant="ghost" size="sm" @click="justCreated = null">Done</Button>
+      </div>
+    </div>
     <form class="flex gap-2" @submit.prevent="add">
       <input
         v-model="url"
@@ -231,7 +288,7 @@ onMounted(load)
         type="url"
         required
         placeholder="https://receiver.example/aictiq"
-      /><Button>Create</Button>
+      /><Button :disabled="submitting || !!justCreated">Create</Button>
     </form>
     <div class="flex flex-wrap gap-3 text-sm">
       <label v-for="event in allEvents" :key="event"
