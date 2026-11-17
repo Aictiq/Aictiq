@@ -38,9 +38,11 @@ import {
   duplicateItem,
   getItem,
   itemDeletePreview,
+  listItemAncestors,
   listItemChildren,
   listWatchers,
   releaseItem,
+  reparentItem,
   transitionItem,
   unwatchItem,
   editItem,
@@ -67,6 +69,8 @@ import Markdown from '@/components/common/Markdown.vue'
 import MarkdownEditor from '@/components/common/MarkdownEditor.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import TimeTrackingPopover from '@/components/common/TimeTrackingPopover.vue'
+import ParentPickerDialog from '@/components/items/ParentPickerDialog.vue'
+import ItemTypeIcon from '@/components/common/ItemTypeIcon.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import RunStageBadges from '@/components/factory/RunStageBadges.vue'
 import RunStatusBadge from '@/components/factory/RunStatusBadge.vue'
@@ -875,6 +879,47 @@ async function duplicate() {
 function openChild(key: string) {
   if (props.modal) itemModal.open(key)
   else void router.push(`/o/${props.slug}/p/${props.projectKey}/items/${key}`)
+}
+// ── Parent ──────────────────────────────────────────────────────────────────────────
+// Re-parenting goes through /reparent, which checks the hierarchy and leaves every other
+// field alone; the picker only offers types that may hold this one.
+const parent = useQuery({
+  queryKey: computed(() => [props.slug, props.itemKey, 'ancestors', currentItem.value?.parentId]),
+  queryFn: async () => (await listItemAncestors(props.slug, props.itemKey))[0] ?? null,
+  enabled: computed(() => currentItem.value?.parentId != null),
+})
+const parentPickerOpen = ref(false)
+const changingParent = ref(false)
+const parentError = ref<string | null>(null)
+watch(
+  () => props.itemKey,
+  () => (parentError.value = null),
+)
+async function changeParent(next: WorkItem | null) {
+  const current = currentItem.value
+  if (!current || changingParent.value || (next?.id ?? null) === current.parentId) return
+  changingParent.value = true
+  parentError.value = null
+  try {
+    const updated = await reparentItem(props.slug, current.key, next?.key ?? null, current.version)
+    client.setQueryData<WorkItem>([props.slug, props.itemKey], updated)
+    parentPickerOpen.value = false
+    await Promise.all([
+      invalidateLists(current),
+      // Both the old and the new parent list their children.
+      client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === props.slug && query.queryKey[2] === 'children',
+      }),
+    ])
+    toast.saved(next ? `${current.key} moved under ${next.key}.` : `${current.key} has no parent now.`)
+  } catch (error) {
+    const problem = toApiError(error)
+    parentError.value =
+      Object.values(problem.fieldErrors).flat()[0] ?? problem.problem?.detail ?? problem.title
+    if (problem.status === 409) await item.refetch()
+  } finally {
+    changingParent.value = false
+  }
 }
 async function changeTeam(event: Event) {
   const select = event.target as HTMLSelectElement
@@ -1999,6 +2044,49 @@ function logged(updated: TimeTrackingItem) {
         <p v-else-if="typeError" class="text-destructive mt-1 text-xs" role="alert">
           {{ typeError }}
         </p>
+      </div>
+      <div v-if="currentItem.type !== 'epic' || currentItem.parentId" class="rounded-md border p-3">
+        <div class="flex items-center justify-between gap-2">
+          <p id="item-parent-label" class="font-label">Parent</p>
+          <button
+            v-if="mayChangeType"
+            type="button"
+            class="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline disabled:opacity-50"
+            :disabled="changingParent"
+            data-testid="item-parent-change"
+            aria-describedby="item-parent-label"
+            @click="((parentError = null), (parentPickerOpen = true))"
+          >
+            {{ currentItem.parentId ? 'Change' : 'Set parent' }}
+          </button>
+        </div>
+        <button
+          v-if="currentItem.parentId && parent.data.value"
+          type="button"
+          class="hover:bg-muted -mx-1 mt-2 flex w-[calc(100%+0.5rem)] min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left text-sm"
+          data-testid="item-parent"
+          @click="openChild(parent.data.value.key)"
+        >
+          <ItemTypeIcon :type="parent.data.value.type" />
+          <span class="text-muted-foreground flex-none font-mono text-xs">
+            {{ parent.data.value.key }}
+          </span>
+          <span class="min-w-0 truncate">{{ parent.data.value.title }}</span>
+        </button>
+        <p v-else-if="currentItem.parentId" class="text-muted-foreground mt-2 text-sm">Loading…</p>
+        <p v-else class="text-muted-foreground mt-2 text-sm" data-testid="item-parent">No parent</p>
+        <p v-if="parentError && !parentPickerOpen" class="text-destructive mt-1 text-xs" role="alert">
+          {{ parentError }}
+        </p>
+        <ParentPickerDialog
+          v-model:open="parentPickerOpen"
+          :slug="slug"
+          :project-key="projectKey"
+          :items="[currentItem]"
+          :busy="changingParent"
+          :error="parentError"
+          @pick="changeParent"
+        />
       </div>
       <div class="rounded-md border p-3">
         <label for="item-status" class="font-label">

@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { CopyPlus, Link } from '@lucide/vue'
+import { CopyPlus, FolderInput, Link } from '@lucide/vue'
 
 import { cn } from '@/lib/utils'
 
 /** A list row's copy-link and duplicate buttons. Like the row selects, it keeps its clicks
  * and keys to itself so using a button never opens the row's item as well. */
 const props = withDefaults(
-  defineProps<{ itemKey: string; busy?: boolean; canDuplicate?: boolean; class?: string }>(),
-  { busy: false, canDuplicate: true, class: undefined },
+  defineProps<{
+    itemKey: string
+    busy?: boolean
+    canDuplicate?: boolean
+    /** Shows "Move under…", for lists that can re-parent. */
+    canMove?: boolean
+    class?: string
+  }>(),
+  { busy: false, canDuplicate: true, canMove: false, class: undefined },
 )
-const emit = defineEmits<{ copyLink: []; duplicate: [] }>()
+const emit = defineEmits<{ copyLink: []; duplicate: []; moveUnder: [] }>()
 </script>
 
 <template>
@@ -27,6 +34,17 @@ const emit = defineEmits<{ copyLink: []; duplicate: [] }>()
       @click="emit('copyLink')"
     >
       <Link class="size-3.5" aria-hidden="true" />
+    </button>
+    <button
+      v-if="canMove"
+      type="button"
+      class="text-muted-foreground hover:text-foreground hover:bg-accent rounded p-1 disabled:opacity-50"
+      :aria-label="`Move ${itemKey} under another item`"
+      title="Move under…"
+      :disabled="busy"
+      @click="emit('moveUnder')"
+    >
+      <FolderInput class="size-3.5" aria-hidden="true" />
     </button>
     <button
       v-if="canDuplicate"

@@ -251,6 +251,12 @@ invalid types and parents are refused without creating an item or substituting a
 The result includes the real `key`, `version`, `type` and `parentKey` (null for roots).
 `create_subtask(parentKey, title, team?, attachmentIds?)` still creates a Task under a Story or Bug.
 
+`update_item(key, version, title?, description?, parentKey?, clearParent?)` edits an existing
+item. `parentKey` moves it under another item in the same project and `clearParent: true`
+takes it out from under its parent, under the same hierarchy rules as creation (Features and
+Tasks cannot be cleared). Use it to give items you already created their Epic, Feature or
+Story. A refused parent says why and changes nothing.
+
 Both take `attachmentIds`: files shared in the asker's project chat (the ids the chat prompt
 lists, from the current or an earlier question). Each is copied onto the new item as its own
 attachment, ZIPs as archives, under the normal storage allowance, and linked under "Files from

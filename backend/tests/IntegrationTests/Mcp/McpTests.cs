@@ -230,6 +230,57 @@ public sealed partial class McpTests(PostgresFixture postgres, GarageFixture gar
     }
 
     [Fact]
+    public async Task update_item_sets_changes_and_clears_an_existing_items_parent_with_the_hierarchy_rules()
+    {
+        var project = await CreateProjectAsync("REP");
+        var other = await CreateProjectAsync("REO");
+        var epic = await CreateItemAsync(project, "Epic", WorkItemType.Epic);
+        var feature = await CreateItemAsync(project, "Feature", WorkItemType.Feature, epic.Id);
+        var story = await CreateItemAsync(project, "Orphan story", WorkItemType.Story);
+        var bug = await CreateItemAsync(project, "Orphan bug");
+        var task = await CreateItemAsync(project, "Task", WorkItemType.Task, story.Id);
+        var foreign = await CreateItemAsync(other, "Foreign epic", WorkItemType.Epic);
+        await using var client = await ConnectAsync();
+
+        async Task<string> Reparent(WorkItemView item, string? parentKey, bool clear = false)
+        {
+            var current = await GetItemAsync(item.Key);
+            var arguments = new Dictionary<string, object?> { ["key"] = item.Key, ["version"] = current.Version };
+            if (parentKey is not null) arguments["parentKey"] = parentKey;
+            if (clear) arguments["clearParent"] = true;
+            return Text(await CallAsync(client, "update_item", arguments));
+        }
+
+        // Set, change and clear: a Story goes under the Epic, then the Feature, then nowhere.
+        Assert.Equal("true", await Reparent(story, epic.Key));
+        Assert.Equal(epic.Id, (await GetItemAsync(story.Key)).ParentId);
+        Assert.Equal("true", await Reparent(story, feature.Key));
+        Assert.Equal(feature.Id, (await GetItemAsync(story.Key)).ParentId);
+        Assert.Equal("true", await Reparent(bug, story.Key));
+        Assert.Equal(story.Id, (await GetItemAsync(bug.Key)).ParentId);
+        Assert.Equal("true", await Reparent(story, null, clear: true));
+        Assert.Null((await GetItemAsync(story.Key)).ParentId);
+
+        // The same rules as create_item and the REST reparent endpoint.
+        Assert.Contains("not allowed", await Reparent(feature, story.Key));
+        Assert.Contains("Epics cannot have a parent", await Reparent(epic, feature.Key));
+        Assert.Contains("need", await Reparent(task, null, clear: true));
+        Assert.Contains("own parent", await Reparent(story, story.Key));
+        Assert.Equal("true", await Reparent(story, epic.Key));
+        Assert.Contains("not found", await Reparent(story, foreign.Key));
+        Assert.Contains("not found", await Reparent(story, "REP-99999"));
+        Assert.Contains("not both", await Reparent(story, epic.Key, clear: true));
+        Assert.Equal(epic.Id, (await GetItemAsync(story.Key)).ParentId);
+        Assert.Equal(epic.Id, (await GetItemAsync(feature.Key)).ParentId);
+        Assert.Equal(story.Id, (await GetItemAsync(task.Key)).ParentId);
+
+        // A stale version changes nothing.
+        Assert.Equal("false", Text(await CallAsync(client, "update_item",
+            new() { ["key"] = story.Key, ["version"] = story.Version, ["clearParent"] = true })));
+        Assert.Equal(epic.Id, (await GetItemAsync(story.Key)).ParentId);
+    }
+
+    [Fact]
     public async Task create_item_and_create_subtask_land_on_a_named_team_or_the_default()
     {
         var project = await CreateProjectAsync("TMS");
