@@ -47,6 +47,9 @@ explain invalid types or parents without substituting a type or standalone item.
 all item types use their parent's team or the project's default. Creation returns `key`,
 `version`, `type` and `parentKey`; confirm the type and link each real key. Project chat may create only in its current project and records the
 requesting person as reporter.
+To fix the hierarchy of existing items, use `update_item(key, version, parentKey?)` to move an
+item under an Epic/Feature/Story, or `clearParent: true` to detach a Story or Bug; the same
+parent rules apply and nothing changes when they refuse.
 
 ## 2. Fall back to the `aictiq` CLI
 

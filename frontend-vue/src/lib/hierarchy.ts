@@ -17,6 +17,11 @@ export function allowsParent(parent: WorkItemType, child: WorkItemType): boolean
   return parents[child].includes(parent)
 }
 
+/** The types that may parent an item of this type, highest first. */
+export function parentTypes(child: WorkItemType): readonly WorkItemType[] {
+  return parents[child]
+}
+
 /** Features and Tasks only make sense beneath something; Stories and Bugs may stand alone. */
 export function requiresParent(type: WorkItemType): boolean {
   return type === 'feature' || type === 'task'

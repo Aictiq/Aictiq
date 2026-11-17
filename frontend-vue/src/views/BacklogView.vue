@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronRight, GripVertical, Plus, X } from '@lucide/vue'
+import { ChevronDown, ChevronRight, FolderInput, GripVertical, Plus, X } from '@lucide/vue'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import { createItem, getTeamBacklog, moveItem, type BacklogSection, type WorkItem, type WorkItemType } from '@/api/items'
+import { createItem, getTeamBacklog, moveItem, reparentItem, type BacklogSection, type WorkItem, type WorkItemType } from '@/api/items'
 import { getSprintCapacity, getTeamVelocity, listSprints, type Sprint } from '@/api/sprints'
 import ItemTypeIcon from '@/components/common/ItemTypeIcon.vue'
 import AssigneeSelect from '@/components/items/AssigneeSelect.vue'
 import ItemFilterBar from '@/components/items/ItemFilterBar.vue'
 import ItemRowActions from '@/components/items/ItemRowActions.vue'
+import ParentPickerDialog from '@/components/items/ParentPickerDialog.vue'
 import PrioritySelect from '@/components/items/PrioritySelect.vue'
 import StateSelect from '@/components/items/StateSelect.vue'
 import AppShell from '@/components/shell/AppShell.vue'
@@ -23,7 +24,7 @@ import { itemQueryError, useItemQueryParams } from '@/composables/useItemQueryPa
 import { useShortcut } from '@/composables/useShortcuts'
 import { useToast } from '@/composables/useToast'
 import { useProjectRealtime } from '@/composables/useProjectRealtime'
-import { ConflictError } from '@/utils/api'
+import { ConflictError, toApiError } from '@/utils/api'
 
 const props = defineProps<{ slug: string; projectKey: string; teamId: string }>()
 const createTicket = useCreateTicket()
@@ -148,6 +149,49 @@ async function dropOn(target: WorkItem | null, section: Section, reparent = fals
     else toast.error(error, 'The backlog move could not be saved.')
   } finally {
     await invalidate()
+  }
+}
+// "Move under…": the visible way to re-parent, for one row or every selected row. The
+// picker searches the whole project, so a parent outside this team's backlog still counts.
+const moving = ref<WorkItem[] | null>(null)
+const movingBusy = ref(false)
+const movingError = ref<string | null>(null)
+const selectedItems = computed(() => allItems.value.filter((item) => selected.value.has(item.key)))
+function startMoveUnder(item?: WorkItem) {
+  const items = item && !selected.value.has(item.key) ? [item] : selectedItems.value
+  if (!items.length) return
+  movingError.value = null
+  moving.value = items
+}
+async function moveUnder(parent: WorkItem | null) {
+  const items = moving.value
+  if (!items?.length || movingBusy.value) return
+  movingBusy.value = true
+  movingError.value = null
+  let moved = 0
+  try {
+    for (const item of items) {
+      if ((parent?.id ?? null) === item.parentId) continue
+      await reparentItem(props.slug, item.key, parent?.key ?? null, item.version)
+      moved++
+    }
+    moving.value = null
+    selected.value = new Set()
+    const subject = items.length === 1 ? items[0]!.key : `${items.length} items`
+    toast.saved(parent ? `${subject} moved under ${parent.key}.` : `${subject} no longer ha${items.length === 1 ? 's' : 've'} a parent.`)
+  } catch (error) {
+    if (error instanceof ConflictError) movingError.value = 'An item changed meanwhile. Reload and try again.'
+    else {
+      const problem = toApiError(error)
+      movingError.value = Object.values(problem.fieldErrors).flat()[0] ?? problem.problem?.detail ?? problem.title
+    }
+    if (moved) movingError.value = `${moved} moved, then: ${movingError.value}`
+  } finally {
+    movingBusy.value = false
+    await Promise.all([
+      invalidate(),
+      client.invalidateQueries({ predicate: (query) => query.queryKey[0] === props.slug && query.queryKey[2] === 'children' }),
+    ])
   }
 }
 function keyboardReorder(event: KeyboardEvent, item: WorkItem, section: Section) {
@@ -287,6 +331,26 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
           @update:search="update({ q: $event })"
         />
 
+        <div
+          v-if="selectedItems.length" class="bg-accent/60 mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+          role="toolbar" aria-label="Selected items" data-testid="backlog-selection"
+        >
+          <strong>{{ selectedItems.length }} selected</strong>
+          <button
+            type="button" class="bg-background hover:bg-muted inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 disabled:opacity-50"
+            :disabled="!edits.canEdit.value || selectedItems.some((item) => item.type === 'epic')"
+            :title="selectedItems.some((item) => item.type === 'epic') ? 'Epics cannot have a parent' : undefined"
+            data-testid="backlog-move-under" @click="startMoveUnder()"
+          >
+            <FolderInput class="size-4" aria-hidden="true" /> Move under…
+          </button>
+          <button type="button" class="text-muted-foreground hover:text-foreground ml-auto text-xs" @click="selected = new Set()">Clear selection</button>
+        </div>
+        <ParentPickerDialog
+          :open="moving !== null" :slug="slug" :project-key="projectKey" :items="moving ?? []" :busy="movingBusy" :error="movingError"
+          @update:open="(open: boolean) => { if (!open) moving = null }" @pick="moveUnder"
+        />
+
         <p v-if="backlog.isError.value && !queryError" class="text-destructive mt-6 text-sm">The backlog could not be loaded.</p>
         <p v-else-if="backlog.isPending.value" class="text-muted-foreground mt-6 text-sm">Loading backlog…</p>
 
@@ -337,8 +401,9 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
               <span class="text-muted-foreground">{{ remaining(row.item) ?? '-' }}</span>
               <ItemRowActions
                 :item-key="row.item.key" :busy="edits.isBusy(row.item)" :can-duplicate="edits.canEdit.value"
+                :can-move="edits.canEdit.value && row.item.type !== 'epic'"
                 class="opacity-60 group-hover:opacity-100 focus-within:opacity-100"
-                @copy-link="edits.copyLink(row.item)" @duplicate="edits.duplicate(row.item)"
+                @copy-link="edits.copyLink(row.item)" @duplicate="edits.duplicate(row.item)" @move-under="startMoveUnder(row.item)"
               />
             </div>
             <form
@@ -369,7 +434,7 @@ const remaining = (item: WorkItem) => item.remainingHours ?? (item.rollup.totalC
             <template v-else>The backlog is empty. Use the bar above to add the first item.</template>
           </div>
         </section>
-        <p v-if="sections.length" class="text-muted-foreground mt-3 text-xs">+ on a row adds a child · Alt while dropping re-parents · Alt+↑/↓ reorders the focused item · Ctrl-click selects several</p>
+        <p v-if="sections.length" class="text-muted-foreground mt-3 text-xs">+ on a row adds a child · Ctrl-click selects several, then “Move under…” sets their parent (or hold Alt while dropping onto a row) · Alt+↑/↓ reorders the focused item</p>
       </div>
       <aside class="space-y-4">
         <div class="border-border rounded-lg border p-4">

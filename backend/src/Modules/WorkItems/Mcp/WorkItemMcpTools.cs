@@ -334,7 +334,37 @@ public sealed class WorkItemMcpTools(WorkItemsDbContext db, ICurrentTenant tenan
         [Description("Optional team key (such as CORE) or team id from get_project. Omit it to follow the parent's team.")] string? team = null,
         [Description(ChatAttachmentIdsDescription)] IReadOnlyList<Guid>? attachmentIds = null,
         CancellationToken cancellationToken = default) => CreateBasic(null, title, parentKey, team, WorkItemType.Task, cancellationToken, attachmentIds: attachmentIds);
-    [McpServerTool(Name = "update_item")] public async Task<bool> UpdateItem(string key, uint version, string? title = null, string? description = null, CancellationToken cancellationToken = default) { if (title is { Length: > 500 }) throw new McpException("title must be 500 characters or fewer."); if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer."); var item = await TryWritableAsync(key, cancellationToken); if (item is null || item.Version != version) return false; if (!string.IsNullOrWhiteSpace(title)) item.Title = title.Trim(); if (description is not null) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); } item.UpdatedAt = clock.GetUtcNow(); item.Changed(user.UserId!, "updated"); await db.SaveChangesAsync(cancellationToken); return true; }
+    [McpServerTool(Name = "update_item")]
+    [Description("Edits an existing item's title, description or parent. Pass the version from get_item; returns false on a version conflict or when the item is not writable. parentKey moves the item under another item in the same project, with the same rules as create_item: Epics cannot have a parent; Features require an Epic; Stories allow an Epic or Feature; Bugs allow an Epic, Feature or Story; Tasks require a Story or Bug; an item cannot go beneath itself. clearParent removes the parent of a Story or Bug.")]
+    public async Task<bool> UpdateItem(string key, uint version, string? title = null, string? description = null,
+        [Description("Existing item key to become this item's parent. Use get_item or search_items to find Epics and Features.")] string? parentKey = null,
+        [Description("True to remove the item's parent. Features and Tasks always need one, so only Stories and Bugs can be cleared. Cannot be combined with parentKey.")] bool clearParent = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (title is { Length: > 500 }) throw new McpException("title must be 500 characters or fewer.");
+        if (description is { Length: > 20_000 }) throw new McpException("description must be 20,000 characters or fewer.");
+        var reparent = !string.IsNullOrWhiteSpace(parentKey);
+        if (reparent && clearParent) throw new McpException("Pass either parentKey or clearParent, not both.");
+        var item = await TryWritableAsync(key, cancellationToken); if (item is null || item.Version != version) return false;
+        string[] changed = ["updated"];
+        if (reparent || clearParent)
+        {
+            Guid? parentId = null;
+            if (reparent)
+            {
+                var parent = await Visible(parentKey!.Trim(), cancellationToken);
+                if (parent is null || parent.ProjectId != item.ProjectId) throw new McpAnswerException($"parent '{parentKey}' not found in project '{item.ProjectKey}'");
+                parentId = parent.Id;
+            }
+            // The REST reparent rules, so an agent cannot build a hierarchy a person could not.
+            var error = await WorkItemEndpoints.ValidateParentAsync(db, item.Id, item.Type, parentId, item.ProjectId, cancellationToken);
+            if (error is not null) throw new McpAnswerException(error);
+            if (item.ParentId != parentId) { item.ParentId = parentId; changed = ["updated", "parentId"]; }
+        }
+        if (!string.IsNullOrWhiteSpace(title)) item.Title = title.Trim();
+        if (description is not null) { item.DescriptionMarkdown = description; item.DescriptionHtml = WorkItemEndpoints.Render(description); }
+        item.UpdatedAt = clock.GetUtcNow(); item.Changed(user.UserId!, changed); await db.SaveChangesAsync(cancellationToken); return true;
+    }
     // http(s) only, like the REST endpoint: a stored javascript: or file: URL is rendered as a
     // link on the item page, and a private address is a way to point a person at a neighbour.
     [McpServerTool(Name = "link_item")] public async Task<bool> LinkItem(string key, string url, CancellationToken cancellationToken = default) { var item = await TryWritableAsync(key, cancellationToken); if (item is null || !LinkPreviewFetcher.TryParsePublicUrl(url, out var parsed, out _)) return false; var uri = parsed!; db.ItemLinks.Add(new ItemLink { OrganizationId = tenant.OrganizationId!.Value, ItemId = item.Id, Kind = ItemLinkKind.Url, Provider = "url", ExternalId = uri.AbsoluteUri, Url = uri.AbsoluteUri, CreatedAt = clock.GetUtcNow() }); try { await db.SaveChangesAsync(cancellationToken); return true; } catch (DbUpdateException) { return true; } }

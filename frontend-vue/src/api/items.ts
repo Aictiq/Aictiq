@@ -136,6 +136,9 @@ export const getItem = (slug: string, key: string) =>
  * should be shown with that Story, rather than mixed in with a descendant's work. */
 export const listItemChildren = (slug: string, key: string) =>
   apiFetch<WorkItem[]>(`/orgs/${slug}/items/${key}/children`)
+/** Parent first, then its parent, up to six levels. */
+export const listItemAncestors = (slug: string, key: string) =>
+  apiFetch<WorkItem[]>(`/orgs/${slug}/items/${key}/ancestors`)
 export const updateItem = (
   slug: string,
   key: string,
@@ -225,6 +228,13 @@ export const moveItem = (
     version: number
   },
 ) => apiFetch<WorkItem>(`/orgs/${slug}/items/${key}/move`, { method: 'POST', body })
+
+/** Sets or, with `null`, clears an item's parent. The server checks the hierarchy rules. */
+export const reparentItem = (slug: string, key: string, parentKey: string | null, version: number) =>
+  apiFetch<WorkItem>(`/orgs/${slug}/items/${key}/reparent`, {
+    method: 'POST',
+    body: { parentKey, version },
+  })
 
 /** What deleting an item takes with it; `descendants` are in tree order, `depth` 1 is a direct child. */
 export interface ItemDeletePreview {
